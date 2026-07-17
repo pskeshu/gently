@@ -166,7 +166,7 @@ def _open_browser(url: str) -> None:
             pass
 
     # 2) Explicit executables (an override path, then known Chrome locations).
-    candidates = [override] if override else []
+    candidates: list[str | None] = [override] if override else []
     candidates += [
         shutil.which("chrome"),
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -221,6 +221,74 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
             return selected if selected else None
 
     return None
+
+
+# launch_gently runs as `__main__`, whose logger is not wired to the configured
+# handlers — so operator-facing lifecycle events (reconnect, tool registration)
+# use a `gently.*`-namespaced logger that reaches the console + file logs.
+_reconnect_log = logging.getLogger("gently.app.launch")
+
+
+async def _attach_microscope(client, store) -> int:
+    """Configure the device session + register microscope tools for a connected
+    client. Used both at boot and when reconnecting to a device layer that was
+    started from the launch gate / Devices panel. Returns the tool count."""
+    try:
+        await client.configure_device_session(str(store.incoming_dir))
+        logger.info("Device session configured: volume_dir=%s", store.incoming_dir)
+    except Exception as e:
+        logger.error("Failed to configure device session (volumes will be slow): %s", e)
+    try:
+        from gently.harness.microscope import register_microscope_tools
+
+        n = register_microscope_tools(client)
+        if n:
+            logger.info("Registered %d microscope tools from device layer", n)
+        return n
+    except Exception as e:
+        logger.debug("Auto-tool registration skipped: %s", e)
+        return 0
+
+
+async def _reconnect_microscope_when_ready(client, viz_server, store) -> None:
+    """Background task (RFC #78 pragmatic reconnect): when a device layer started
+    from the launch gate (or the Devices panel) reaches 'ready', (re)connect the
+    agent's microscope client to it and register its tools — so hardware the gate
+    started becomes usable by the agent without a relaunch. Acts only while the
+    client is disconnected, and registers tools once."""
+    if client is None:
+        return
+    # If already wired up at boot, the boot path registered tools already.
+    tools_registered = bool(client.is_connected)
+    while True:
+        await asyncio.sleep(2.0)
+        sup = getattr(viz_server, "device_supervisor", None) if viz_server else None
+        if sup is None:
+            continue
+        try:
+            # status() does a short socket probe — off the event loop.
+            state = (await asyncio.to_thread(sup.status)).get("state")
+        except Exception:
+            continue
+        if state != "ready":
+            continue
+        # Ensure the client is connected to the now-ready device layer.
+        if not client.is_connected:
+            try:
+                await client.disconnect()  # drop any stale (failed-at-boot) session
+            except Exception:
+                pass
+            try:
+                await client.connect()
+            except Exception as e:
+                _reconnect_log.debug("Microscope reconnect attempt failed: %s", e)
+        # Register microscope tools once — whoever connected the client.
+        if client.is_connected and not tools_registered:
+            n = await _attach_microscope(client, store)
+            _reconnect_log.info(
+                "Microscope client reconnected to the device layer (%d tools registered)", n
+            )
+            tools_registered = True
 
 
 async def main(
@@ -325,7 +393,7 @@ async def main(
 
     # Log file path for launch info
     session_name = datetime.now().strftime("%Y%m%d")
-    log_file = log_dir / f"{session_name}.log"
+    log_file = str(log_dir / f"{session_name}.log")
 
     # Connect to device layer via hardware module's client factory
     client = None
@@ -352,25 +420,12 @@ async def main(
                 http_url,
             )
 
-    # Configure device session for zero-copy volume transfer
+    # Configure the device session + register microscope tools if the client
+    # connected at boot (an already-running device layer). If the device layer is
+    # started later from the launch gate, _reconnect_microscope_when_ready does
+    # this once it reaches 'ready'.
     if client and client.is_connected:
-        try:
-            incoming = str(store.incoming_dir)
-            await client.configure_device_session(incoming)
-            logger.info("Device session configured: volume_dir=%s", incoming)
-        except Exception as e:
-            logger.error("Failed to configure device session (volumes will be slow): %s", e)
-
-    # Register auto-generated microscope tools from device layer plan schemas
-    if client and client.is_connected:
-        try:
-            from gently.harness.microscope import register_microscope_tools
-
-            n = register_microscope_tools(client)
-            if n:
-                logger.info("Registered %d microscope tools from device layer", n)
-        except Exception as e:
-            logger.debug("Auto-tool registration skipped: %s", e)
+        await _attach_microscope(client, store)
 
     # Create agent
     agent = MicroscopyAgent(
@@ -552,6 +607,18 @@ async def main(
     if agent.viz_server is not None:
         agent.viz_server.agent_bridge = bridge
         agent.viz_server.set_context_store(context_store)
+        # Device-layer supervisor (managed child subprocess) — lets the launch
+        # gate and the Devices panel start/stop start_device_layer.py from the
+        # UI, and kills it on exit so it never orphans. It auto-detects an
+        # already-running (external) device layer and leaves it alone. RFC #78.
+        try:
+            from gently.app.device_supervisor import DeviceLayerSupervisor
+
+            agent.viz_server.device_supervisor = DeviceLayerSupervisor(
+                port=settings.network.device_port,
+            )
+        except Exception:
+            logger.debug("DeviceLayerSupervisor init skipped", exc_info=True)
         # If launched into an existing session, rehydrate its persisted
         # imagery so the galleries/filmstrips show data from the start.
         if session_to_resume:
@@ -559,6 +626,11 @@ async def main(
                 agent.viz_server.rehydrate_session(session_to_resume)
             except Exception:
                 logger.debug("Startup rehydrate failed", exc_info=True)
+
+    # Reconnect the microscope client if a device layer is started from the
+    # launch gate / Devices panel after boot (RFC #78 pragmatic reconnect).
+    if client is not None:
+        asyncio.create_task(_reconnect_microscope_when_ready(client, agent.viz_server, store))
 
     # ── Banner + serve ──────────────────────────────────────────────
     # The viz server runs in-process (uvicorn in a background task). With
@@ -607,6 +679,12 @@ async def main(
         except (ValueError, OSError):
             pass
 
+    # Graceful-shutdown hook for the desktop shell (issue #85): the viz server's
+    # POST /api/shutdown calls this to stop the whole backend, running the same
+    # finally-block teardown as Ctrl-C (thread-safe from any caller).
+    if agent.viz_server is not None:
+        agent.viz_server.request_shutdown = lambda: _loop.call_soon_threadsafe(_stop.set)
+
     try:
         while not _stop.is_set():
             await asyncio.sleep(0.3)
@@ -631,6 +709,37 @@ async def main(
                 await agent.viz_server.stop()
             except (asyncio.CancelledError, RuntimeError, OSError, Exception):
                 pass
+
+
+def _serve(**main_kwargs) -> None:
+    """Run one backend lifetime — the reload child's entry point."""
+    try:
+        asyncio.run(main(**main_kwargs))
+    except (KeyboardInterrupt, RuntimeError, SystemExit):
+        pass
+
+
+def _run_with_reload(main_kwargs: dict) -> None:
+    """Dev auto-restart: re-run the backend whenever a gently/*.py file changes.
+
+    Uses watchfiles (the same watcher uvicorn --reload uses) to run the server in
+    a child process and restart it on any .py change under gently/ (or
+    launch_gently.py). This is a WHOLE-backend restart, not an in-place reload —
+    gently's app is built from runtime state (agent, store, mesh), so there is no
+    static import for uvicorn's native reloader to hot-swap. A running device
+    layer restarts too, so this is for UI / backend dev, not live hardware.
+    After a restart, refresh the browser / Tauri window (Ctrl+R) to see changes.
+    """
+    from watchfiles import PythonFilter, run_process
+
+    root = Path(__file__).resolve().parent
+    paths = [str(root / "gently"), str(root / "launch_gently.py")]
+    print(
+        "[reload] watching gently/ + launch_gently.py — edit a .py file and the "
+        "backend restarts (then refresh the page)",
+        flush=True,
+    )
+    run_process(*paths, target=_serve, kwargs=main_kwargs, watch_filter=PythonFilter())
 
 
 def cli_main():
@@ -665,10 +774,29 @@ def cli_main():
         action="store_true",
         help="Do not auto-open the web UI in a browser",
     )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Dev: auto-restart the backend when a gently/*.py file changes "
+        "(watchfiles). Restarts the whole backend — not for live hardware.",
+    )
     args = parser.parse_args()
 
+    # Gate the agent + hardware by the launch gate's remembered choices (the gate
+    # persists them; they apply at boot). CLI flags can still force these OFF.
+    launch_no_api = args.no_api
+    launch_offline = args.offline
+    try:
+        from gently.ui.web.launch_prefs import load_prefs
+
+        _lp = load_prefs()
+        launch_no_api = args.no_api or not _lp.get("agent", True)
+        launch_offline = args.offline or not _lp.get("hardware", True)
+    except Exception:
+        pass
+
     # An API key is required unless running in UI-only mode.
-    if not args.no_api and not os.getenv("ANTHROPIC_API_KEY"):
+    if not launch_no_api and not os.getenv("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY not set")
         if os.name == "nt":
             print("Set with: set ANTHROPIC_API_KEY=your-key")
@@ -687,19 +815,25 @@ def cli_main():
     pick_session = args.resume == "__PICK__"
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
+    main_kwargs = dict(
+        offline=launch_offline,
+        show_sessions=args.sessions,
+        resume_session=resume_id,
+        pick_session=pick_session,
+        log_level=log_level,
+        no_browser=args.no_browser,
+        no_api=launch_no_api,
+        no_auth=args.no_auth,
+    )
+
+    # Dev: auto-restart the backend on gently/*.py changes (refresh the page to
+    # pick them up). Runs the server in a watchfiles-managed child process.
+    if args.reload:
+        _run_with_reload(main_kwargs)
+        return
+
     try:
-        asyncio.run(
-            main(
-                offline=args.offline,
-                show_sessions=args.sessions,
-                resume_session=resume_id,
-                pick_session=pick_session,
-                log_level=log_level,
-                no_browser=args.no_browser,
-                no_api=args.no_api,
-                no_auth=args.no_auth,
-            )
-        )
+        asyncio.run(main(**main_kwargs))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass
 

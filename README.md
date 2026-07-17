@@ -116,15 +116,23 @@ You get a `.venv` in the project directory with the runtime + dev dependencies
 pinned in `uv.lock`. Activate it with `source .venv/bin/activate`, or prefix
 commands with `uv run` (e.g. `uv run python ...`) to use it without activating.
 
-#### Optional extras
+#### The `device` group and optional extras
+
+The hardware-control stack (`pymmcore`, `bluesky`, `ophyd`) plus the accessory
+transports (BLE/serial/MQTT — SwitchBot room light, ACUITYnano thermal
+controller) live in the `device` dependency group, which is **installed by
+default**. None of it is imported by the agent or by `--offline` launch — only
+by the device layer — so a machine with no microscope can drop the whole stack:
+
+```bash
+# Laptop / review / CI — no microscope, skip the hardware-control stack
+uv sync --no-group device
+```
 
 PyTorch is **not** in the base install — the CUDA build is machine-specific, so
 it lives in mutually-exclusive extras wired to the right PyTorch index:
 
 ```bash
-# Device-layer accessories (microscope computer): BLE/serial/MQTT transports
-uv sync --extra device
-
 # PyTorch (needed for SAM detection and the ML pipeline)
 # NOTE: the GPU and CPU builds are mutually exclusive, so they can't be combined.
 uv sync --extra torch-gpu   # CUDA 11.8 build (GPU box, e.g. the microscope PC)

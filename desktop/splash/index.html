@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gently</title>
+<!--
+  Boot splash for the Tauri desktop shell. Purely visual: it is shown while the
+  Rust shell spawns the Python backend and waits for the viz server to answer.
+  Once the server is reachable, the Rust side navigates this window to the live
+  UI (http://localhost:8080). The status line is updated from Rust via an
+  injected `window.__gentlyStatus(text)` call, with a CSS fallback message.
+-->
+<style>
+  :root{
+    --bg:#0a0d13; --text:#e7edf4; --muted:#8792a3; --accent:#5b8cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{height:100%;color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;user-select:none;cursor:default;
+    background:radial-gradient(900px 480px at 50% -12%, rgba(91,140,255,.13), transparent 60%), var(--bg);
+    display:flex;flex-direction:column;justify-content:center;align-items:center;gap:22px}
+  .mark{width:64px;height:64px;border-radius:50%;border:3px solid var(--accent);position:relative;
+    background:radial-gradient(circle at 50% 50%, rgba(91,140,255,.28), transparent 70%)}
+  .mark::after{content:"";position:absolute;inset:0;margin:auto;width:20px;height:20px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 20px var(--accent)}
+  .wordmark{font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .spin{width:26px;height:26px;border-radius:50%;border:2.5px solid rgba(135,146,163,.25);
+    border-top-color:var(--accent);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .status{color:var(--muted);font-size:13.5px;min-height:18px;letter-spacing:.01em}
+  .foot{position:fixed;bottom:20px;color:#57616f;font-size:11.5px}
+</style>
+</head>
+<body>
+  <div class="mark"></div>
+  <div class="wordmark">Gently</div>
+  <div class="spin"></div>
+  <div class="status" id="status">Starting the backend…</div>
+  <div class="foot">microscopy agent · desktop</div>
+<script>
+  // Rust calls window.__gentlyStatus("…") to reflect boot progress.
+  window.__gentlyStatus = function (text) {
+    var el = document.getElementById("status");
+    if (el && typeof text === "string") el.textContent = text;
+  };
+</script>
+</body>
+</html>

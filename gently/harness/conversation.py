@@ -70,6 +70,7 @@ class ConversationManager:
         self.interaction_logger = None
         self.choice_handler = None
         self.context_store = None  # for tool_label
+        self._tool_context: dict | None = None  # default execution context
 
         # Decision capture for orchestrator A/B testing. Set by the agent
         # alongside the EventCapture once the session folder is known. None

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch Gently</title>
+<!--
+  Launch gate — the entry point (RFC #78). Two plain questions:
+    · are we using the microscope this session?
+    · is the assistant on?
+  On "Let's go" it POSTs /api/launch/go (persist + mark passed + start the
+  device layer if the microscope is on) and hands off to the dashboard
+  immediately — MMCore init runs in the background and is followed there via
+  the boot banner / Devices console.
+
+  Theme-aware: reads the app's `gently-theme` and matches light/dark (no more
+  dark-gate → light-dashboard flash). Device port / SAM device are NOT here —
+  they're install-time Settings, and the GPU is auto-detected.
+-->
+<script>
+  // Apply the app's saved theme before first paint (no flash).
+  (function () {
+    try {
+      var t = localStorage.getItem('gently-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root, [data-theme="dark"] {
+    --g-bg:#0d1117; --g-card:#161b22; --g-hover:#21262d; --g-border:#30363d;
+    --g-text:#c9d1d9; --g-muted:#8b949e; --g-faint:#6e7681; --g-accent:#60a5fa;
+    --g-spot:rgba(96,140,250,.12);
+  }
+  [data-theme="light"] {
+    --g-bg:#f8fafc; --g-card:#ffffff; --g-hover:#f1f5f9; --g-border:#e2e8f0;
+    --g-text:#1e293b; --g-muted:#64748b; --g-faint:#94a3b8; --g-accent:#3b82f6;
+    --g-spot:rgba(59,130,246,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{min-height:100vh;color:var(--g-text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    background:radial-gradient(1000px 520px at 50% -14%, var(--g-spot), transparent 60%), var(--g-bg);
+    display:flex;justify-content:center;align-items:center;padding:40px 20px;transition:background .2s,color .2s}
+  .wrap{width:100%;max-width:460px}
+  .head{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:8px}
+  .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--g-accent);position:relative;
+    background:radial-gradient(circle at 50% 50%, var(--g-spot), transparent 70%)}
+  .mark::after{content:"";position:absolute;inset:0;margin:auto;width:9px;height:9px;border-radius:50%;
+    background:var(--g-accent);box-shadow:0 0 12px var(--g-accent)}
+  .wordmark{font-size:22px;font-weight:700;letter-spacing:-.015em}
+  .cap{text-align:center;color:var(--g-muted);font-size:14px;margin:0 0 30px}
+  .opt{display:flex;align-items:center;gap:15px;padding:18px;border:1px solid var(--g-border);border-radius:13px;
+    background:var(--g-card);margin-bottom:13px;transition:.15s;cursor:pointer}
+  .opt:hover{border-color:var(--g-faint)}
+  .opt:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
+  .opt.on{border-color:color-mix(in srgb, var(--g-accent) 55%, transparent);
+    background:color-mix(in srgb, var(--g-accent) 8%, var(--g-card));
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--g-accent) 25%, transparent)}
+  .ic{width:42px;height:42px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--g-hover);border:1px solid var(--g-border);color:var(--g-muted)}
+  .opt.on .ic{background:color-mix(in srgb, var(--g-accent) 14%, transparent);
+    border-color:color-mix(in srgb, var(--g-accent) 40%, transparent);color:var(--g-accent)}
+  .txt{flex:1;min-width:0}
+  .t{font-size:15.5px;font-weight:650;letter-spacing:-.01em}
+  .s{font-size:12.5px;color:var(--g-muted);margin-top:3px;line-height:1.45}
+  .sw{width:44px;height:25px;border-radius:999px;background:var(--g-hover);position:relative;flex:none;transition:.15s;border:1px solid var(--g-border)}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--g-faint);transition:.15s}
+  .opt.on .sw{background:var(--g-accent);border-color:transparent}
+  .opt.on .sw::after{left:21px;background:#fff}
+  .btn{width:100%;margin-top:18px;background:var(--g-accent);color:#fff;border:0;border-radius:12px;
+    padding:16px;font-size:16px;font-weight:700;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:9px;transition:filter .15s,opacity .15s}
+  .btn:hover:not(:disabled){filter:brightness(1.08)}
+  .btn:disabled{opacity:.7;cursor:default}
+  .foot{text-align:center;margin-top:16px;color:var(--g-faint);font-size:12px}
+  .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--g-muted)}
+  .status.err{color:#f85149}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head"><span class="mark"></span><span class="wordmark">Gently</span></div>
+    <p class="cap">What are we doing today?</p>
+
+    <div class="opt" id="opt-hardware" data-key="hardware" role="switch" aria-checked="true" tabindex="0" aria-labelledby="hw-t">
+      <div class="ic" aria-hidden="true">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M12 13v6M8 21h8M6 9a6 6 0 0 1 8-5.6"/></svg>
+      </div>
+      <div class="txt">
+        <div class="t" id="hw-t">Microscope</div>
+        <div class="s" id="hw-s"></div>
+      </div>
+      <span class="sw" aria-hidden="true"></span>
+    </div>
+
+    <div class="opt" id="opt-agent" data-key="agent" role="switch" aria-checked="true" tabindex="0" aria-labelledby="ag-t">
+      <div class="ic" aria-hidden="true">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>
+      </div>
+      <div class="txt">
+        <div class="t" id="ag-t">Assistant</div>
+        <div class="s" id="ag-s"></div>
+      </div>
+      <span class="sw" aria-hidden="true"></span>
+    </div>
+
+    <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
+    <div class="status" id="status"></div>
+    <div class="foot">Remembers your last choice</div>
+  </div>
+
+<script>
+const state = { hardware: true, agent: true };
+const COPY = {
+  hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
+  agent:    { on: "Help find embryos and watch the timelapse.", off: "Off — manual control only." },
+};
+
+function paint() {
+  document.getElementById("opt-hardware").classList.toggle("on", state.hardware);
+  document.getElementById("opt-hardware").setAttribute("aria-checked", String(state.hardware));
+  document.getElementById("hw-s").textContent = state.hardware ? COPY.hardware.on : COPY.hardware.off;
+  document.getElementById("opt-agent").classList.toggle("on", state.agent);
+  document.getElementById("opt-agent").setAttribute("aria-checked", String(state.agent));
+  document.getElementById("ag-s").textContent = state.agent ? COPY.agent.on : COPY.agent.off;
+  // Honest button label: "Start" spins up the microscope; "Open" is instant.
+  document.querySelector("#go").childNodes[0].nodeValue = (state.hardware ? "Start " : "Open ");
+}
+
+async function loadPrefs() {
+  try {
+    const r = await fetch("/api/launch/prefs");
+    if (r.ok) {
+      const p = await r.json();
+      if (typeof p.hardware === "boolean") state.hardware = p.hardware;
+      if (typeof p.agent === "boolean") state.agent = p.agent;
+    }
+  } catch (e) { /* keep defaults */ }
+  paint();
+}
+
+function toggle(key) { state[key] = !state[key]; paint(); }
+for (const id of ["opt-hardware", "opt-agent"]) {
+  const el = document.getElementById(id);
+  el.addEventListener("click", () => toggle(el.dataset.key));
+  el.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(el.dataset.key); }
+  });
+}
+
+function setStatus(msg, kind) {
+  const el = document.getElementById("status");
+  el.textContent = msg || "";
+  el.className = "status" + (kind ? " " + kind : "");
+}
+
+document.getElementById("go").addEventListener("click", async () => {
+  const btn = document.getElementById("go");
+  btn.disabled = true;
+  btn.childNodes[0].nodeValue = "Starting ";
+  try {
+    const r = await fetch("/api/launch/go", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+    });
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      setStatus("Couldn't start: " + (b.error || r.status), "err");
+      btn.disabled = false; paint();
+      return;
+    }
+    const b = await r.json().catch(() => ({}));
+    if (b.error) setStatus("Microscope: " + b.error, "err");
+    // Hand off immediately — the dashboard follows the boot from here.
+    window.location.href = "/";
+  } catch (e) {
+    setStatus("Something went wrong: " + e, "err");
+    btn.disabled = false; paint();
+  }
+});
+
+loadPrefs();
+</script>
+{% if replay_enabled %}
+<!-- Session replay: the gate is part of the session too (which toggles the
+     operator chose, hesitation before Start) — record it like every page. -->
+<script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+<script src="/static/js/replay-recorder.js" defer></script>
+{% endif %}
+</body>
+</html>

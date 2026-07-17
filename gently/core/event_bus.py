@@ -9,6 +9,7 @@ Provides a publish/subscribe pattern for decoupled communication:
 """
 
 import asyncio
+import functools
 import logging
 import threading
 import uuid
@@ -495,7 +496,7 @@ class EventBus:
                     else:
                         # We're in sync context, need to schedule thread-safely
                         loop.call_soon_threadsafe(
-                            lambda c=coro: asyncio.ensure_future(c, loop=loop)
+                            functools.partial(asyncio.ensure_future, coro, loop=loop)
                         )
             except Exception as e:
                 logger.error("Async handler error for %s: %s", event, e)

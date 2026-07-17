@@ -33,7 +33,7 @@ class DetectorResult:
     findings: dict[str, Any] = field(default_factory=dict)
     confidence: float | None = None
     reasoning: str | None = None
-    raw_response: str | None = None
+    raw_response: str | dict | None = None
     timestamp: datetime = field(default_factory=datetime.now)
     elapsed_ms: float | None = None
     error: str | None = None

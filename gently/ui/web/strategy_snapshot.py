@@ -709,7 +709,7 @@ def _replay_timeline(
             # Pre-timelapse event from a previous run in this session — skip.
             continue
         data = ev.get("data") or {}
-        embryo_id = ev.get("embryo_id") or data.get("embryo_id")
+        embryo_id = str(ev.get("embryo_id") or data.get("embryo_id") or "")
 
         if subtype == "cadence_changed" and embryo_id in by_id:
             emb = by_id[embryo_id]

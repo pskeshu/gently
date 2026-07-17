@@ -19,6 +19,10 @@ all execution to the device layer — no hardware-specific code needed.
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +155,7 @@ class HTTPMicroscope(Microscope):
 
     def __init__(self, http_url: str):
         self.http_url = http_url
-        self._session = None
+        self._session: aiohttp.ClientSession | None = None
         self._connected = False
         self._available_plans: set[str] = set()
         self._plan_schemas: list = []  # Anthropic tool-format schemas

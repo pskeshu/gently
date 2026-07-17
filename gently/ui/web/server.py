@@ -24,6 +24,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -160,6 +161,16 @@ class VisualizationServer(Service):
         self.sessions_dir = Path(sessions_dir)
         self.gently_store = gently_store  # FileStore for persistent volume/projection access
         self.context_store = None  # FileContextStore — set via set_context_store()
+        # Wired in by launch_gently after construction (optional subsystems).
+        self.agent_bridge: Any = None
+        self.mesh_service: Any = None
+        self.device_supervisor: Any = None  # DeviceLayerSupervisor (RFC #78)
+        # Callable that stops the WHOLE backend (launcher keep-alive included);
+        # POST /api/shutdown uses it for the desktop shell handshake (issue #85).
+        self.request_shutdown: Any = None
+        # False until the launch gate is submitted this session; while False, /
+        # bounces to /launch so the gate is the entry point (RFC #78).
+        self.gate_passed: bool = False
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -566,7 +577,7 @@ class VisualizationServer(Service):
         import uuid
 
         if not hasattr(self, "_marking_sessions"):
-            self._marking_sessions = {}
+            self._marking_sessions: dict[str, dict[str, Any]] = {}
 
         session_id = str(uuid.uuid4())[:8]
 

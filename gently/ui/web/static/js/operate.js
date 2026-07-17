@@ -23,7 +23,7 @@ const OperateManager = (function () {
     const MARK_HIT_PX = 14;
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const ROLE_NEUTRAL = '#8a8f98';
-    const STATE_RANK = { marked: 0, centered: 1, lowering: 2, focused: 3, imaged: 4 };
+    const STATE_RANK = { marked: 0, centered: 1, lowering: 2, focused: 3, calibrated: 4, imaged: 5 };
 
     let _wired = false, _active = false;
 
@@ -82,7 +82,8 @@ const OperateManager = (function () {
             'op-rail', 'op-rail-head', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
             'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
             'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
-            'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus', 'op-acquire', 'op-retract',
+            'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus',
+            'op-calibrate', 'op-cal-result', 'op-cal-skip', 'op-acquire', 'op-retract',
             'op-rolechips', 'op-modes', 'op-panel-adaptive', 'op-panel-library', 'op-panel-plan', 'op-panel-agent',
             'op-tl-interval', 'op-tl-stop', 'op-tl-condval', 'op-tl-monitor', 'op-lib-list', 'op-plan-list',
             'op-run-start', 'op-runspine', 'op-run-pause', 'op-run-stop', 'op-run-open',
@@ -91,7 +92,7 @@ const OperateManager = (function () {
 
     // ── step model ───────────────────────────────────────────────────────
     function stepForState(st) {
-        return { marked: 'b1', centered: 'b2', lowering: 'b2', focused: 'b4', imaged: 'b5' }[st] || 'b1';
+        return { marked: 'b1', centered: 'b2', lowering: 'b2', focused: 'bc', calibrated: 'b4', imaged: 'b5' }[st] || 'b1';
     }
     function effectiveStep() {
         if (_marking) return 'a2';
@@ -102,17 +103,17 @@ const OperateManager = (function () {
     }
     function cameraForStep(step) {
         if (step === 'a1' || step === 'a2' || step === 'b1') return 'bottom';
-        if (step === 'b2' || step === 'b3' || step === 'b4' || step === 'b5') return 'spim';
+        if (step === 'b2' || step === 'b3' || step === 'bc' || step === 'b4' || step === 'b5') return 'spim';
         return 'none';  // c0 / running are non-camera (the dish map carries context)
     }
 
     const RAIL_HEADS = {
         a1: 'Focus the bottom objective', a2: 'Mark all embryos',
         b1: 'Center the embryo', b2: 'Lower the SPIM head', b3: 'Focus the SPIM objective',
-        b4: 'Acquire the volume', b5: 'Retract & advance',
+        bc: 'Calibrate piezo-galvo', b4: 'Acquire the volume', b5: 'Retract & advance',
         c0: 'Run — choose how to image', running: 'Run — live',
     };
-    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', b4: 'b4', b5: 'b4', c0: 'run', running: 'run' };
+    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', bc: 'bc', b4: 'b4', b5: 'b4', c0: 'run', running: 'run' };
 
     function setStep(s) { _step = s; renderStep(); }
 
@@ -133,7 +134,7 @@ const OperateManager = (function () {
         // stepper nodes (done/active/locked) driven by selected embryo's state
         const st = _selected ? (_states[_selected] || 'marked') : null;
         const rank = st ? STATE_RANK[st] : -1;
-        const order = { b1: 0, b2: 1, b3: 2, b4: 3 };
+        const order = { b1: 0, b2: 1, b3: 2, bc: 3, b4: 4 };
         D['op-stepper'].querySelectorAll('.op-node').forEach(n => {
             const node = n.dataset.node;
             n.classList.remove('is-active', 'is-done', 'is-locked');
@@ -290,7 +291,7 @@ const OperateManager = (function () {
             const st = _states[emb.id] || 'marked';
             const c = document.createElementNS(SVG_NS, 'circle');
             c.setAttribute('cx', toX(xy.x)); c.setAttribute('cy', toY(xy.y)); c.setAttribute('r', r);
-            const col = st === 'imaged' ? 'var(--accent-green)' : st === 'focused' ? 'var(--accent-orange)'
+            const col = st === 'imaged' ? 'var(--accent-green)' : (st === 'focused' || st === 'calibrated') ? 'var(--accent-orange)'
                 : (st === 'centered' || st === 'lowering') ? 'var(--accent)' : ROLE_NEUTRAL;
             c.setAttribute('fill', col);
             if (emb.id === _selected) { c.setAttribute('stroke', 'var(--text)'); c.setAttribute('stroke-width', '1.2'); }
@@ -411,9 +412,18 @@ const OperateManager = (function () {
     }
     function enterMarking(cands) {
         if (!_lastFrame) { toast('Start the camera first'); return false; }
+        // Absolute stage origin for pixel→stage conversion. Prefer the XY
+        // stamped on the live frame by the device layer; fall back to the
+        // position stream. NEVER default to [0, 0] — that silently converts
+        // clicks to offsets from stage origin, so embryos land hundreds of µm
+        // off and calibration images empty field. Block marking instead.
+        const capStage = (Array.isArray(_lastFrame.stage_position) && _lastFrame.stage_position.length === 2)
+            ? _lastFrame.stage_position
+            : (_lastXY ? [_lastXY.X, _lastXY.Y] : null);
+        if (!capStage) { toast('Stage position unknown — wait for the position readout, then mark'); return false; }
         _marking = true;
         _frozenFrame = { w: _lastFrame.shape[1], h: _lastFrame.shape[0], downsample: _lastFrame.downsample || 1 };
-        _captureStage = _lastFrame.stage_position || (_lastXY ? [_lastXY.X, _lastXY.Y] : [0, 0]);
+        _captureStage = capStage;
         _frozenSrc = `data:${_lastFrame.mime || 'image/jpeg'};base64,${_lastFrame.jpeg_b64}`;
         D['op-cam-img'].src = _frozenSrc; D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none';
         _markers = [];
@@ -472,6 +482,9 @@ const OperateManager = (function () {
     }
     async function confirmMarks() {
         if (!_markers.length) return;
+        if (!Array.isArray(_captureStage) || _captureStage.length !== 2) {
+            toast('Stage position unknown — cannot register markers'); return;
+        }
         D['op-confirm'].disabled = true;
         try {
             const markers = _markers.map(m => ({ stage_x_um: m.stageX, stage_y_um: m.stageY, pixel_x: m.fx, pixel_y: m.fy, source: m.source }));
@@ -560,13 +573,43 @@ const OperateManager = (function () {
     }
     function markInFocus() {
         if (!_selected) return;
-        advanceState(_selected, 'focused'); forceLedOff(); setStep('b4');
+        advanceState(_selected, 'focused'); forceLedOff(); setStep('bc');
         toast(`Embryo ${labelFor(_embryos.find(e => e.id === _selected))} in focus`);
+    }
+
+    // ── B-cal calibrate (piezo-galvo) ──────────────────────────────────────
+    async function calibrateSelected() {
+        if (!_selected) return;
+        if (STATE_RANK[_states[_selected] || 'marked'] < STATE_RANK.focused) { toast('Focus the embryo first'); return; }
+        D['op-calibrate'].disabled = true; D['op-calibrate'].textContent = 'Calibrating…';
+        if (D['op-cal-result']) D['op-cal-result'].textContent = 'sweeping…';
+        try {
+            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, {});
+            const cal = d.calibration || {};
+            const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
+            if (D['op-cal-result']) {
+                D['op-cal-result'].textContent = (slope != null)
+                    ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
+                    : 'done';
+            }
+            advanceState(_selected, 'calibrated'); setStep('b4');
+            toast(`Calibrated embryo ${labelFor(_embryos.find(e => e.id === _selected))}`);
+        } catch (e) {
+            if (D['op-cal-result']) D['op-cal-result'].textContent = 'failed';
+            toast(`Calibrate failed (${e.status || e.message})`);
+        } finally {
+            D['op-calibrate'].disabled = false; D['op-calibrate'].textContent = 'Calibrate this embryo';
+        }
+    }
+    function skipCalibration() {
+        if (!_selected) return;
+        advanceState(_selected, 'calibrated'); setStep('b4');
+        toast('Calibration skipped');
     }
 
     // ── B4 acquire ─────────────────────────────────────────────────────────
     async function acquireSelected() {
-        if (!_selected || _states[_selected] !== 'focused') { toast('Focus the embryo first'); return; }
+        if (!_selected || STATE_RANK[_states[_selected] || 'marked'] < STATE_RANK.focused) { toast('Focus the embryo first'); return; }
         D['op-acquire'].disabled = true; D['op-acquire'].textContent = 'Acquiring…'; _acquiring = true; renderStatus();
         try {
             await postJSON('/api/devices/acquire/volume', { num_slices: 50, exposure_ms: 10.0 });
@@ -833,6 +876,8 @@ const OperateManager = (function () {
         document.querySelectorAll('[data-gv]').forEach(b => b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b => b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
         D['op-infocus'].addEventListener('click', markInFocus);
+        if (D['op-calibrate']) D['op-calibrate'].addEventListener('click', calibrateSelected);
+        if (D['op-cal-skip']) D['op-cal-skip'].addEventListener('click', skipCalibration);
         D['op-acquire'].addEventListener('click', acquireSelected);
         D['op-retract'].addEventListener('click', retractAndAdvance);
         D['op-survey-btn'].addEventListener('click', surveyMore);

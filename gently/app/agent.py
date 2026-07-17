@@ -17,7 +17,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anthropic
 import numpy as np
@@ -27,6 +27,11 @@ from ..settings import settings
 
 if TYPE_CHECKING:
     from ..ui.web.server import VisualizationServer
+    from .bottom_camera_monitor import BottomCameraStreamMonitor
+    from .device_state_monitor import DeviceStateMonitor
+    from .lightsheet_monitor import LightSheetStreamMonitor
+    from .operation_plan_updater import OperationPlanUpdater
+    from .temperature_sampler import TemperatureSampler
 
 from gently_perception import Perceiver
 
@@ -209,16 +214,16 @@ class MicroscopyAgent:
         self.viz_server: VisualizationServer | None = None
 
         # Device-state monitor (bridges device-layer SSE → EventBus)
-        self.device_state_monitor = None
+        self.device_state_monitor: DeviceStateMonitor | None = None
         # Session-scoped temperature sampler — polls device layer, persists readings.
-        self.temperature_sampler = None
+        self.temperature_sampler: TemperatureSampler | None = None
         # Bus-subscriber that transitions plan tactics when execution events fire.
-        self.operation_plan_updater = None
+        self.operation_plan_updater: OperationPlanUpdater | None = None
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
-        self.bottom_camera_monitor = None
+        self.bottom_camera_monitor: BottomCameraStreamMonitor | None = None
         # Opt-in lightsheet stream bridge — same lifecycle as bottom_camera_monitor.
-        self.lightsheet_monitor = None
+        self.lightsheet_monitor: LightSheetStreamMonitor | None = None
 
         # ===== Create delegate managers =====
 
@@ -302,7 +307,7 @@ class MicroscopyAgent:
         try:
             from gently.app.wake_router import WakeRouter
 
-            self.wake_router = WakeRouter(self, self._event_bus)
+            self.wake_router: WakeRouter | None = WakeRouter(self, self._event_bus)
         except Exception:
             logger.exception("Failed to init wake-router")
             self.wake_router = None
@@ -313,8 +318,8 @@ class MicroscopyAgent:
     # ===== Backward-Compat Delegation Properties =====
 
     @property
-    def session_id(self) -> str:
-        """Get current session ID."""
+    def session_id(self) -> str | None:
+        """Get current session ID (None before a session is created)."""
         return self.sessions.session_id
 
     @property
@@ -454,7 +459,7 @@ class MicroscopyAgent:
             if active_id:
                 self.experiment.active_plan_item_id = active_id
                 self.memory.active_plan_item_id = active_id
-                item = self.context_store.get_plan_item(active_id)
+                item = self.context_store.get_plan_item(active_id) if self.context_store else None
                 title = item.title if item else active_id
                 result = f"Back to run mode. Active plan item: {title}"
 
@@ -475,7 +480,8 @@ class MicroscopyAgent:
                         seed_operation_plan_from_plan_item,
                     )
 
-                    seed_operation_plan_from_plan_item(self.context_store, self.session_id)
+                    if self.session_id is not None:
+                        seed_operation_plan_from_plan_item(self.context_store, self.session_id)
                 except Exception:
                     logger.exception("operation-plan seeding failed")
             elif candidates:
@@ -1123,7 +1129,7 @@ class MicroscopyAgent:
             except StopAsyncIteration:
                 return
         finally:
-            if acquired:
+            if acquired and lock is not None:
                 lock.release()
 
     async def run_wake_turn(
@@ -1292,7 +1298,7 @@ class MicroscopyAgent:
         db_embryos = self.store.list_embryos(session_id) if self.store else []
 
         # Build a unified dict keyed by embryo_id
-        embryo_states = {}
+        embryo_states: dict[str, Any] = {}
         for row in db_embryos:
             eid = row.get("embryo_id", "")
             if not eid:
@@ -1439,7 +1445,7 @@ class MicroscopyAgent:
 
         import yaml
 
-        result = {
+        result: dict[str, Any] = {
             "exposure_count": 0,
             "total_exposure_ms": 0.0,
             "last_imaged": None,
@@ -1643,7 +1649,10 @@ class MicroscopyAgent:
         active_embryos = [e for e in self.experiment.embryos.values() if not e.should_skip]
         if not active_embryos:
             return 120.0
-        return min(e.interval_seconds for e in active_embryos)
+        return min(
+            (e.interval_seconds for e in active_embryos if e.interval_seconds is not None),
+            default=120.0,
+        )
 
     # === Perception System Integration ===
 
@@ -1692,28 +1701,30 @@ A VALID image shows:
 Respond with ONLY: VALID or BLANK"""
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
-                model=settings.models.fast,
-                max_tokens=10,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": b64_image,
+                lambda: self.claude.messages.create(
+                    model=settings.models.fast,
+                    max_tokens=10,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": b64_image,
+                                    },
                                 },
-                            },
-                        ],
-                    }
-                ],
+                            ],
+                        }
+                    ],
+                )
             )
 
-            result = response.content[0].text.strip().upper()
+            block = cast(anthropic.types.TextBlock, response.content[0])
+            result = block.text.strip().upper()
             is_blank = "BLANK" in result
 
             if is_blank:

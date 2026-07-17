@@ -23,6 +23,7 @@ Robust by construction, because the device layer runs on Windows consoles:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -145,14 +146,45 @@ def sub(label: str, value: str, label_w: int = 10) -> None:
     out(f"    {c(label.ljust(label_w), 'grey')}{value}")
 
 
+_last_step: tuple[int, int, str] | None = None
+
+
+def progress_event(**payload) -> None:
+    """Emit one machine-readable startup-progress event on stdout.
+
+    The DeviceLayerSupervisor drains the device layer's stdout pipe — the only
+    channel that crosses the process boundary before the device layer's HTTP
+    port opens — and parses these ``@@GENTLY_PROGRESS@@`` lines into a per-stage
+    progress readout for the UI. No-op on an interactive terminal (isatty), so a
+    human running the device layer directly never sees the sentinel noise; it
+    only fires when stdout is captured (piped) by the supervisor.
+    """
+    try:
+        if sys.stdout.isatty():
+            return
+    except (AttributeError, ValueError):
+        return
+    payload.setdefault("v", 1)
+    try:
+        print("@@GENTLY_PROGRESS@@ " + json.dumps(payload), flush=True)
+    except Exception:
+        pass
+
+
 def step(n: int, total: int, label: str) -> None:
     """A startup progress line: ``  [2/5] Starting Micro-Manager core``"""
+    global _last_step
+    _last_step = (n, total, label)
     out(f"  {c(f'[{n}/{total}]', 'cyan')} {label}")
+    progress_event(i=n, n=total, status="start", label=label)
 
 
 def step_done(detail: str = "ok") -> None:
     """A check-mark continuation under the most recent step."""
     out(f"        {c(_CHECK, 'green')} {c(detail, 'grey')}")
+    if _last_step is not None:
+        i, total, label = _last_step
+        progress_event(i=i, n=total, status="ok", label=label, detail=detail)
 
 
 def note(text: str, style: str = "grey") -> None:

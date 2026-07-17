@@ -11,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/boot-banner.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
@@ -108,8 +109,8 @@
     {% endif %}
     {% include '_header.html' %}
     {% include '_navbar.html' %}
-    <!-- App shell: main content + docked agent panel (flex row for pin-to-dock).
-         Header + navbar stay full-width above this. -->
+    <!-- App shell: main content + docked agent panel (flex row; the panel is a
+         real column that pushes .app-main). Header + navbar stay full-width above. -->
     <div class="app-shell">
     {% if ux_v2 %}
     <aside class="v2-rail" id="v2-rail">
@@ -484,6 +485,26 @@
                 </div>
             </div>
 
+            <!-- Device-layer supervision card (device-layer.js) — runtime mirror
+                 of the launch gate's hardware block: status + Start/Stop + log tail. -->
+            <div class="devices-layer-card" id="devices-layer-card" hidden>
+                <div class="devices-layer-head">
+                    <span class="devices-card-title">Device Layer</span>
+                    <span class="devices-status-pill" id="devices-layer-pill">unknown</span>
+                    <span class="devices-layer-meta" id="devices-layer-meta"></span>
+                    <span class="devices-layer-hint" id="devices-layer-hint" hidden></span>
+                </div>
+                <div class="devices-layer-actions">
+                    <button type="button" class="marking-action-btn marking-done-btn devices-layer-btn"
+                            id="devices-layer-start">Start</button>
+                    <button type="button" class="marking-action-btn devices-layer-btn"
+                            id="devices-layer-stop">Stop</button>
+                    <button type="button" class="marking-action-btn devices-layer-log-toggle"
+                            id="devices-layer-log-toggle" aria-expanded="false">Log</button>
+                </div>
+                <pre class="devices-layer-log" id="devices-layer-log" hidden></pre>
+            </div>
+
             <!-- Operate view: guided bottom-cam → SPIM operator surface.
                  Survey & mark all → per-embryo center → lower SPIM → focus → acquire. -->
             <div class="devices-view devices-view-operate" id="devices-view-operate" style="display:none">
@@ -506,6 +527,8 @@
                     <span class="op-node" data-node="b2">Lower</span>
                     <span class="op-arrow">→</span>
                     <span class="op-node" data-node="b3">Focus</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="bc">Calibrate</span>
                     <span class="op-arrow">→</span>
                     <span class="op-node" data-node="b4">Acquire</span>
                   </div>
@@ -600,6 +623,14 @@
                     <div class="op-hud-line">focus score <b id="op-spim-score">—</b></div>
                     <div class="op-hint">Peak the focus score, then mark in focus.</div>
                     <button class="op-btn op-btn-primary" id="op-infocus" type="button">Mark in focus →</button>
+                  </div>
+
+                  <div class="op-group" data-step="bc">
+                    <div class="op-cap">Piezo-galvo calibration</div>
+                    <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate this embryo</button>
+                    <div class="op-hud-line">fit <b id="op-cal-result">—</b></div>
+                    <div class="op-hint">Sweeps the light sheet to fit the piezo↔galvo focus track. Head stays lowered.</div>
+                    <button class="op-btn op-btn-ghost" id="op-cal-skip" type="button">Skip calibration →</button>
                   </div>
 
                   <div class="op-group" data-step="b4">
@@ -1290,9 +1321,22 @@
     <div class="ambient-pulse" id="ambient-pulse"></div>
     </div><!-- /.app-main -->
 
-    <!-- Agent chat — docked side panel (overlay by default; pin to dock) -->
+    <!-- Agent chat — docked side panel (always docked; collapse to reclaim space) -->
     <aside id="agent-chat" class="agent-chat" aria-label="Agent chat">
         <div class="agent-chat-resize" id="agent-chat-resize" title="Drag to resize" aria-hidden="true"></div>
+        <!-- Collapsed rail: the always-present agent affordance (shown only when collapsed) -->
+        <button id="agent-rail-toggle" class="agent-rail" title="Open agent (Ctrl/Cmd+J)" aria-label="Open agent">
+            <span class="agent-rail-icon">
+                <span class="agent-rail-spark" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 1.6l2.1 6.4a3 3 0 0 0 1.9 1.9l6.4 2.1-6.4 2.1a3 3 0 0 0-1.9 1.9L12 22.4l-2.1-6.4a3 3 0 0 0-1.9-1.9L1.6 12l6.4-2.1a3 3 0 0 0 1.9-1.9z"></path>
+                        <path d="M19 2.4l.6 1.9 1.9.6-1.9.6-.6 1.9-.6-1.9L16.5 5l1.9-.6z" opacity="0.7"></path>
+                    </svg>
+                </span>
+                <span class="agent-rail-dot" id="agent-rail-dot" aria-hidden="true"></span>
+                <span class="agent-rail-badge hidden" id="agent-rail-badge" aria-hidden="true"></span>
+            </span>
+        </button>
         <div class="agent-chat-header">
             <div class="agent-chat-id">
                 <img class="agent-chat-mark" src="/static/favicon.svg" alt="" width="22" height="22">
@@ -1300,19 +1344,26 @@
                 <span id="agent-chat-user" class="agent-chat-user"></span>
             </div>
             <span id="agent-chat-conn" class="agent-chat-conn ac-conn-bad">Connecting…</span>
-            <button id="agent-chat-pin" class="agent-chat-pin" title="Pin to dock" aria-pressed="false">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 3v18M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>
+            <button id="agent-chat-signout" class="agent-chat-signout" title="Sign out" style="display:none">Sign out</button>
+            <button id="agent-chat-close" class="agent-chat-close" title="Collapse (Ctrl/Cmd+J)" aria-label="Collapse agent panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 6 15 12 9 18"></polyline>
                 </svg>
             </button>
-            <button id="agent-chat-signout" class="agent-chat-signout" title="Sign out" style="display:none">Sign out</button>
-            <button id="agent-chat-close" class="agent-chat-close" title="Close">&times;</button>
         </div>
         <div id="agent-control-banner" class="agent-control-banner hidden"></div>
         <div id="agent-chat-log" class="agent-chat-log"></div>
         <div class="agent-chat-input">
             <textarea id="agent-chat-text" rows="1" placeholder="Message Gently…"></textarea>
-            <button id="agent-chat-send" class="agent-chat-send">Send</button>
+            <button id="agent-chat-send" class="agent-chat-send" aria-label="Send message" title="Send">
+                <svg class="ac-icon-send" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="6 11 12 5 18 11"></polyline>
+                </svg>
+                <svg class="ac-icon-stop" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="5" y="5" width="14" height="14" rx="3"></rect>
+                </svg>
+            </button>
         </div>
     </aside>
     </div><!-- /.app-shell -->
@@ -1335,6 +1386,8 @@
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate.js"></script>
+    <script src="/static/js/device-layer.js"></script>
+    <script src="/static/js/boot-banner.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
@@ -1350,5 +1403,20 @@
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/context-surface.js"></script>
     <script src="/static/js/landing.js"></script>
+
+    <!-- Device-layer boot banner (boot-banner.js) — non-modal, follows MMCore
+         startup from any tab; the Devices panel is the on-demand full console. -->
+    <div id="gently-boot-banner" class="boot-banner" hidden>
+        <span class="boot-banner-dot" aria-hidden="true"></span>
+        <span class="boot-banner-text" id="boot-banner-text"></span>
+        <button type="button" class="boot-banner-btn" id="boot-banner-details" hidden>Details</button>
+        <button type="button" class="boot-banner-btn" id="boot-banner-retry" hidden>Retry</button>
+        <button type="button" class="boot-banner-x" id="boot-banner-close" aria-label="Dismiss" hidden>&times;</button>
+    </div>
+    {% if replay_enabled %}
+    <!-- Session replay: loads last, degrades silently, never blocks the app -->
+    <script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+    <script src="/static/js/replay-recorder.js" defer></script>
+    {% endif %}
 </body>
 </html>

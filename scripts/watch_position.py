@@ -67,9 +67,9 @@ async def watch(host: str, port: int, log_mode: bool) -> None:
                 buf += chunk
                 while b"\n\n" in buf:
                     frame, buf = buf.split(b"\n\n", 1)
-                    data_lines = []
-                    for line in frame.splitlines():
-                        s = line.decode("utf-8", errors="replace")
+                    data_lines: list[str] = []
+                    for raw_line in frame.splitlines():
+                        s = raw_line.decode("utf-8", errors="replace")
                         if not s or s.startswith(":") or s.startswith("event:"):
                             continue
                         if s.startswith("data:"):

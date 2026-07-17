@@ -108,6 +108,7 @@ def main(argv=None) -> int:
 
     session = matches[0]
     session_dir = store._session_dir(session["session_id"])
+    assert session_dir is not None
     log_path = session_dir / "events.jsonl"
     if not log_path.exists():
         print(f"No events.jsonl in {session_dir}", file=sys.stderr)

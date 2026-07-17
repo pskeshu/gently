@@ -93,7 +93,7 @@ class ToolDefinition:
         required = []
 
         for param in self.parameters:
-            prop = {
+            prop: dict[str, Any] = {
                 "type": param.type,
                 "description": param.description,
             }
@@ -162,6 +162,55 @@ def _python_type_to_json_schema(python_type) -> str:
 
     # Default to string for complex types
     return "string"
+
+
+def _unwrap_optional(tp: Any) -> Any:
+    """Reduce ``float | None`` / ``Optional[int]`` to the underlying scalar type.
+
+    Returns the single non-None member of a union, or the type unchanged for a
+    plain annotation. Returns None when there's no unambiguous scalar (so callers
+    skip coercion).
+    """
+    args = get_args(tp)
+    if args:
+        non_none = [a for a in args if a is not type(None)]
+        return non_none[0] if len(non_none) == 1 else None
+    return tp
+
+
+def _coerce_kwargs(handler: Callable, kwargs: dict) -> dict:
+    """Best-effort coercion of string tool args to their annotated scalar types.
+
+    Tool inputs arrive as JSON from the model (and sometimes as UI form strings),
+    so a param annotated ``float``/``int`` can show up as e.g. ``"120"``. Without
+    this, a downstream numeric comparison raises
+    ``'<' not supported between instances of 'str' and 'int'``. Coercion is
+    conservative: only string values whose annotation resolves to int/float/bool
+    are touched; anything that fails to parse is left as-is for the tool to report.
+    """
+    try:
+        hints = get_type_hints(handler)
+    except Exception:
+        return kwargs
+    for name, value in list(kwargs.items()):
+        if name == "context" or not isinstance(value, str):
+            continue
+        target = _unwrap_optional(hints.get(name))
+        if target in (int, float):
+            s = value.strip()
+            if not s:
+                continue
+            try:
+                kwargs[name] = target(s)
+            except (ValueError, TypeError):
+                pass
+        elif target is bool:
+            low = value.strip().lower()
+            if low in ("true", "1", "yes", "on"):
+                kwargs[name] = True
+            elif low in ("false", "0", "no", "off"):
+                kwargs[name] = False
+    return kwargs
 
 
 def _extract_parameters_from_function(func: Callable) -> list[ToolParameter]:
@@ -460,6 +509,11 @@ class ToolRegistry:
         try:
             # Prepare arguments
             kwargs = dict(tool_input)
+
+            # Coerce string args to their annotated scalar types. JSON/UI inputs
+            # can deliver e.g. new_interval_seconds="120", which would otherwise
+            # crash on a numeric comparison inside the tool.
+            kwargs = _coerce_kwargs(tool.handler, kwargs)
 
             # Inject context if handler expects it (but don't overwrite if already provided)
             sig = inspect.signature(tool.handler)

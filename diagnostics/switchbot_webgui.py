@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -86,7 +87,7 @@ class Bot:
 
     def __init__(self, address: str):
         self.address = address
-        self._client = None
+        self._client: Any = None
         self._lock = asyncio.Lock()
         self._morse_task: asyncio.Task | None = None
         self.state = "unknown"
@@ -181,7 +182,7 @@ class Bot:
             await self._client.disconnect()
 
 
-BOT: Bot | None = None
+BOT: Any = None
 
 
 @asynccontextmanager

@@ -40,7 +40,7 @@ class SweepResult:
     human_z: float
     predicted_z: float
     error_um: float
-    interior_peak: bool   # argmax strictly inside the sweep (not an endpoint)
+    interior_peak: bool  # argmax strictly inside the sweep (not an endpoint)
     score_contrast: float  # (max-min)/max — low ⇒ unreliable peak
 
 
@@ -49,8 +49,8 @@ class ValidationReport:
     n_sweeps: int
     median_error_um: float
     p95_error_um: float
-    within_margin_frac: float    # fraction with error <= margin_um
-    interior_peak_frac: float    # fraction whose metric peak is interior
+    within_margin_frac: float  # fraction with error <= margin_um
+    interior_peak_frac: float  # fraction whose metric peak is interior
     sweeps: list[SweepResult] = field(default_factory=list)
 
 

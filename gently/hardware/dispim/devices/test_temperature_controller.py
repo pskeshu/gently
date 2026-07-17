@@ -97,7 +97,9 @@ class AcuityNanoPrecisionThermalizerAPI:
 if __name__ == "__main__":
     import time
 
-    from acuitynano_precision_thermalizer_api import AcuityNanoPrecisionThermalizerAPI
+    from acuitynano_precision_thermalizer_api import (  # type: ignore[no-redef]
+        AcuityNanoPrecisionThermalizerAPI,
+    )
 
     acuity = AcuityNanoPrecisionThermalizerAPI()
     print("Commanding ACUITYnano to 37.0 C...")

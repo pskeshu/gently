@@ -12,9 +12,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import anthropic
+from anthropic.types import MessageParam, TextBlock
 
 from ...settings import settings
 
@@ -242,7 +243,7 @@ class DevelopmentalTracker:
             Classification result
         """
         # Build content for Claude Vision
-        content = []
+        content: list[dict[str, Any]] = []
 
         # Add temporal context if available
         if recent_images and len(recent_images) > 1:
@@ -287,13 +288,14 @@ class DevelopmentalTracker:
         content.append({"type": "text", "text": STAGE_CLASSIFICATION_PROMPT})
 
         try:
+            messages: list[MessageParam] = [{"role": "user", "content": cast(Any, content)}]
             response = self.claude.messages.create(
                 model=self.model,
                 max_tokens=500,
-                messages=[{"role": "user", "content": content}],
+                messages=messages,
             )
 
-            result = self._parse_classification(response.content[0].text)
+            result = self._parse_classification(cast(TextBlock, response.content[0]).text)
             result.timepoint = timepoint
 
             # Calculate time to hatching

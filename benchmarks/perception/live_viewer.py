@@ -46,7 +46,7 @@ benchmark_state: dict[str, Any] = {
     "verification_active": False,
 }
 is_paused: bool = False
-pause_event: asyncio.Event = None  # Will be initialized on startup
+pause_event: asyncio.Event | None = None  # Will be initialized on startup
 
 
 async def broadcast(message: dict):

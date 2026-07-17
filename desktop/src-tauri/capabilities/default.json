@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Thin shell — the UI is served by the Python backend and makes no Tauri IPC calls. Navigation is driven from Rust, so no window/shell permissions are needed.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

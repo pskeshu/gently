@@ -219,7 +219,7 @@ class Detector:
         list of dict
             Content array for Claude API
         """
-        content = []
+        content: list[dict[str, Any]] = []
 
         # Add instruction
         content.append({"type": "text", "text": f"Analyzing {embryo_id} at timepoint {timepoint}"})

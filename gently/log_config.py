@@ -33,7 +33,7 @@ def configure_logging(
     # the standard streams to UTF-8 with replacement so logging never raises.
     for _stream in (sys.stdout, sys.stderr):
         try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except (AttributeError, OSError):
             pass
 
@@ -68,6 +68,15 @@ def configure_logging(
         "bluesky.RE.state",
     ):
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # The `websockets` library logs a full "data transfer failed" traceback at
+    # ERROR level every time a client disconnects ungracefully (e.g. a browser
+    # tab sleeping or dropping — Windows raises WinError 121, "semaphore timeout").
+    # These are routine, not faults, and flood the console hundreds of lines deep,
+    # burying real errors. Suppress below CRITICAL so a genuinely fatal WS fault
+    # still surfaces. WARNING is not enough here because the noise is ERROR-level.
+    for name in ("websockets", "websockets.server", "websockets.client"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
     # File handler — always INFO+ regardless of console level
     if log_file:

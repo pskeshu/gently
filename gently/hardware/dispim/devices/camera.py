@@ -5,6 +5,7 @@ DiSPIM camera detector devices (single, dual, and bottom camera).
 import logging
 import time
 from collections import OrderedDict
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pymmcore
@@ -13,6 +14,9 @@ from ophyd.status import Status
 from gently.exceptions import AcquisitionError, HardwareError
 
 from ._common import _safe_obtain
+
+if TYPE_CHECKING:
+    from .optical import DiSPIMLED
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +32,8 @@ class DiSPIMCamera:
         self.name = device_name
         self.core = core
         self.parent = None  # Required for Bluesky
-        self._last_image = None
-        self._last_image_time = None
+        self._last_image: Any = None
+        self._last_image_time: float | None = None
 
     def _ensure_active(self) -> None:
         """Make this the default MMCore camera if it isn't already.

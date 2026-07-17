@@ -10,7 +10,7 @@ Provides concrete implementations of AnalysisStep for:
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -119,17 +119,17 @@ class ThresholdStep(AnalysisStep):
             try:
                 from skimage.filters import threshold_otsu
 
-                threshold_value = threshold_otsu(image)
+                threshold_value = float(threshold_otsu(image))
             except ImportError:
                 # Fallback to simple percentile
-                threshold_value = np.percentile(image, 50)
+                threshold_value = float(np.percentile(image, 50))
 
         elif self.method == "percentile":
-            threshold_value = np.percentile(image, self.value or 50)
+            threshold_value = float(np.percentile(image, self.value or 50))
 
         elif self.method == "percentile_bright":
             # Keep values above percentile (bright regions)
-            threshold_value = np.percentile(image, self.value or 95)
+            threshold_value = float(np.percentile(image, self.value or 95))
 
         elif self.method == "manual":
             if self.value is None:
@@ -200,7 +200,7 @@ class MorphologyStep(AnalysisStep):
         try:
             import cv2
 
-            kernel = np.ones((self.kernel_size, self.kernel_size), np.uint8)
+            kernel: np.ndarray = np.ones((self.kernel_size, self.kernel_size), np.uint8)
 
             if self.operation == "erode":
                 result = cv2.erode(input_data, kernel, iterations=self.iterations)
@@ -455,13 +455,14 @@ class VLMStep(AnalysisStep):
             # Call Claude
             client = anthropic.Anthropic(api_key=api_key)
             response = await asyncio.to_thread(
-                client.messages.create,
-                model=self.model,
-                max_tokens=self.max_tokens,
-                messages=[{"role": "user", "content": content}],
+                lambda: client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    messages=[{"role": "user", "content": cast(Any, content)}],
+                )
             )
 
-            result_text = response.content[0].text
+            result_text = cast(Any, response.content[0]).text
 
             return AnalysisResult(
                 step_name=self.name,
@@ -518,7 +519,7 @@ class SAMStep(AnalysisStep):
         self.model_path = model_path or "sam_vit_b_01ec64.pth"
         self.min_area = min_area
         self._sam = None
-        self._predictor = None
+        self._predictor: Any = None
 
     def _load_sam(self):
         """Lazy load SAM model"""

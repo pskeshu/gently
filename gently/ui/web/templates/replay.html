@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gently — Session Replay</title>
+<link rel="icon" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/rrweb/rrweb.min.css">
+<style>
+  :root{--bg:#0a0d13;--panel:#11161f;--text:#e7edf4;--muted:#8792a3;--accent:#5b8cff;--line:#1d2634}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif}
+  header{display:flex;align-items:baseline;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sid{color:var(--accent);font-family:ui-monospace,monospace;font-size:13px}
+  header a{color:var(--muted);font-size:12.5px;text-decoration:none;margin-left:auto}
+  header a:hover{color:var(--text)}
+  .wrap{display:flex;gap:18px;padding:18px 22px;align-items:flex-start}
+  .player-col{flex:1;min-width:0}
+  #stage{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}
+  #stage .replayer-wrapper{transform-origin:top left;position:relative}
+  #stage iframe{border:none;background:#fff}
+  #controls{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;margin-top:10px;padding:10px 14px}
+  #controls button{background:#182132;color:var(--text);border:1px solid var(--line);border-radius:6px;
+    padding:5px 12px;font-size:13px;cursor:pointer}
+  #controls button:hover{border-color:var(--accent)}
+  #seek{flex:1;accent-color:var(--accent)}
+  #clock{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);min-width:120px;text-align:right}
+  #speed{background:#0d1219;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+  .side{width:340px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    max-height:82vh;display:flex;flex-direction:column}
+  .side h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .side select{margin:10px 14px;background:#0d1219;color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:6px 8px;font-size:13px}
+  #actions{overflow-y:auto;padding:6px 0;font-size:12.5px}
+  .act{display:flex;gap:10px;padding:5px 14px;cursor:pointer;border-left:2px solid transparent}
+  .act:hover{background:#161d29;border-left-color:var(--accent)}
+  .act .t{color:var(--muted);font-family:ui-monospace,monospace;flex:none;font-size:11.5px}
+  .act .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .act.bus .name{color:var(--muted)}
+  .list{padding:22px;max-width:760px}
+  .list table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .list th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;letter-spacing:.05em;
+    text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .list td{padding:9px 10px;border-bottom:1px solid var(--line)}
+  .list a{color:var(--accent);text-decoration:none;font-family:ui-monospace,monospace}
+  .empty{color:var(--muted);padding:30px 22px}
+  #status{color:var(--muted);font-size:13px;padding:8px 2px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Session Replay</h1>
+  {% if session_id %}<span class="sid">{{ session_id }}</span>{% endif %}
+  <a href="{{ '/replay' if session_id else '/' }}">{{ '← all recordings' if session_id else '← back to gently' }}</a>
+</header>
+
+{% if not session_id %}
+<div class="list">
+  {% if recordings %}
+  <table>
+    <tr><th>Session</th><th>Tabs</th><th>Size</th></tr>
+    {% for r in recordings %}
+    <tr>
+      <td><a href="/replay/{{ r.id }}">{{ r.id }}</a></td>
+      <td>{{ r.tabs | length }}</td>
+      <td>{{ '%.1f' | format(r.bytes / 1048576) }} MB</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">No recordings yet — use the app with replay enabled and sessions will appear here.</div>
+  {% endif %}
+</div>
+{% else %}
+<div class="wrap">
+  <div class="player-col">
+    <div id="stage"></div>
+    <div id="controls">
+      <button id="playpause">Play</button>
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <span id="clock">0:00 / 0:00</span>
+      <select id="speed">
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+    </div>
+    <div id="status">Loading events…</div>
+  </div>
+  <div class="side">
+    <h2>Tabs</h2>
+    <select id="tab-select"></select>
+    <h2>Actions</h2>
+    <div id="actions"></div>
+  </div>
+</div>
+
+<script src="/static/vendor/rrweb/rrweb.umd.min.js"></script>
+<script>
+(async function () {
+  var sid = {{ session_id | tojson }};
+  var status = document.getElementById('status');
+  var tabSel = document.getElementById('tab-select');
+  var stage = document.getElementById('stage');
+  var seek = document.getElementById('seek');
+  var clock = document.getElementById('clock');
+  var playBtn = document.getElementById('playpause');
+  var speedSel = document.getElementById('speed');
+
+  var rep = null, total = 0, playing = false, ticker = null;
+
+  function fmt(ms) {
+    var s = Math.max(0, Math.round(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+  async function j(url) { var r = await fetch(url); if (!r.ok) throw new Error(url + ': ' + r.status); return r.json(); }
+
+  function fitStage() {
+    var iframe = stage.querySelector('iframe');
+    var wrapper = stage.querySelector('.replayer-wrapper');
+    if (!iframe || !wrapper) return;
+    var w = parseInt(iframe.getAttribute('width') || '1280', 10);
+    var h = parseInt(iframe.getAttribute('height') || '800', 10);
+    var scale = Math.min(stage.clientWidth / w, 1);
+    wrapper.style.transform = 'scale(' + scale + ')';
+    stage.style.height = Math.ceil(h * scale) + 'px';
+  }
+
+  function setPlaying(p) {
+    playing = p;
+    playBtn.textContent = p ? 'Pause' : 'Play';
+    if (ticker) { clearInterval(ticker); ticker = null; }
+    if (p) {
+      ticker = setInterval(function () {
+        if (!rep) return;
+        var t = rep.getCurrentTime();
+        if (t >= total) { setPlaying(false); t = total; }
+        seek.value = total ? Math.round((t / total) * 1000) : 0;
+        clock.textContent = fmt(t) + ' / ' + fmt(total);
+      }, 200);
+    }
+  }
+
+  function seekTo(ms, thenPlay) {
+    if (!rep) return;
+    if (thenPlay) { rep.play(ms); setPlaying(true); }
+    else { rep.pause(ms); setPlaying(false); }
+    seek.value = total ? Math.round((ms / total) * 1000) : 0;
+    clock.textContent = fmt(ms) + ' / ' + fmt(total);
+    fitStage();
+  }
+
+  var meta = { startTime: 0 };
+  async function loadTab(tab) {
+    status.textContent = 'Loading events…';
+    var events = (await j('/replay/api/' + sid + '/events?tab=' + tab)).events;
+    if (events.length < 2) { status.textContent = 'Not enough events to replay this tab.'; return; }
+    if (rep) { try { rep.destroy(); } catch (e) {} }
+    stage.innerHTML = '';
+    rep = new rrweb.Replayer(events, {
+      root: stage,
+      skipInactive: true,
+      speed: parseInt(speedSel.value, 10),
+      // CSS animations restart from t=0 inside the replay iframe and rrweb
+      // pauses them at their first frame — the v2 shell's staggered
+      // fill-backwards entrances (v2-rise: from opacity 0) then leave whole
+      // panels invisible even though the DOM is correct. Disabling animations
+      // entirely makes the static (= final) styles apply. MutationObserver
+      // can never capture animation state, so this is the replay-side truth.
+      insertStyleRules: [
+        '*, *::before, *::after { animation: none !important; transition: none !important; }',
+      ],
+    });
+    meta = rep.getMetaData();
+    total = meta.totalTime;
+    rep.on('finish', function () { setPlaying(false); });
+    seekTo(0, false);
+    status.textContent = events.length + ' events · ' +
+      new Date(meta.startTime).toLocaleString() + ' → ' + new Date(meta.endTime).toLocaleTimeString() +
+      ' · ' + fmt(total);
+    fitStage();
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (!rep) return;
+    if (playing) { rep.pause(); setPlaying(false); }
+    else { rep.play(rep.getCurrentTime() >= total ? 0 : rep.getCurrentTime()); setPlaying(true); }
+  });
+  seek.addEventListener('input', function () {
+    seekTo((parseInt(seek.value, 10) / 1000) * total, false);
+  });
+  speedSel.addEventListener('change', function () {
+    if (rep) rep.setConfig({ speed: parseInt(speedSel.value, 10) });
+  });
+  window.addEventListener('resize', fitStage);
+
+  async function loadActions() {
+    var actions = (await j('/replay/api/' + sid + '/actions')).actions;
+    var box = document.getElementById('actions');
+    box.innerHTML = '';
+    actions.forEach(function (a) {
+      var row = document.createElement('div');
+      row.className = 'act' + (a.action === 'bus-summary' ? ' bus' : '');
+      var when = a.t ? new Date(a.t) : null;
+      var name = a.action || '?';
+      if (a.action === 'bus-summary' && a.params) {
+        name = 'bus: ' + Object.keys(a.params).map(function (k) { return k + '×' + a.params[k]; }).join(' ');
+      }
+      row.innerHTML = '<span class="t">' + (when ? when.toLocaleTimeString() : '') + '</span><span class="name"></span>';
+      row.querySelector('.name').textContent = name;
+      row.title = name + (a.target && a.target.label ? ' — ' + a.target.label : '');
+      row.addEventListener('click', function () {
+        if (rep && when) {
+          var off = when.getTime() - meta.startTime;
+          if (off >= 0 && off <= total) seekTo(off, false);
+        }
+      });
+      box.appendChild(row);
+    });
+    if (!actions.length) box.innerHTML = '<div class="act"><span class="name">No actions logged.</span></div>';
+  }
+
+  var tabs = (await j('/replay/api/' + sid + '/tabs')).tabs;
+  if (!tabs.length) { status.textContent = 'No rrweb streams recorded for this session.'; return; }
+  tabs.forEach(function (t) {
+    var o = document.createElement('option');
+    o.value = t.tab;
+    o.textContent = t.tab + ' — ' + t.events + ' events, ' + (t.bytes / 1048576).toFixed(1) + ' MB';
+    tabSel.appendChild(o);
+  });
+  tabSel.addEventListener('change', function () { loadTab(tabSel.value); });
+  await loadTab(tabs[0].tab);
+  await loadActions();
+})().catch(function (e) {
+  document.getElementById('status').textContent = 'Failed to load replay: ' + e.message;
+});
+</script>
+{% endif %}
+</body>
+</html>

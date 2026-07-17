@@ -26,8 +26,8 @@ class SessionManager:
         self._session_id: str | None = None
 
     @property
-    def session_id(self) -> str:
-        """Get current session ID."""
+    def session_id(self) -> str | None:
+        """Get current session ID (None before create_session())."""
         return self._session_id
 
     def create_session(self):
@@ -258,7 +258,7 @@ class SessionManager:
                 clean.append(msg)
                 continue
             if isinstance(content, list):
-                valid_blocks = []
+                valid_blocks: list[dict | str] = []
                 for block in content:
                     if isinstance(block, dict):
                         valid_blocks.append(block)

@@ -15,7 +15,7 @@ from .model import Campaign
 try:
     from .file_store import FileContextStore as ContextStore
 except ImportError:
-    from .store import ContextStore
+    from .store import ContextStore  # type: ignore[assignment]  # legacy fallback
 
 logger = logging.getLogger(__name__)
 

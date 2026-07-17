@@ -91,7 +91,7 @@ def test_load_focus_traces_roundtrip(tmp_path):
         {"z": 100.0, "focus_score": 0.4, "t": 1.0, "source": "bottom"},
         {"z": 110.0, "score": 0.9, "source": "bottom"},  # 'score' alias
         {"garbage": True},  # missing z/score -> skipped
-        "not json",         # junk -> skipped
+        "not json",  # junk -> skipped
     ]
     with p.open("w") as f:
         for ln in lines:

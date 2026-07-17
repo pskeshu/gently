@@ -76,11 +76,12 @@ class DeviceLayerServer(Service):
     ):
         super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
-        self.config = None
-        self.system = None  # DiSPIMSystem facade — only place this process touches MMCore directly
+        self.config: dict | None = None
+        # DiSPIMSystem facade — only place this process touches MMCore directly
+        self.system: Any = None
         self.RE = None
-        self.devices = {}
-        self.plans = {}
+        self.devices: dict[str, Any] = {}
+        self.plans: dict[str, Any] = {}
 
         # SAM configuration
         self._sam_device = sam_device
@@ -93,11 +94,11 @@ class DeviceLayerServer(Service):
         self._running = False
 
         # Results storage (simple in-memory)
-        self._run_history = []
-        self._last_documents = {}
+        self._run_history: list[Any] = []
+        self._last_documents: dict[str, Any] = {}
 
         # Plan execution timing log
-        self._plan_execution_log = []
+        self._plan_execution_log: list[Any] = []
 
         # Volume staging directory - set via POST /session/configure
         # When set, large numpy arrays are written as TIFF files instead of
@@ -989,6 +990,25 @@ class DeviceLayerServer(Service):
             payload["focus_score"] = focus_score
         return payload
 
+    def _current_stage_xy(self) -> list[float] | None:
+        """Latest XY-stage position from the state cache, as ``[x, y]`` µm.
+
+        Sourced from the position poller (``kind == "xy_stage"``). Returns
+        ``None`` when no XY reading has arrived yet — callers MUST NOT fall
+        back to ``[0, 0]``: the operate-view marking canvas converts clicked
+        pixels to stage coords relative to this origin, so a bogus ``[0, 0]``
+        silently places every marker relative to stage origin instead of the
+        true position (embryos then land hundreds of µm off, and calibration
+        images empty field). Absent-is-better-than-wrong.
+        """
+        positions = self._state_latest.get("positions") or {}
+        for entry in positions.values():
+            if isinstance(entry, dict) and entry.get("kind") == "xy_stage":
+                x, y = entry.get("X"), entry.get("Y")
+                if x is not None and y is not None:
+                    return [float(x), float(y)]
+        return None
+
     async def _bottom_camera_streamer(self):
         """Continuous grab/encode/broadcast loop. Runs while a subscriber lives.
 
@@ -1008,6 +1028,13 @@ class DeviceLayerServer(Service):
                 img = await asyncio.to_thread(self._capture_bottom_frame_sync)
                 payload = self._encode_frame_for_stream(img) if img is not None else None
                 if payload is not None:
+                    # Stamp the true stage XY so the operate-view marking canvas
+                    # converts clicked pixels to absolute stage coords (not
+                    # offsets from origin). Omitted — never [0, 0] — when no XY
+                    # reading has arrived yet; the frontend then blocks marking.
+                    xy = self._current_stage_xy()
+                    if xy is not None:
+                        payload["stage_position"] = xy
                     await self._broadcast_camera(payload)
                 # Pace the loop — sleep whatever's left of the interval.
                 elapsed = time.monotonic() - tick
@@ -2142,16 +2169,19 @@ class DeviceLayerServer(Service):
             cfg = dict((self.config or {}).get("temperature") or {})
             has_pw = bool(cfg.get("password"))
             temp = self.devices.get("temperature")
-            return web.json_response({
-                "success": True,
-                "config": self._redact_temp_cfg(cfg),
-                "password_set": has_pw,
-                "active": temp is not None,
-                "live_backend": type(temp._dev).__name__ if temp is not None else None,
-                "state": self._temp_state(temp),
-            })
+            return web.json_response(
+                {
+                    "success": True,
+                    "config": self._redact_temp_cfg(cfg),
+                    "password_set": has_pw,
+                    "active": temp is not None,
+                    "live_backend": type(temp._dev).__name__ if temp is not None else None,
+                    "state": self._temp_state(temp),
+                }
+            )
         except Exception as e:
             import traceback
+
             return web.json_response(
                 {"success": False, "error": str(e), "traceback": traceback.format_exc()},
                 status=500,
@@ -2172,6 +2202,7 @@ class DeviceLayerServer(Service):
 
         def _probe():
             from gently.hardware.temperature import create_temperature_controller
+
             tc = create_temperature_controller(eff)
             try:
                 r = tc.read()
@@ -2200,7 +2231,7 @@ class DeviceLayerServer(Service):
             import os
 
             sidecar = Path(self.config_path).parent / "config.local.yml"
-            existing = {}
+            existing: dict = {}
             if sidecar.exists():
                 with open(sidecar) as f:
                     existing = yaml.safe_load(f) or {}
@@ -2239,16 +2270,24 @@ class DeviceLayerServer(Service):
         re_state = str(getattr(self.RE, "state", "idle")) if self.RE is not None else "idle"
         if re_state != "idle":
             return web.json_response(
-                {"success": False, "blocked": True,
-                 "error": f"RunEngine is {re_state}; stop the plan before reconfiguring"},
-                status=409)
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": f"RunEngine is {re_state}; stop the plan before reconfiguring",
+                },
+                status=409,
+            )
         old = self.devices.get("temperature")
         lock = getattr(old, "_lock", None)
         if lock is not None and lock.locked():
             return web.json_response(
-                {"success": False, "blocked": True,
-                 "error": "a temperature ramp is in progress; wait or stop it first"},
-                status=409)
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": "a temperature ramp is in progress; wait or stop it first",
+                },
+                status=409,
+            )
 
         # Fill in the stored password when the client didn't submit a new one.
         eff = self._preserve_temp_password(cfg)
@@ -2256,6 +2295,7 @@ class DeviceLayerServer(Service):
         # Build the NEW controller first (eager connect off the event loop).
         def _build():
             from gently.hardware.temperature import create_temperature_controller
+
             return create_temperature_controller(eff)
 
         try:
@@ -2263,10 +2303,15 @@ class DeviceLayerServer(Service):
         except Exception as e:
             self._write_temp_sidecar(eff)  # save intent; a restart will apply it
             return web.json_response(
-                {"success": False, "applied": False, "restart_required": True,
-                 "error": f"could not connect with the new config: {e}. "
-                          "Saved — restart the device layer to apply."},
-                status=502)
+                {
+                    "success": False,
+                    "applied": False,
+                    "restart_required": True,
+                    "error": f"could not connect with the new config: {e}. "
+                    "Saved — restart the device layer to apply.",
+                },
+                status=502,
+            )
 
         # Swap + retire the old controller.
         self.devices["temperature"] = new_tc
@@ -2279,12 +2324,16 @@ class DeviceLayerServer(Service):
         self.config["temperature"] = eff
         self._write_temp_sidecar(eff)
         logger.info("Thermalizer reconfigured live (backend=%s)", eff.get("backend", "serial"))
-        return web.json_response({
-            "success": True, "applied": True, "restart_required": False,
-            "config": self._redact_temp_cfg(eff),
-            "live_backend": type(new_tc._dev).__name__,
-            "state": self._temp_state(new_tc),
-        })
+        return web.json_response(
+            {
+                "success": True,
+                "applied": True,
+                "restart_required": False,
+                "config": self._redact_temp_cfg(eff),
+                "live_backend": type(new_tc._dev).__name__,
+                "state": self._temp_state(new_tc),
+            }
+        )
 
     async def handle_set_camera_led_mode(self, request):
         """POST /api/camera/led_mode - Enable/disable automatic LED for bottom camera"""
@@ -2792,19 +2841,23 @@ class DeviceLayerServer(Service):
                 if bottom_camera:
                     bottom_camera.configure_exposure(exposure_ms)
 
-            # Detection always images under ROOM LIGHT, never the camera LED.
-            # use_led is a persistent device flag that other flows (e.g. manual
-            # marking via capture_for_marking) leave switched on, so force it
-            # off here and turn the room light on so there's illumination.
+            # Detection needs even illumination. Prefer the ROOM LIGHT
+            # (SwitchBot) and disable the camera LED. But the room light is an
+            # OPTIONAL BLE accessory — when it's absent or the command fails,
+            # forcing the LED off leaves the frame near-black and SAM finds
+            # nothing. So only disable the LED once the room light is actually
+            # on; otherwise fall back to the camera LED as the light source.
             bottom_camera = self.devices.get("bottom_camera")
-            if bottom_camera is not None:
-                bottom_camera.use_led = False
             if await self._set_room_light("on"):
+                if bottom_camera is not None:
+                    bottom_camera.use_led = False
                 logger.info("[detect_embryos] Room light ON, camera LED disabled")
             else:
+                if bottom_camera is not None:
+                    bottom_camera.use_led = True
                 logger.warning(
-                    "[detect_embryos] Could not turn room light on "
-                    "(no SwitchBot configured?) — capturing under ambient light"
+                    "[detect_embryos] Room light unavailable (no SwitchBot "
+                    "configured or command failed) — falling back to camera LED"
                 )
 
             # Capture image via plan
@@ -3237,7 +3290,7 @@ class DeviceLayerServer(Service):
     def _extract_volume(self, documents: dict, params: dict) -> dict:
         val = self._extract_from_events(documents, ["volume_scanner", "camera", "camera_image"])
         if val is not None:
-            result = {"success": True}
+            result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
                 result["volume"] = val  # file ref — client resolves
                 result["shape"] = val.get("shape")
@@ -3261,7 +3314,7 @@ class DeviceLayerServer(Service):
             ],
         )
         if val is not None:
-            result = {"success": True}
+            result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
                 result["image"] = val
                 result["shape"] = val.get("shape")
@@ -3623,7 +3676,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/temperature/set", self.handle_set_temperature)
         self._app.router.add_get("/api/temperature/config", self.handle_get_temperature_config)
         self._app.router.add_post(
-            "/api/temperature/config/test", self.handle_test_temperature_config)
+            "/api/temperature/config/test", self.handle_test_temperature_config
+        )
         self._app.router.add_post("/api/temperature/config", self.handle_set_temperature_config)
         self._app.router.add_get("/api/room_light/status", self.handle_get_room_light_status)
         self._app.router.add_post("/api/room_light/set", self.handle_set_room_light)

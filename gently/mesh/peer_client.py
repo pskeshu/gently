@@ -29,7 +29,7 @@ class PeerClient:
         self._audit_log = audit_log
         self._pinning_verified: set = set()  # track first-success per peer
 
-    async def _ensure_session(self):
+    async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=settings.mesh.fetch_timeout_s)
             # Use permissive SSL context — we verify by cert fingerprint, not CA chain
@@ -39,6 +39,7 @@ class PeerClient:
             connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._session = aiohttp.ClientSession(timeout=timeout, connector=connector)
             self._pinning_verified.clear()
+        return self._session
 
     def _auth_headers(self, peer: PeerInfo) -> dict[str, str]:
         """Build auth headers for a trusted peer."""
@@ -103,12 +104,12 @@ class PeerClient:
 
         Returns the parsed JSON dict on success, or None on failure.
         """
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/mesh/status"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     return await resp.json()
@@ -126,12 +127,12 @@ class PeerClient:
 
     async def fetch_peer_campaigns(self, peer: PeerInfo) -> list | None:
         """GET /api/campaigns from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     data = await resp.json()
@@ -144,12 +145,12 @@ class PeerClient:
 
     async def fetch_campaign_export(self, peer: PeerInfo, campaign_id: str) -> dict | None:
         """GET /api/campaigns/{id}/export from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns/{campaign_id}/export"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     return await resp.json()
@@ -167,12 +168,12 @@ class PeerClient:
         hostname: str,
     ) -> bool:
         """POST /api/campaigns/{id}/join on a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns/{campaign_id}/join"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.post(
+            async with session.post(
                 url,
                 json={
                     "instance_id": instance_id,
@@ -199,12 +200,12 @@ class PeerClient:
         hostname: str,
     ) -> bool:
         """POST /api/campaigns/{id}/items/{item_id}/claim on a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/claim"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.post(
+            async with session.post(
                 url,
                 json={
                     "instance_id": instance_id,
@@ -229,12 +230,12 @@ class PeerClient:
         item_id: str,
     ) -> bool:
         """POST /api/campaigns/{id}/items/{item_id}/unclaim on a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/unclaim"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.post(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.post(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                 return resp.status == 200
@@ -253,7 +254,7 @@ class PeerClient:
         outcome: str | None = None,
     ) -> bool:
         """POST /api/campaigns/{id}/items/{item_id}/status on a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/status"
         body: dict[str, Any] = {"status": status}
         if outcome is not None:
@@ -261,7 +262,7 @@ class PeerClient:
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.post(url, json=body, headers=headers, ssl=ssl_fp) as resp:
+            async with session.post(url, json=body, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                 return resp.status == 200
@@ -305,15 +306,15 @@ class PeerClient:
         self, peer: PeerInfo, method: str, path: str, json_body: dict | None = None
     ) -> dict | None:
         """Make an HTTP request trying HTTPS first, then HTTP (for pre-pairing)."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         base = f"{peer.ip_address}:{peer.viz_port}"
         for scheme in ("https", "http"):
             url = f"{scheme}://{base}{path}"
             try:
                 if method == "GET":
-                    req = self._session.get(url)
+                    req = session.get(url)
                 else:
-                    req = self._session.post(url, json=json_body or {})
+                    req = session.post(url, json=json_body or {})
                 async with req as resp:
                     if resp.status == 200:
                         return await resp.json()
@@ -350,12 +351,12 @@ class PeerClient:
 
     async def fetch_peer_sessions(self, peer: PeerInfo) -> list | None:
         """GET /api/data/sessions from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/data/sessions"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     data = await resp.json()
@@ -368,12 +369,12 @@ class PeerClient:
 
     async def fetch_peer_session_detail(self, peer: PeerInfo, session_id: str) -> dict | None:
         """GET /api/data/sessions/{id} from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/data/sessions/{session_id}"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     return await resp.json()
@@ -385,12 +386,12 @@ class PeerClient:
 
     async def fetch_peer_coverage(self, peer: PeerInfo) -> dict | None:
         """GET /api/data/coverage from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/data/coverage"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     return await resp.json()
@@ -402,12 +403,12 @@ class PeerClient:
 
     async def fetch_peer_stage_distribution(self, peer: PeerInfo) -> dict | None:
         """GET /api/data/stages from a peer."""
-        await self._ensure_session()
+        session = await self._ensure_session()
         url = f"{peer.base_url}/api/data/stages"
         headers = self._auth_headers(peer)
         ssl_fp = self._ssl_for_peer(peer)
         try:
-            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+            async with session.get(url, headers=headers, ssl=ssl_fp) as resp:
                 if resp.status == 200:
                     self._log_pinning_success(peer, ssl_fp)
                     return await resp.json()

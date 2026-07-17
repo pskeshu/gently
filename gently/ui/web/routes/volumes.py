@@ -3,6 +3,7 @@
 import base64
 import io
 import logging
+from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
@@ -61,7 +62,7 @@ def create_router(server) -> APIRouter:
             logger.error(f"Failed to load volume: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}") from e
 
-        PROJECTION_METHODS = {
+        PROJECTION_METHODS: dict[str, Any] = {
             "three_view": projection_three_view,
         }
 

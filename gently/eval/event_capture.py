@@ -29,6 +29,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from gently.core.event_bus import _NO_HISTORY_TYPES, Event, EventBus, EventType
 
@@ -52,13 +53,13 @@ class EventCapture:
     # itself skips for its history deque. The rationale carries over: at
     # 5 Hz over hours these would dominate the log without adding signal
     # that replay / diff can use.
-    DEFAULT_SKIP: set[EventType] = frozenset(_NO_HISTORY_TYPES)
+    DEFAULT_SKIP: frozenset[EventType] = frozenset(_NO_HISTORY_TYPES)
 
     def __init__(self, path: Path, *, skip: set[EventType] | None = None):
         self.path = Path(path)
         self._skip = self.DEFAULT_SKIP if skip is None else frozenset(skip)
-        self._fp = None
-        self._unsub = None
+        self._fp: Any = None
+        self._unsub: Any = None
         self._lock = threading.Lock()
         self._count = 0
         self._skipped = 0

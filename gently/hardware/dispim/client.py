@@ -61,7 +61,7 @@ class DiSPIMMicroscope(Microscope):
         """
         self.http_url = http_url
 
-        self._session = None  # aiohttp session
+        self._session: aiohttp.ClientSession | None = None  # aiohttp session
         self._qs_connected = False  # Track actual queue server connection
         self._sam_available = False  # Track SAM availability via HTTP
 
@@ -82,6 +82,7 @@ class DiSPIMMicroscope(Microscope):
 
         # Connect to Device Layer Server (HTTP API)
         try:
+            assert self._session is not None
             async with self._session.get(f"{self.http_url}/api/status") as resp:
                 if resp.status == 200:
                     await resp.json()  # Validate response
@@ -94,6 +95,7 @@ class DiSPIMMicroscope(Microscope):
         # Check SAM availability (via HTTP, same server)
         if self._qs_connected:
             try:
+                assert self._session is not None
                 async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
                     if resp.status == 200:
                         sam_status = await resp.json()
@@ -148,6 +150,7 @@ class DiSPIMMicroscope(Microscope):
             return False
 
         try:
+            assert self._session is not None
             async with self._session.get(
                 f"{self.http_url}/api/status",
                 timeout=aiohttp.ClientTimeout(total=timeout),
@@ -189,6 +192,7 @@ class DiSPIMMicroscope(Microscope):
             ``{"success": True, "volume_dir": "..."}`` on success.
         """
         self._ensure_connected()
+        assert self._session is not None
         async with self._session.post(
             f"{self.http_url}/session/configure",
             json={"volume_dir": volume_dir},
@@ -253,12 +257,14 @@ class DiSPIMMicroscope(Microscope):
     async def _api_get(self, path: str) -> dict:
         """GET request using the shared session."""
         self._ensure_connected()
+        assert self._session is not None
         async with self._session.get(f"{self.http_url}{path}") as resp:
             return await resp.json()
 
     async def _api_post(self, path: str, json: dict | None = None) -> dict:
         """POST request using the shared session."""
         self._ensure_connected()
+        assert self._session is not None
         async with self._session.post(f"{self.http_url}{path}", json=json) as resp:
             return await resp.json()
 
@@ -294,6 +300,7 @@ class DiSPIMMicroscope(Microscope):
         }
 
         try:
+            assert self._session is not None
             async with self._session.post(
                 f"{self.http_url}/api/queue/item/add",
                 json=payload,
@@ -417,7 +424,7 @@ class DiSPIMMicroscope(Microscope):
                         if isinstance(val, (int, float)):
                             return float(val)
                         if isinstance(val, dict):
-                            return float(val.get("z", val.get("position", 0)))
+                            return float(val.get("z", val.get("position", 0)) or 0)
 
         raise DeviceLayerError("Failed to read piezo position")
 
@@ -439,7 +446,7 @@ class DiSPIMMicroscope(Microscope):
         dict
             Calibration results with optimal positions
         """
-        plan_kwargs = {"lightsheet_snap": "lightsheet_snap"}
+        plan_kwargs: dict[str, Any] = {"lightsheet_snap": "lightsheet_snap"}
         if piezo_positions is not None:
             plan_kwargs["piezo_positions"] = piezo_positions
         if galvo_positions is not None:
@@ -802,6 +809,7 @@ class DiSPIMMicroscope(Microscope):
         direct, no queue.
         """
         try:
+            assert self._session is not None
             async with self._session.get(
                 f"{self.http_url}/api/light_source/power",
                 params={"wavelength": int(wavelength)},
@@ -927,6 +935,7 @@ class DiSPIMMicroscope(Microscope):
             sock_connect=10.0,
         )
         url = f"{self.http_url}/api/devices/stream"
+        assert self._session is not None
         async with self._session.get(url, timeout=client_timeout) as resp:
             resp.raise_for_status()
             buf = b""
@@ -974,6 +983,7 @@ class DiSPIMMicroscope(Microscope):
             sock_connect=10.0,
         )
         url = f"{self.http_url}/api/bottom_camera/stream"
+        assert self._session is not None
         async with self._session.get(url, timeout=client_timeout) as resp:
             resp.raise_for_status()
             buf = b""
@@ -1011,6 +1021,7 @@ class DiSPIMMicroscope(Microscope):
             sock_connect=10.0,
         )
         url = f"{self.http_url}/api/lightsheet/stream"
+        assert self._session is not None
         async with self._session.get(url, timeout=client_timeout) as resp:
             resp.raise_for_status()
             buf = b""
@@ -1040,7 +1051,7 @@ class DiSPIMMicroscope(Microscope):
         self, galvo=None, piezo=None, exposure=None, side=None
     ) -> dict:
         """POST live galvo/piezo/exposure/side to the device-layer lightsheet streamer."""
-        body = {}
+        body: dict[str, float | str] = {}
         if galvo is not None:
             body["galvo"] = float(galvo)
         if piezo is not None:
@@ -1187,6 +1198,7 @@ class DiSPIMMicroscope(Microscope):
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms
 
+            assert self._session is not None
             async with self._session.post(
                 f"{self.http_url}/api/detect_embryos", json=payload, timeout=300
             ) as resp:
@@ -1336,7 +1348,7 @@ class DiSPIMMicroscope(Microscope):
                     }
                 )
 
-            result = {"success": True, "num_embryos": len(embryos)}
+            result: dict[str, Any] = {"success": True, "num_embryos": len(embryos)}
             if save_path:
                 from pathlib import Path as _Path
 
@@ -1413,6 +1425,7 @@ class DiSPIMMicroscope(Microscope):
         # Device Layer Server status
         if self._session:
             try:
+                assert self._session is not None
                 async with self._session.get(f"{self.http_url}/api/status") as resp:
                     if resp.status == 200:
                         server_status = await resp.json()
@@ -1432,6 +1445,7 @@ class DiSPIMMicroscope(Microscope):
         # SAM status (via HTTP, same server)
         if self._session and self._qs_connected:
             try:
+                assert self._session is not None
                 async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
                     if resp.status == 200:
                         sam_status = await resp.json()

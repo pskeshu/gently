@@ -10,6 +10,7 @@ detection modules handle image analysis.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 from scipy.ndimage import (
@@ -123,10 +124,10 @@ def detect_embryo_roi(
             return None
 
         padding = kernel_size // 2
-        y_min = max(0, np.min(rows) - padding)
-        y_max = min(image.shape[0], np.max(rows) + padding)
-        x_min = max(0, np.min(cols) - padding)
-        x_max = min(image.shape[1], np.max(cols) + padding)
+        y_min = max(0, int(np.min(rows)) - padding)
+        y_max = min(image.shape[0], int(np.max(rows)) + padding)
+        x_min = max(0, int(np.min(cols)) - padding)
+        x_max = min(image.shape[1], int(np.max(cols)) + padding)
 
         w = x_max - x_min
         h = y_max - y_min
@@ -214,10 +215,10 @@ def detect_multiple_embryos(
             x_center = (np.min(cols) + np.max(cols)) // 2
 
             padding = kernel_size // 2
-            y_min = max(0, np.min(rows) - padding)
-            y_max = min(image.shape[0], np.max(rows) + padding)
-            x_min = max(0, np.min(cols) - padding)
-            x_max = min(image.shape[1], np.max(cols) + padding)
+            y_min = max(0, int(np.min(rows)) - padding)
+            y_max = min(image.shape[0], int(np.max(rows)) + padding)
+            x_min = max(0, int(np.min(cols)) - padding)
+            x_max = min(image.shape[1], int(np.max(cols)) + padding)
 
             w = x_max - x_min
             h = y_max - y_min
@@ -234,7 +235,7 @@ def detect_multiple_embryos(
         regions.sort(key=lambda x: x["size"], reverse=True)
 
         # Filter out overlapping regions
-        selected_regions = []
+        selected_regions: list[Any] = []
         for region in regions:
             if len(selected_regions) >= max_embryos:
                 break

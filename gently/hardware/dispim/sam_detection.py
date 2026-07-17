@@ -12,6 +12,7 @@ import os
 import uuid
 from io import BytesIO
 from pathlib import Path
+from typing import Any, cast
 
 import anthropic
 import cv2
@@ -77,8 +78,8 @@ class SAMEmbryoDetector:
         self.min_separation_pixels = 100
 
         # SAM models (lazy loaded)
-        self._mask_generator = None
-        self._predictor = None
+        self._mask_generator: Any = None
+        self._predictor: Any = None
 
     def _load_sam(self):
         """Lazy load SAM models"""
@@ -167,7 +168,9 @@ class SAMEmbryoDetector:
             )
             background = cv2.morphologyEx(img_norm, cv2.MORPH_OPEN, kernel_bg)
             img_no_bg = cv2.subtract(img_norm, background)
-            img_no_bg = cv2.normalize(img_no_bg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            img_no_bg = cv2.normalize(  # type: ignore[call-overload]  # cv2 stub disallows None dst, valid at runtime
+                img_no_bg, None, 0, 255, cv2.NORM_MINMAX
+            ).astype(np.uint8)
             logger.debug("Background subtracted")
         else:
             img_no_bg = img_norm
@@ -511,8 +514,8 @@ class SAMEmbryoDetector:
 
         # Claude review (if enabled)
         embryos_final = embryos_sam
-        verification = {"verified": True, "skipped": not use_claude_review}
-        changes = {"round1": {"removed": [], "added": []}}
+        verification: dict[str, Any] = {"verified": True, "skipped": not use_claude_review}
+        changes: dict[str, Any] = {"round1": {"removed": [], "added": []}}
 
         if use_claude_review and self.claude_client:
             logger.info("[2/4] Claude Vision review (Round 1)...")
@@ -543,7 +546,7 @@ class SAMEmbryoDetector:
 
             if has_r2_changes:
                 logger.info("Applying Round 2 corrections...")
-                review_r2 = {
+                review_r2: dict[str, Any] = {
                     "false_positives": verification.get("additional_false_positives", []),
                     "false_negatives": verification.get("additional_false_negatives", []),
                 }
@@ -561,7 +564,7 @@ class SAMEmbryoDetector:
             stage_position,
             pixel_size_um,
             objective_mag,
-            image_shape=image.shape[:2],  # (height, width)
+            image_shape=cast("tuple[int, int]", image.shape[:2]),  # (height, width)
         )
 
         # Save final visualization
@@ -570,7 +573,7 @@ class SAMEmbryoDetector:
             cv2.imwrite(str(output_dir / "detection_final.png"), final_viz)
 
         # Package results
-        results = {
+        results: dict[str, Any] = {
             "embryos": embryo_positions,
             "initial_detections": len(embryos_sam),
             "final_detections": len(embryos_final),
@@ -649,7 +652,7 @@ class SAMEmbryoDetector:
         # Sort by quality and apply spatial separation
         embryo_candidates.sort(key=lambda x: x["area"] * x["stability_score"], reverse=True)
 
-        selected_embryos = []
+        selected_embryos: list[Any] = []
         for candidate in embryo_candidates:
             if len(selected_embryos) >= self.max_embryos:
                 break
@@ -901,7 +904,7 @@ Respond in JSON:
     ) -> tuple[list[dict], dict]:
         """Apply Claude's corrections (from test script)"""
         corrected = []
-        changes = {"removed": [], "added": []}
+        changes: dict[str, Any] = {"removed": [], "added": []}
 
         # Remove false positives
         false_positives = set(review.get("false_positives", []))

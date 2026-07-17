@@ -18,10 +18,12 @@ import io
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import anthropic
 import numpy as np
 import tifffile
+from anthropic.types import TextBlock
 from PIL import Image
 
 # Add parent to path for gently imports
@@ -123,7 +125,7 @@ async def classify_image(
 ) -> dict:
     """Use Claude to classify a single image."""
     response = await asyncio.to_thread(
-        client.messages.create,
+        client.messages.create,  # type: ignore[arg-type]  # overloaded SDK method not resolvable by to_thread
         model="claude-haiku-4-5-20251001",  # Fast and cheap for bulk labeling
         max_tokens=200,
         messages=[
@@ -145,7 +147,7 @@ async def classify_image(
     )
 
     # Parse response
-    text = response.content[0].text
+    text = cast(TextBlock, response.content[0]).text
     try:
         # Find JSON in response
         import re
@@ -229,7 +231,7 @@ async def auto_label_batch(
 
     # Save results for review
     output_file = output_file or Path("labeled_results.json")
-    save_data = {
+    save_data: dict[str, Any] = {
         stage: [{k: v for k, v in r.items() if k != "image_b64"} for r in results]
         for stage, results in results_by_stage.items()
     }
@@ -350,7 +352,7 @@ async def interactive_review(results_file: Path, examples_dir: Path):
         elif choice == "p":
             # Just populate from saved file - need to reload images
             print("Reloading images...")
-            results_with_images = {}
+            results_with_images: dict = {}
             for stage, items in data.items():
                 if stage.startswith("_"):
                     continue

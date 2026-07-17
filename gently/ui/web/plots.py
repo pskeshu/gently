@@ -5,11 +5,14 @@ All functions return numpy arrays (RGB images) suitable for push_image().
 Uses matplotlib with Agg backend for thread safety.
 """
 
+from typing import cast
+
 import matplotlib
 import numpy as np
 
 matplotlib.use("Agg")  # Non-interactive backend for thread safety
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 
 def generate_focus_curve_plot(
@@ -87,7 +90,7 @@ def generate_focus_curve_plot(
 
     # Convert to numpy array
     fig.canvas.draw()
-    buf = np.asarray(fig.canvas.buffer_rgba())
+    buf = np.asarray(cast(FigureCanvasAgg, fig.canvas).buffer_rgba())
     plt.close(fig)
 
     return buf[:, :, :3].astype(np.uint8)
@@ -188,7 +191,7 @@ def generate_calibration_summary_plot(
 
     fig.tight_layout()
     fig.canvas.draw()
-    buf = np.asarray(fig.canvas.buffer_rgba())
+    buf = np.asarray(cast(FigureCanvasAgg, fig.canvas).buffer_rgba())
     plt.close(fig)
 
     return buf[:, :, :3].astype(np.uint8)
@@ -278,7 +281,7 @@ def generate_edge_detection_plot(
 
     fig.tight_layout()
     fig.canvas.draw()
-    buf = np.asarray(fig.canvas.buffer_rgba())
+    buf = np.asarray(cast(FigureCanvasAgg, fig.canvas).buffer_rgba())
     plt.close(fig)
 
     return buf[:, :, :3].astype(np.uint8)
