@@ -4,7 +4,9 @@
       "type": "stdio",
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "@playwright/mcp@latest",
+        "--config",
+        ".claude/playwright-mcp-config.json"
       ],
       "env": {}
     }
