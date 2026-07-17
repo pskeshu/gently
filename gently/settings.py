@@ -182,6 +182,25 @@ class UISettings:
     # switch: it drops the recorder include and 403s the ingest endpoint; the
     # player stays available for existing recordings.
     replay: bool = field(default_factory=lambda: _env("REPLAY", True))
+    # Default recording fidelity — one size does not fit all. High-fidelity DOM
+    # churn (the live map re-rendering at poll rate) is invaluable for a specific
+    # visual debug but wasteful always-on. Levels (overridable per-load with
+    # ?replay=<level>):
+    #   full     — record every DOM mutation (highest churn; deep visual debug)
+    #   balanced — block the machine-driven high-churn regions (map, 3D, temp
+    #              graph); keeps clicks + panels. The sane always-on default.
+    #   actions  — semantic action log only (clicks/nav), no rrweb DOM stream
+    replay_fidelity: str = field(default_factory=lambda: _env("REPLAY_FIDELITY", "balanced"))
+    # Cap one tab's rrweb stream. A dashboard tab left open re-renders the live
+    # map / telemetry at poll rate, so a single long-lived tab can balloon its
+    # recording to gigabytes. Past the cap, rrweb frames are dropped (a one-time
+    # marker is logged); the small semantic action log keeps recording.
+    replay_max_tab_mb: float = field(default_factory=lambda: _env("REPLAY_MAX_TAB_MB", 120.0))
+    # Total on-disk budget for all rrweb recordings. Oldest recordings are pruned
+    # (once, lazily) to keep the footprint under this.
+    replay_total_budget_mb: float = field(
+        default_factory=lambda: _env("REPLAY_TOTAL_BUDGET_MB", 1024.0)
+    )
 
 
 @dataclass(frozen=True)
