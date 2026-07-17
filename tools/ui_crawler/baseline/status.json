@@ -1,0 +1,146 @@
+{
+  "US-01": {
+    "status": "works",
+    "title": "First-run landing shows the entry choices"
+  },
+  "US-02": {
+    "status": "partial",
+    "title": "Skip to workspace and resume a prior session"
+  },
+  "US-03": {
+    "status": "partial",
+    "title": "Return to the landing after dismissing it"
+  },
+  "US-04": {
+    "status": "blocked",
+    "title": "Design a plan with the agent"
+  },
+  "US-05": {
+    "status": "gap",
+    "title": "Review & commit a designed plan"
+  },
+  "US-06": {
+    "status": "gap",
+    "title": "Start a new plan from the workspace"
+  },
+  "US-07": {
+    "status": "partial",
+    "title": "Edit / revise an existing plan"
+  },
+  "US-08": {
+    "status": "works",
+    "title": "Take a quick look jumps straight to the scope"
+  },
+  "US-09": {
+    "status": "blocked",
+    "title": "One-off snap/volume without a session"
+  },
+  "US-10": {
+    "status": "partial",
+    "title": "Mark embryos (bottom-cam detect \u2192 single list)"
+  },
+  "US-11": {
+    "status": "blocked",
+    "title": "Center on a marked embryo"
+  },
+  "US-12": {
+    "status": "blocked",
+    "title": "Lower SPIM \u2192 focus \u2192 acquire"
+  },
+  "US-13": {
+    "status": "works",
+    "title": "Run chooser + assign roles after marking"
+  },
+  "US-14": {
+    "status": "blocked",
+    "title": "Start an adaptive timelapse"
+  },
+  "US-15": {
+    "status": "blocked",
+    "title": "Monitor / pause / stop / resume a run"
+  },
+  "US-16": {
+    "status": "works",
+    "title": "View the Operation Plan"
+  },
+  "US-17": {
+    "status": "works",
+    "title": "Understand a tactic (expand its card)"
+  },
+  "US-18": {
+    "status": "blocked",
+    "title": "Run a tactic"
+  },
+  "US-25": {
+    "status": "works",
+    "title": "Configure the thermalizer (serial/MQTT) in Settings"
+  },
+  "US-26": {
+    "status": "blocked",
+    "title": "Set a temperature setpoint from Devices"
+  },
+  "US-28": {
+    "status": "partial",
+    "title": "Watch the temperature graph"
+  },
+  "US-29": {
+    "status": "partial",
+    "title": "Per-embryo predicted stages over time"
+  },
+  "US-30": {
+    "status": "partial",
+    "title": "Inspect a perception trace / VLM reasoning"
+  },
+  "US-31": {
+    "status": "gap",
+    "title": "Correct / annotate ground truth"
+  },
+  "US-32": {
+    "status": "gap",
+    "title": "Export data"
+  },
+  "US-33": {
+    "status": "partial",
+    "title": "See learnings / observations"
+  },
+  "US-35": {
+    "status": "gap",
+    "title": "Campaigns (create / view / add sessions)"
+  },
+  "US-36": {
+    "status": "works",
+    "title": "Read the live notebook"
+  },
+  "US-37": {
+    "status": "partial",
+    "title": "Ask the notebook a question"
+  },
+  "US-38": {
+    "status": "partial",
+    "title": "Chat / delegate to the agent"
+  },
+  "US-39": {
+    "status": "blocked",
+    "title": "Answer an agent question (ask flow)"
+  },
+  "US-40": {
+    "status": "partial",
+    "title": "Steer / interrupt the agent"
+  },
+  "US-41": {
+    "status": "works",
+    "title": "Settings: effective config / prefs / advanced"
+  },
+  "US-42": {
+    "status": "partial",
+    "title": "Sessions: list, resume, import"
+  },
+  "US-43": {
+    "status": "gap",
+    "title": "Multi-instance / mesh"
+  },
+  "US-44": {
+    "status": "partial",
+    "title": "Auth: log in / gain control / view-only"
+  }
+}

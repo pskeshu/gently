@@ -155,3 +155,7 @@ gently/ui/tui/dist/
 config/config.local.yml
 config/settings.local.yml
 config/dashboard_defaults.json
+
+# UI crawler generated output
+tools/ui_crawler/out*/
+
