@@ -192,6 +192,19 @@ class VisualizationServer(Service):
         self.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
         self.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+        # Static assets are served live (CLAUDE.md: "refresh the window — served
+        # live by Python, no rebuild"). Default StaticFiles sends ETag +
+        # Last-Modified but no Cache-Control, so browsers apply *heuristic*
+        # freshness and can serve a stale .js/.css after an edit — breaking that
+        # promise. Force revalidation on every load: with the ETag still present
+        # an unchanged file returns a cheap 304, a changed one returns fresh bytes.
+        @self.app.middleware("http")
+        async def _revalidate_static(request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/static"):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
+
         # Add CORS middleware
         self.app.add_middleware(
             CORSMiddleware,

@@ -23,11 +23,28 @@
     <link rel="stylesheet" href="/static/css/operate.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
-    {% if ux_v2 %}
-    {# Agent-first welcome — shown on entry, recedes into the workspace once the
-       user picks a path. Chat is the last resort (the escape pill), not the
-       first thing. Only rendered when the flag is on. #}
+    {% if show_landing %}
+    {# Agent-first welcome — shown on a FRESH entry, recedes into the workspace
+       once the user picks a path. Suppressed when resuming a session or when the
+       session already has work (show_landing computed in the index route) so
+       resuming doesn't bounce back through "what are we doing today?". Chat is
+       the last resort (the escape pill), not the first thing. #}
     <div id="v2-landing" class="v2-landing" data-screen="welcome" aria-label="Welcome to Gently">
+      {# The header's theme toggle is occluded by this full-bleed overlay
+         (z-index 200), so the welcome/plan screens carry their own. Reuses
+         .theme-toggle + .theme-icon (icon-swap + styling) from main.css. #}
+      <button class="theme-toggle v2-landing-theme" id="v2-landing-theme" title="Toggle dark/light mode" aria-label="Toggle theme">
+        <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
       <div class="v2-landing-inner">
 
         {# ── Screen 1: welcome ── #}

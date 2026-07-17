@@ -589,8 +589,11 @@ function renderConnectionUI(s) {
         dot.classList.add('connected');
         text.textContent = 'Connected';
     } else if (s.gentlyConnected) {
+        // Gently is up but the microscope isn't connected. "Online" here read as
+        // "all connected" and hid a disconnected scope — surface the operator's
+        // actual question instead (matches the popover's "Microscope: Offline").
         dot.classList.add('partial');
-        text.textContent = 'Online';
+        text.textContent = 'Scope offline';
     } else {
         text.textContent = 'Offline';
     }
@@ -646,6 +649,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // device-status poll, and the agent /ws/agent). Subscribe the header
     // renderer BEFORE connecting so the first handshake renders correctly.
     ConnectionStatus.subscribe(renderConnectionUI);
+
+    // Instant microscope availability: the single DEVICE_LAYER_AVAILABILITY
+    // signal (emitted by the launcher's device-layer watcher on every state
+    // transition) flips the microscope status the moment the layer attaches or
+    // detaches — no waiting for the 15s /api/device-status poll below, which
+    // stays on as a slow reconciler.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', (d) => {
+            if (d && typeof d.available === 'boolean') {
+                ConnectionStatus.setMicroscope(d.available);
+            }
+        });
+    }
 
     // Start WebSocket connection
     connectWebSocket();

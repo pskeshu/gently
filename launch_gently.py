@@ -250,16 +250,43 @@ async def _attach_microscope(client, store) -> int:
         return 0
 
 
-async def _reconnect_microscope_when_ready(client, viz_server, store) -> None:
-    """Background task (RFC #78 pragmatic reconnect): when a device layer started
-    from the launch gate (or the Devices panel) reaches 'ready', (re)connect the
-    agent's microscope client to it and register its tools — so hardware the gate
-    started becomes usable by the agent without a relaunch. Acts only while the
-    client is disconnected, and registers tools once."""
-    if client is None:
-        return
-    # If already wired up at boot, the boot path registered tools already.
-    tools_registered = bool(client.is_connected)
+async def _watch_device_layer(agent, client, viz_server, store) -> None:
+    """RFC #78 single availability watcher — the one producer of hardware
+    availability that every dependent surface derives from.
+
+    Polls the device-layer supervisor and, on each state *transition*, drives the
+    agent's hardware wiring and emits a DEVICE_LAYER_AVAILABILITY signal:
+
+      · layer usable ('ready' managed, or 'external'):  connect the client if
+        needed, attach the agent (tools + session + live telemetry monitors),
+        announce available — so hardware started mid-session (launch gate, Devices
+        panel, or a separately-run device server) becomes usable without relaunch.
+      · layer down ('stopped'/'crashed'/'failed') or still booting: detach the
+        agent (stop telemetry monitors), disconnect the client, announce
+        unavailable.
+
+    Runs for every session now that the client is always created (even 'offline'),
+    so start/stop from anywhere propagates cleanly instead of dead-ending on a
+    client that was never built."""
+    from gently.core.event_bus import EventType
+
+    def announce(state: str, usable: bool) -> None:
+        try:
+            agent._emit_event(
+                EventType.DEVICE_LAYER_AVAILABILITY,
+                {
+                    "state": state,
+                    "available": bool(usable and client and client.is_connected),
+                    "connected": bool(client and client.is_connected),
+                },
+            )
+        except Exception:
+            _reconnect_log.debug("availability announce failed", exc_info=True)
+
+    prev_state = None
+    # Boot may have already connected + attached (layer up at launch): reflect it
+    # so we don't redundantly re-attach on the first poll.
+    attached = bool(client and client.is_connected)
     while True:
         await asyncio.sleep(2.0)
         sup = getattr(viz_server, "device_supervisor", None) if viz_server else None
@@ -270,25 +297,48 @@ async def _reconnect_microscope_when_ready(client, viz_server, store) -> None:
             state = (await asyncio.to_thread(sup.status)).get("state")
         except Exception:
             continue
-        if state != "ready":
+        if state == prev_state:
             continue
-        # Ensure the client is connected to the now-ready device layer.
-        if not client.is_connected:
-            try:
-                await client.disconnect()  # drop any stale (failed-at-boot) session
-            except Exception:
-                pass
-            try:
-                await client.connect()
-            except Exception as e:
-                _reconnect_log.debug("Microscope reconnect attempt failed: %s", e)
-        # Register microscope tools once — whoever connected the client.
-        if client.is_connected and not tools_registered:
-            n = await _attach_microscope(client, store)
-            _reconnect_log.info(
-                "Microscope client reconnected to the device layer (%d tools registered)", n
-            )
-            tools_registered = True
+        prev_state = state
+
+        usable = state in ("ready", "external")
+        if usable:
+            # Connect the client to the now-usable layer, then attach the agent.
+            if client is not None and not client.is_connected:
+                try:
+                    await client.disconnect()  # drop any stale failed-at-boot session
+                except Exception:
+                    pass
+                try:
+                    await client.connect()
+                except Exception as e:
+                    _reconnect_log.debug("client connect on '%s' failed: %s", state, e)
+            if client is not None and client.is_connected and not attached:
+                try:
+                    await agent.attach_hardware()
+                    attached = True
+                    _reconnect_log.info("Device layer %s — agent attached to hardware", state)
+                except Exception as e:
+                    _reconnect_log.warning("attach_hardware failed: %s", e)
+        else:
+            # Booting or gone — hardware not usable; detach if we were attached.
+            if attached:
+                try:
+                    await agent.detach_hardware()
+                    _reconnect_log.info("Device layer %s — agent detached from hardware", state)
+                except Exception as e:
+                    _reconnect_log.warning("detach_hardware failed: %s", e)
+                attached = False
+            if (
+                client is not None
+                and client.is_connected
+                and state in ("stopped", "crashed", "failed")
+            ):
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+        announce(state, usable)
 
 
 async def main(
@@ -395,35 +445,37 @@ async def main(
     session_name = datetime.now().strftime("%Y%m%d")
     log_file = str(log_dir / f"{session_name}.log")
 
-    # Connect to device layer via hardware module's client factory
-    client = None
-    if not offline:
-        hw = get_hardware()
-        http_url = f"http://{settings.network.device_host}:{settings.network.device_port}"
-        if hasattr(hw, "create_client"):
-            client = hw.create_client(http_url=http_url)
-        else:
-            # Fallback for hardware modules without create_client
-            from gently.app.queue_server_client import QueueServerClient
+    # Always build the microscope client — even when "offline" (RFC #78). The
+    # client is cheap and already tolerates a down device layer: is_connected
+    # stays False, its tools stay in Claude's schema and return clear errors. So
+    # "offline" means DON'T auto-connect at boot, NOT "never build the client".
+    # Building it unconditionally is what lets the single device-layer watcher
+    # attach the agent whenever hardware is started mid-session (launch gate,
+    # Devices panel, or a separately-run device server) — the previous
+    # `client = None` path dead-ended every downstream surface with no recovery.
+    hw = get_hardware()
+    http_url = f"http://{settings.network.device_host}:{settings.network.device_port}"
+    if hasattr(hw, "create_client"):
+        client = hw.create_client(http_url=http_url)
+    else:
+        # Fallback for hardware modules without create_client
+        from gently.app.queue_server_client import QueueServerClient
 
-            client = QueueServerClient(http_url=http_url)
+        client = QueueServerClient(http_url=http_url)
+    if offline:
+        logger.info("Launched offline — microscope client built but not auto-connecting at boot")
+    else:
         connected = await client.connect()
         if not connected:
-            # Keep client object (not None) so microscope tools remain in
-            # Claude's tool schema.  Tools check is_connected at runtime and
-            # return clear error messages. Setting client = None causes all
-            # requires_microscope tools to vanish from the schema, which
-            # makes Claude hallucinate XML tool calls as plain text.
             logger.debug(
-                "Device layer not reachable at %s — microscope tools "
-                "available but will return errors until connected",
+                "Device layer not reachable at %s — microscope tools available but "
+                "will return errors until the layer starts and the watcher attaches",
                 http_url,
             )
 
     # Configure the device session + register microscope tools if the client
     # connected at boot (an already-running device layer). If the device layer is
-    # started later from the launch gate, _reconnect_microscope_when_ready does
-    # this once it reaches 'ready'.
+    # started later, _watch_device_layer attaches the agent once it's usable.
     if client and client.is_connected:
         await _attach_microscope(client, store)
 
@@ -627,10 +679,11 @@ async def main(
             except Exception:
                 logger.debug("Startup rehydrate failed", exc_info=True)
 
-    # Reconnect the microscope client if a device layer is started from the
-    # launch gate / Devices panel after boot (RFC #78 pragmatic reconnect).
-    if client is not None:
-        asyncio.create_task(_reconnect_microscope_when_ready(client, agent.viz_server, store))
+    # Single device-layer availability watcher (RFC #78): attaches/detaches the
+    # agent and announces DEVICE_LAYER_AVAILABILITY as the layer comes and goes.
+    # Always runs now that the client is always created — so starting/stopping the
+    # device layer mid-session propagates to every hardware-dependent surface.
+    asyncio.create_task(_watch_device_layer(agent, client, agent.viz_server, store))
 
     # ── Banner + serve ──────────────────────────────────────────────
     # The viz server runs in-process (uvicorn in a background task). With

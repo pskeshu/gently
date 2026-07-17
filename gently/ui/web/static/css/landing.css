@@ -33,6 +33,16 @@ body.ux-v2[data-theme="light"] .v2-landing-orb { box-shadow: 0 6px 22px rgba(59,
 body.ux-v2[data-theme="light"] .v2-escape-field input:focus { box-shadow: 0 0 0 4px rgba(59,130,246,.12); }
 body.ux-v2[data-theme="light"] .v2-escape-send { box-shadow: 0 6px 16px rgba(59,130,246,.35); }
 
+/* Theme toggle floated in the overlay's top-right — the header's toggle is
+   hidden behind this full-bleed overlay, so the landing carries its own.
+   Positioned against .v2-landing (position:fixed below). */
+.v2-landing-theme {
+    position: absolute;
+    top: 22px;
+    right: 24px;
+    z-index: 3;
+}
+
 .v2-landing {
     position: fixed;
     inset: 0;
