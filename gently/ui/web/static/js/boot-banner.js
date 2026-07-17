@@ -42,9 +42,13 @@ const BootBanner = (function () {
                 if (skip) skip.click(); else landing.classList.add('dismissed');
             }
             if (typeof switchTab === 'function' && typeof TABS !== 'undefined') switchTab(TABS.DEVICES);
+            // The console we just opened IS the details — acknowledge so the
+            // click always has visible feedback (Retry lives on in the
+            // console's Start button; the poll re-shows on a state change).
+            acknowledge();
         });
         _retry.addEventListener('click', onRetry);
-        _close.addEventListener('click', hide);
+        _close.addEventListener('click', acknowledge);
         setPoll(1500);
     }
 
@@ -65,8 +69,18 @@ const BootBanner = (function () {
         }
     }
 
+    // Failure state the user has dismissed (Details or ×). Without this the
+    // poll re-shows the banner every cycle — dismissal never sticks.
+    let _ackedState = null;
+
+    function acknowledge() {
+        _ackedState = _lastState;
+        hide();
+    }
+
     function render(d) {
         const state = d.state;
+        if (state !== _lastState) _ackedState = null; // new state → new banner
 
         // Publish a readiness signal for hardware-only controls to gate on.
         const ready = state === 'ready' || state === 'external';
@@ -97,6 +111,7 @@ const BootBanner = (function () {
                 hide(); // already ready on load, or the ready-flash was dismissed
             }
         } else if (state === 'failed' || state === 'crashed') {
+            if (_ackedState === state) { setPoll(6000); _lastState = state; return; }
             show('failed');
             _text.textContent =
                 (d.failure && d.failure.summary) ||
