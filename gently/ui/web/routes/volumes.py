@@ -6,12 +6,17 @@ import logging
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
+from gently.ui.web.auth import require_control
+
+from ..upload_validation import decode_array_payload
 from ..volume_helpers import image_to_base64_png, load_volume_from_disk
 
 logger = logging.getLogger(__name__)
+
+MAX_VOLUME_UPLOAD_BYTES = 512 * 1024 * 1024
 
 try:
     from PIL import Image
@@ -243,7 +248,7 @@ def create_router(server) -> APIRouter:
 
         raise HTTPException(status_code=404, detail=f"Volume {uid} not found")
 
-    @router.post("/api/volumes3d")
+    @router.post("/api/volumes3d", dependencies=[Depends(require_control)])
     async def push_volume_3d_http(request: Request):
         """Push a 3D volume with segmentation via HTTP (for CV subagent)"""
         try:
@@ -261,13 +266,21 @@ def create_router(server) -> APIRouter:
             if not all([volume_b64, masks_b64, uid, shape]):
                 raise HTTPException(status_code=400, detail="Missing required fields")
 
-            # Decode arrays
-            volume = np.frombuffer(base64.b64decode(volume_b64), dtype=np.dtype(dtype_vol)).reshape(
-                shape
+            # Decode arrays (validates shape/dtype and caps size before allocating)
+            volume = decode_array_payload(
+                volume_b64,
+                shape,
+                dtype_vol,
+                max_nbytes=MAX_VOLUME_UPLOAD_BYTES,
+                label="volume",
             )
 
-            masks = np.frombuffer(base64.b64decode(masks_b64), dtype=np.dtype(dtype_mask)).reshape(
-                shape
+            masks = decode_array_payload(
+                masks_b64,
+                shape,
+                dtype_mask,
+                max_nbytes=MAX_VOLUME_UPLOAD_BYTES,
+                label="masks",
             )
 
             # Push using the existing method
@@ -275,6 +288,8 @@ def create_router(server) -> APIRouter:
 
             return {"status": "ok", "uid": uid, "shape": shape}
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to push 3D volume via HTTP: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
