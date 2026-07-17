@@ -177,6 +177,12 @@ class UISettings:
     # GENTLY_UX_V2=0 until the v1 markup is removed in a later cleanup step.
     ux_v2: bool = field(default_factory=lambda: _env("UX_V2", True))
 
+    # Always-on session replay (rrweb capture + semantic action log) feeding
+    # post-hoc human replay and agent postmortems. GENTLY_REPLAY=0 is the kill
+    # switch: it drops the recorder include and 403s the ingest endpoint; the
+    # player stays available for existing recordings.
+    replay: bool = field(default_factory=lambda: _env("REPLAY", True))
+
 
 @dataclass(frozen=True)
 class Settings:

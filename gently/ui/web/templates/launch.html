@@ -184,5 +184,11 @@ document.getElementById("go").addEventListener("click", async () => {
 
 loadPrefs();
 </script>
+{% if replay_enabled %}
+<!-- Session replay: the gate is part of the session too (which toggles the
+     operator chose, hesitation before Start) — record it like every page. -->
+<script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+<script src="/static/js/replay-recorder.js" defer></script>
+{% endif %}
 </body>
 </html>
