@@ -18,6 +18,13 @@
     box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.45);
     font-size: 0.85rem;
 }
+/* Honor the hidden attribute: `display: flex` above otherwise overrides the UA
+   `[hidden] { display: none }`, so hide() (which sets el.hidden = true) left the
+   pill on screen as a bare dot. Higher specificity than `.boot-banner`, so it
+   wins and the banner fully disappears when hidden. */
+.boot-banner[hidden] {
+    display: none;
+}
 .boot-banner-dot {
     width: 9px;
     height: 9px;
