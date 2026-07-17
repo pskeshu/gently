@@ -97,33 +97,62 @@
     return batch;
   }
 
-  function flush() {
-    if (STATE.disabled) return;
-    var batch = takeBatch();
-    if (!batch) return scheduleFlush();
+  // Stay well under the server's 32MB ingest cap. A single flush that exceeds it
+  // is 413'd and the WHOLE batch is lost — rrweb frames AND the clicks/actions
+  // riding with it — so we split the bulky rrweb stream instead of gambling a
+  // giant POST. (The buffer is capped by event COUNT, not bytes, so batch size
+  // is otherwise unbounded: a big full-snapshot or mutation storm can blow it.)
+  var SAFE_MAX_BYTES = 8 * 1024 * 1024;
+
+  // Send a batch, recursively halving its rrweb array until each POST body is
+  // under SAFE_MAX_BYTES. Actions/gap ride with the FIRST chunk only, so nothing
+  // is dropped and nothing is duplicated.
+  function sendBatch(batch, depth) {
     var body;
     try {
       body = JSON.stringify(batch);
     } catch (e) {
-      return scheduleFlush();
+      return Promise.resolve();
     }
-    fetch(INGEST_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: body,
-      // no keepalive on periodic flushes: keepalive caps bodies at ~64KB
-    })
-      .then(function (r) {
-        if (r.ok) {
-          STATE.failures = 0;
-        } else {
-          onFailure("HTTP " + r.status);
-        }
+    var rrweb = batch.rrweb || [];
+    if (body.length <= SAFE_MAX_BYTES || rrweb.length <= 1 || depth > 12) {
+      return fetch(INGEST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body,
+        // no keepalive on periodic flushes: keepalive caps bodies at ~64KB
       })
-      .catch(function (e) {
-        onFailure(e && e.message);
-      })
-      .then(scheduleFlush);
+        .then(function (r) {
+          if (r.ok) {
+            STATE.failures = 0;
+          } else {
+            onFailure("HTTP " + r.status);
+          }
+        })
+        .catch(function (e) {
+          onFailure(e && e.message);
+        });
+    }
+    // Too big — halve the rrweb stream. First half carries the actions + gap.
+    var mid = Math.floor(rrweb.length / 2);
+    var first = {
+      tab: batch.tab, ts: batch.ts, url: batch.url,
+      rrweb: rrweb.slice(0, mid), actions: batch.actions, gap: batch.gap,
+    };
+    var second = {
+      tab: batch.tab, ts: batch.ts, url: batch.url,
+      rrweb: rrweb.slice(mid), actions: [],
+    };
+    return sendBatch(first, depth + 1).then(function () {
+      return sendBatch(second, depth + 1);
+    });
+  }
+
+  function flush() {
+    if (STATE.disabled) return;
+    var batch = takeBatch();
+    if (!batch) return scheduleFlush();
+    sendBatch(batch, 0).then(scheduleFlush);
   }
 
   function onFailure(why) {
