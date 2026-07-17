@@ -4,12 +4,17 @@ import base64
 import logging
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
+from gently.ui.web.auth import require_control
+
+from ..upload_validation import decode_array_payload
 from ..volume_helpers import parse_volume_uid
 
 logger = logging.getLogger(__name__)
+
+MAX_IMAGE_UPLOAD_BYTES = 64 * 1024 * 1024
 
 
 def create_router(server) -> APIRouter:
@@ -134,7 +139,7 @@ def create_router(server) -> APIRouter:
 
         raise HTTPException(status_code=404, detail=f"Image {uid} not found")
 
-    @router.post("/api/images")
+    @router.post("/api/images", dependencies=[Depends(require_control)])
     async def push_image_http(request: Request):
         """Push a 2D image via HTTP (for CV subagent visualizations)"""
         try:
@@ -151,14 +156,22 @@ def create_router(server) -> APIRouter:
             if not all([image_b64, uid, shape]):
                 raise HTTPException(status_code=400, detail="Missing required fields")
 
-            # Decode array
-            array = np.frombuffer(base64.b64decode(image_b64), dtype=np.dtype(dtype)).reshape(shape)
+            # Decode array (validates shape/dtype and caps size before allocating)
+            array = decode_array_payload(
+                image_b64,
+                shape,
+                dtype,
+                max_nbytes=MAX_IMAGE_UPLOAD_BYTES,
+                label="image",
+            )
 
             # Push using the existing method
             await server.push_image(array, uid, data_type, metadata)
 
             return {"status": "ok", "uid": uid, "data_type": data_type}
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to push image via HTTP: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
