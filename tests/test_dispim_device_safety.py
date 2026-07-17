@@ -27,7 +27,7 @@ class MockCore:
         self._configs = {}  # group -> current_config
         self._available_configs = {}  # group -> [configs]
         self._exposure = 10.0
-        self._camera_device = None
+        self._camera_device = ""
         self._focus_device = None
         self._circular_buffer = []
         self._sequence_running = False
@@ -82,6 +82,9 @@ class MockCore:
 
     def setCameraDevice(self, name):
         self._camera_device = name
+
+    def getCameraDevice(self):
+        return self._camera_device
 
     def setFocusDevice(self, name):
         self._focus_device = name
@@ -229,10 +232,10 @@ def make_z_stage(core=None, limits=(50.0, 250.0)):
     return DiSPIMZstage("ZStage", core or make_core(), limits=limits)
 
 
-def make_xy_stage(core=None, x_limits=(2000.0, 4000.0), y_limits=(-1000.0, 1000.0)):
+def make_xy_stage(core=None):
     from gently.hardware.dispim.devices.stage import DiSPIMXYStage
 
-    return DiSPIMXYStage("XYStage", core or make_core(), x_limits=x_limits, y_limits=y_limits)
+    return DiSPIMXYStage("XYStage", core or make_core())
 
 
 def make_piezo(core=None, limits=(-200.0, 200.0)):
@@ -328,38 +331,40 @@ class TestXYStageBounds:
 
     def test_valid_xy_position(self):
         stage = make_xy_stage()
-        status = stage.set([3000.0, 0.0])
+        x = (stage.x_limits[0] + stage.x_limits[1]) / 2.0
+        y = (stage.y_limits[0] + stage.y_limits[1]) / 2.0
+        status = stage.set([x, y])
         status.wait(timeout=2)
-        assert stage.core._xy_position == (3000.0, 0.0)
+        assert stage.core._xy_position == (x, y)
 
     def test_x_below_lower_limit(self):
         stage = make_xy_stage()
-        status = stage.set([1999.0, 0.0])
-        with pytest.raises(ValueError, match="outside limits"):
+        status = stage.set([stage.x_limits[0] - 1.0, 0.0])
+        with pytest.raises(ValueError, match="outside hardware limits"):
             status.wait(timeout=2)
 
     def test_x_above_upper_limit(self):
         stage = make_xy_stage()
-        status = stage.set([4001.0, 0.0])
-        with pytest.raises(ValueError, match="outside limits"):
+        status = stage.set([stage.x_limits[1] + 1.0, 0.0])
+        with pytest.raises(ValueError, match="outside hardware limits"):
             status.wait(timeout=2)
 
     def test_y_below_lower_limit(self):
         stage = make_xy_stage()
-        status = stage.set([3000.0, -1001.0])
-        with pytest.raises(ValueError, match="outside limits"):
+        status = stage.set([0.0, stage.y_limits[0] - 1.0])
+        with pytest.raises(ValueError, match="outside hardware limits"):
             status.wait(timeout=2)
 
     def test_y_above_upper_limit(self):
         stage = make_xy_stage()
-        status = stage.set([3000.0, 1001.0])
-        with pytest.raises(ValueError, match="outside limits"):
+        status = stage.set([0.0, stage.y_limits[1] + 1.0])
+        with pytest.raises(ValueError, match="outside hardware limits"):
             status.wait(timeout=2)
 
     def test_core_not_called_on_invalid_x(self):
         core = make_core()
         stage = make_xy_stage(core=core)
-        stage.set([0.0, 0.0])  # x=0 is below x_limits[0]=2000
+        stage.set([stage.x_limits[0] - 1.0, 0.0])
         time.sleep(0.1)
         assert not any(c[0] == "setXYPosition" for c in core.call_log)
 

@@ -15,6 +15,14 @@ import sys
 import urllib.error
 import urllib.request
 
+if "pytest" in sys.modules and os.environ.get("GENTLY_RUN_LIVE_CAMPAIGN_TESTS") != "1":
+    import pytest
+
+    pytest.skip(
+        "live campaign coordination script requires a running Gently server",
+        allow_module_level=True,
+    )
+
 BASE = os.environ.get("GENTLY_URL", "http://localhost:8080")
 FAKE_PEER = "test-peer-001"
 FAKE_HOST = "test-machine"

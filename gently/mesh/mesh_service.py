@@ -217,7 +217,7 @@ class MeshService(Service):
 
         # Only fetch status from trusted peers
         if trusted:
-            asyncio.ensure_future(self._fetch_and_update_peer(peer))
+            self._schedule_status_fetch(peer)
 
     def _on_peer_heartbeat(self, instance_id: str, sender_ip: str, verified: bool = False):
         """Called on subsequent heartbeats from a known peer."""
@@ -233,7 +233,7 @@ class MeshService(Service):
         if peer:
             peer.last_seen = time.time()
             peer.ip_address = sender_ip
-            asyncio.ensure_future(self._fetch_and_update_peer(peer))
+            self._schedule_status_fetch(peer)
             logger.debug(f"Mesh: nudge from {peer.hostname} ({peer_id[:8]}), refetching")
 
     def _on_local_status_changed(self, event):
@@ -327,6 +327,20 @@ class MeshService(Service):
             },
         )
 
+    def _schedule_status_fetch(self, peer: PeerInfo) -> None:
+        """Schedule a best-effort peer status fetch when the service is running."""
+        if not self._peer_client:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug(
+                "Mesh: skipping status fetch for %s because no event loop is running",
+                peer.instance_id[:8],
+            )
+            return
+        loop.create_task(self._fetch_and_update_peer(peer))
+
     # ------------------------------------------------------------------
     # Pairing integration
     # ------------------------------------------------------------------
@@ -352,7 +366,7 @@ class MeshService(Service):
                 if cert_fp:
                     peer.tls_enabled = True
             # Kick off an immediate status fetch now that we trust them
-            asyncio.ensure_future(self._fetch_and_update_peer(peer))
+            self._schedule_status_fetch(peer)
             logger.info(f"Mesh: peer {peer.hostname} ({instance_id[:8]}) now trusted")
 
     # ------------------------------------------------------------------
