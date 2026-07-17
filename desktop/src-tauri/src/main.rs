@@ -11,18 +11,28 @@
 // children inherit the job, so when this shell exits or crashes the OS reaps the
 // entire tree. See docs/superpowers/specs/2026-07-02-unified-launcher-design.md.
 //
+// Graceful shutdown (issue #85): on window-close the shell first ASKS the
+// backend to stop (POST /api/shutdown — drains replay ingest, stops the device
+// layer via its clean SIGTERM path), waits briefly for the port to go down,
+// and only then exits — where the kill + Job-close floor still applies as the
+// unchanged crash-safe fallback.
+//
 // Deferred (documented): bundling the Python environment for a redistributable
-// installer (embeddable Python / PyInstaller sidecar), and a graceful backend
-// shutdown handshake before the job hard-kills the tree.
+// installer (embeddable Python / PyInstaller sidecar).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{Manager, RunEvent};
+
+/// True once a graceful shutdown handshake is in flight (or done). A second
+/// close request while true is allowed straight through to the hard path.
+static SHUTTING: AtomicBool = AtomicBool::new(false);
 
 /// Backend process + (Windows) the job that owns its tree, held for the app's
 /// whole lifetime as Tauri managed state.
@@ -52,8 +62,25 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error building the Gently desktop app")
-        .run(|app_handle, event| {
-            if let RunEvent::Exit = event {
+        .run(|app_handle, event| match event {
+            // Window close → graceful backend handshake first (issue #85).
+            // Intercept the close, ask the backend to stop over HTTP, and only
+            // exit once it's down (or the deadline passes). If a handshake is
+            // already in flight (or the user insists with a second close), let
+            // the close proceed to the hard path below.
+            RunEvent::WindowEvent {
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } => {
+                if SHUTTING.load(Ordering::SeqCst) {
+                    return;
+                }
+                SHUTTING.store(true, Ordering::SeqCst);
+                api.prevent_close();
+                let handle = app_handle.clone();
+                std::thread::spawn(move || graceful_shutdown(handle));
+            }
+            RunEvent::Exit => {
                 let b = app_handle.state::<Backend>();
                 // Best-effort direct kill of the child we spawned...
                 // (trailing `;` so the MutexGuard temporary drops before `b` —
@@ -68,7 +95,99 @@ fn main() {
                 #[cfg(windows)]
                 jobkill::close(&b.job);
             }
+            _ => {}
         });
+}
+
+/// The graceful shutdown handshake (issue #85), run off the UI thread.
+///
+/// POST /api/shutdown → 200: backend is draining (device layer stopped via its
+/// SIGTERM path, replay batches flushed) — wait for its port to close, then
+/// exit. 409: an acquisition is running — ask the operator in the webview; on
+/// confirm the PAGE resends with `{"confirm": true}` (same-origin fetch, no
+/// second Rust HTTP path). Any exit still runs the RunEvent::Exit arm, so the
+/// kill + Job-close floor is unchanged.
+fn graceful_shutdown(app: tauri::AppHandle) {
+    let port = viz_port();
+    match post_shutdown(port, false) {
+        Some(200) => {
+            // Backend acknowledged — give it a bounded window to drain + exit.
+            wait_for_port_closed("127.0.0.1", port, 6);
+            app.exit(0);
+        }
+        Some(409) => {
+            // Mid-run guard tripped. Confirm in the webview; the page itself
+            // resends the shutdown with {"confirm": true} if the user agrees.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.eval(
+                    "if(confirm('An acquisition is running — quit anyway?'))\
+                     {fetch('/api/shutdown',{method:'POST',\
+                     headers:{'Content-Type':'application/json'},\
+                     body:JSON.stringify({confirm:true})});}",
+                );
+            }
+            if wait_for_port_closed("127.0.0.1", port, 10) {
+                app.exit(0);
+            } else {
+                // Backend still up — the operator cancelled. Keep the window
+                // open and re-arm the handshake for the next close.
+                SHUTTING.store(false, Ordering::SeqCst);
+            }
+        }
+        // Anything else (backend dead, hung, or an unexpected status): nothing
+        // to hand-shake with — exit now; the Exit arm reaps the tree.
+        _ => {
+            app.exit(0);
+        }
+    }
+}
+
+/// POST /api/shutdown to the local backend over a raw TCP socket — no HTTP
+/// client dependency (style precedent: `wait_for_port` below). Returns the
+/// response status code, or None if the request failed outright.
+fn post_shutdown(port: u16, confirm: bool) -> Option<u16> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let body = if confirm { r#"{"confirm":true}"# } else { "{}" };
+    let req = format!(
+        "POST /api/shutdown HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = [0u8; 512];
+    let n = stream.read(&mut buf).ok()?;
+    // Status line: "HTTP/1.1 200 OK" — the second token is the code.
+    String::from_utf8_lossy(&buf[..n])
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+/// Poll a TCP port until nothing accepts (backend gone), or `secs` elapse.
+/// Returns true if the port closed within the deadline.
+fn wait_for_port_closed(host: &str, port: u16, secs: u64) -> bool {
+    use std::net::TcpStream;
+    let addr: std::net::SocketAddr = match format!("{host}:{port}").parse() {
+        Ok(a) => a,
+        Err(_) => return true,
+    };
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    false
 }
 
 /// Spawn the Python backend, wait for its server, then navigate the window to it.

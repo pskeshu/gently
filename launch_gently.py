@@ -679,6 +679,12 @@ async def main(
         except (ValueError, OSError):
             pass
 
+    # Graceful-shutdown hook for the desktop shell (issue #85): the viz server's
+    # POST /api/shutdown calls this to stop the whole backend, running the same
+    # finally-block teardown as Ctrl-C (thread-safe from any caller).
+    if agent.viz_server is not None:
+        agent.viz_server.request_shutdown = lambda: _loop.call_soon_threadsafe(_stop.set)
+
     try:
         while not _stop.is_set():
             await asyncio.sleep(0.3)
