@@ -463,8 +463,8 @@
                 <div class="devices-header-left">
                     <h2 class="devices-title"><span class="devices-title-script">Device</span> <em class="devices-title-em">state</em></h2>
                     <div class="view-switcher" id="devices-view-switcher">
-                        <button class="view-btn" data-view="operate" title="Operate (o)">Operate</button>
-                        <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
+                        <button class="view-btn active" data-view="operate" title="Operate (o)">Operate</button>
+                        <button class="view-btn" data-view="map" title="XY Map (m)">Map</button>
                         <button class="view-btn" data-view="details" title="Details (d)">Details</button>
                         <button class="view-btn" data-view="optical3d" title="3D volume (v)">3D</button>
                         <button class="view-btn" data-view="manual" title="Manual control">Manual</button>
@@ -524,30 +524,34 @@
 
             <!-- Operate view: guided bottom-cam → SPIM operator surface.
                  Survey & mark all → per-embryo center → lower SPIM → focus → acquire. -->
-            <div class="devices-view devices-view-operate" id="devices-view-operate" style="display:none">
+            <div class="devices-view devices-view-operate" id="devices-view-operate">
               <div class="operate">
 
                 <!-- HEADER — stepper ("you are here") + always-on safety status strip -->
                 <header class="op-head">
-                  <div class="op-stepper" id="op-stepper">
+                  <!-- Every node is a real button: the stepper is navigation, not
+                       decoration. Steps can be revisited in any order — safety comes
+                       from live hardware state (head down, floor distance), never from
+                       step position, so revisiting can't re-arm a forbidden motion. -->
+                  <div class="op-stepper" id="op-stepper" role="tablist" aria-label="Operator steps">
                     <span class="op-phase">Survey</span>
-                    <span class="op-node" data-node="a1">Focus</span>
-                    <span class="op-arrow">→</span>
-                    <span class="op-node" data-node="a2">Mark</span>
+                    <button class="op-node" type="button" data-node="a1">Focus</button>
+                    <span class="op-arrow" aria-hidden="true">→</span>
+                    <button class="op-node" type="button" data-node="a2">Mark</button>
                     <span class="op-phase-div"></span>
                     <span class="op-phase">Run</span>
-                    <span class="op-node" data-node="run">Choose</span>
+                    <button class="op-node" type="button" data-node="run">Choose</button>
                     <span class="op-phase-div"></span>
                     <span class="op-phase">Acquire<b id="op-loop-emb"></b></span>
-                    <span class="op-node" data-node="b1">Center</span>
-                    <span class="op-arrow">→</span>
-                    <span class="op-node" data-node="b2">Lower</span>
-                    <span class="op-arrow">→</span>
-                    <span class="op-node" data-node="b3">Focus</span>
-                    <span class="op-arrow">→</span>
-                    <span class="op-node" data-node="bc">Calibrate</span>
-                    <span class="op-arrow">→</span>
-                    <span class="op-node" data-node="b4">Acquire</span>
+                    <button class="op-node" type="button" data-node="b1">Center</button>
+                    <span class="op-arrow" aria-hidden="true">→</span>
+                    <button class="op-node" type="button" data-node="b2">Lower</button>
+                    <span class="op-arrow" aria-hidden="true">→</span>
+                    <button class="op-node" type="button" data-node="b3">Focus</button>
+                    <span class="op-arrow" aria-hidden="true">→</span>
+                    <button class="op-node" type="button" data-node="bc">Calibrate</button>
+                    <span class="op-arrow" aria-hidden="true">→</span>
+                    <button class="op-node" type="button" data-node="b4">Acquire</button>
                   </div>
                   <div class="op-status">
                     <span class="op-stat"><i>HEAD</i><b id="op-st-head">—</b></span>
@@ -580,21 +584,69 @@
 
                 <!-- RIGHT RAIL — only the active step's control group renders -->
                 <div class="op-rail" id="op-rail" data-active="a1">
-                  <div class="op-rail-head" id="op-rail-head">Focus the bottom objective</div>
+                  <div class="op-rail-top">
+                    <div class="op-rail-head" id="op-rail-head">Focus the bottom objective</div>
+                    <button class="op-cancel" id="op-cancel" type="button"
+                            title="Leave this step (Esc)" aria-label="Leave this step">Cancel</button>
+                  </div>
+
+                  <!-- INSTRUMENT SHELF — lives outside .op-group, so it survives every
+                       step change. Both axes stay live at all times: raising the head is
+                       always one click away, from any step. Ranges are the axis's real
+                       travel limits, reported by the device layer. -->
+                  <div class="op-shelf" id="op-shelf">
+                    <div class="op-gauge" id="op-gauge-bz">
+                      <div class="op-gauge-head">
+                        <span class="op-gauge-name">Bottom&nbsp;focus</span>
+                        <span class="op-gauge-read"><b id="op-bz-pos">—</b><i>µm</i></span>
+                      </div>
+                      <div class="op-gauge-body">
+                        <div class="op-gauge-track" id="op-bz-track">
+                          <div class="op-gauge-mark" id="op-bz-mark"></div>
+                        </div>
+                        <div class="op-gauge-scale">
+                          <span id="op-bz-max">—</span>
+                          <span id="op-bz-min">—</span>
+                        </div>
+                        <div class="op-gauge-nudge" id="op-bz-nudge">
+                          <button class="op-nbtn" data-bz="10" type="button">▲&nbsp;10</button>
+                          <button class="op-nbtn" data-bz="1" type="button">▲&nbsp;1</button>
+                          <button class="op-nbtn" data-bz="-1" type="button">▼&nbsp;1</button>
+                          <button class="op-nbtn" data-bz="-10" type="button">▼&nbsp;10</button>
+                        </div>
+                      </div>
+                      <div class="op-gauge-foot">focus <b id="op-bz-score">—</b></div>
+                    </div>
+
+                    <div class="op-gauge" id="op-gauge-fd">
+                      <div class="op-gauge-head">
+                        <span class="op-gauge-name">SPIM&nbsp;head</span>
+                        <span class="op-gauge-read"><b id="op-fd-pos">—</b><i>µm</i></span>
+                      </div>
+                      <div class="op-gauge-body">
+                        <div class="op-gauge-track" id="op-fd-track">
+                          <div class="op-gauge-floor" id="op-fd-floorband"></div>
+                          <div class="op-gauge-mark" id="op-fd-mark"></div>
+                        </div>
+                        <div class="op-gauge-scale">
+                          <span id="op-fd-max">—</span>
+                          <span id="op-fd-min">—</span>
+                        </div>
+                        <div class="op-gauge-nudge" id="op-fd-nudge">
+                          <button class="op-nbtn" data-fd="100" type="button">▲&nbsp;100</button>
+                          <button class="op-nbtn" data-fd="10" type="button">▲&nbsp;10</button>
+                          <button class="op-nbtn" data-fd="-1" id="op-fd-d1" type="button">▼&nbsp;1</button>
+                          <button class="op-nbtn" data-fd="-10" id="op-fd-d10" type="button">▼&nbsp;10</button>
+                          <button class="op-nbtn" data-fd="-100" id="op-fd-d100" type="button">▼&nbsp;100</button>
+                        </div>
+                      </div>
+                      <div class="op-gauge-foot">to floor <b id="op-fd-floor">—</b> µm</div>
+                    </div>
+                  </div>
 
                   <div class="op-group" data-step="a1">
                     <button class="op-btn" id="op-cam-toggle" type="button">Start camera</button>
-                    <div class="op-field">
-                      <label class="op-label">Bottom focus Z <span class="op-cap" id="op-bz-pos">—</span><span class="op-cap"> µm</span></label>
-                      <div class="op-hud-line">focus score <b id="op-bz-score">—</b></div>
-                      <div class="op-nudge" id="op-bz-nudge">
-                        <button class="op-nbtn" data-bz="-10" type="button">−10</button>
-                        <button class="op-nbtn" data-bz="-1" type="button">−1</button>
-                        <button class="op-nbtn" data-bz="1" type="button">+1</button>
-                        <button class="op-nbtn" data-bz="10" type="button">+10</button>
-                      </div>
-                    </div>
-                    <div class="op-hint">Sharpen the embryos, then mark them.</div>
+                    <div class="op-hint">Sharpen the embryos with the bottom-focus gauge, then mark them.</div>
                     <button class="op-btn op-btn-primary" id="op-tomark" type="button">Mark embryos →</button>
                   </div>
 
@@ -611,17 +663,8 @@
                   </div>
 
                   <div class="op-group" data-step="b2">
-                    <div class="op-field">
-                      <label class="op-label">SPIM head · F-drive <span class="op-cap" id="op-fd-pos">—</span><span class="op-cap"> µm</span></label>
-                      <div class="op-hud-line">distance to floor <b id="op-fd-floor">—</b> µm</div>
-                      <div class="op-nudge op-nudge-2" id="op-fd-nudge">
-                        <button class="op-nbtn" data-fd="-100" id="op-fd-d100" type="button">▼ 100</button>
-                        <button class="op-nbtn" data-fd="-10" id="op-fd-d10" type="button">▼ 10</button>
-                        <button class="op-nbtn" data-fd="10" type="button">▲ 10</button>
-                        <button class="op-nbtn" data-fd="100" type="button">▲ 100</button>
-                      </div>
-                    </div>
-                    <div class="op-hint">▼ lowers toward the sample. Watch the floor gauge.</div>
+                    <div class="op-hint">Lower with ▼ on the SPIM-head gauge. The floor band shows
+                      how much travel is left; steps that would cross it are disabled.</div>
                     <button class="op-btn op-btn-primary" id="op-tofocus" type="button">Focus SPIM →</button>
                   </div>
 
@@ -670,8 +713,8 @@
                     <div class="op-field">
                       <label class="op-label">Run mode</label>
                       <div class="op-modes" id="op-modes">
-                        <label class="op-mode"><input type="radio" name="op-mode" value="manual"><span>Manual one-by-one</span><small>volumes, the B-loop</small></label>
-                        <label class="op-mode"><input type="radio" name="op-mode" value="adaptive" checked><span>Adaptive timelapse</span><small>ongoing, cadence</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="manual" checked><span>Manual one-by-one</span><small>volumes, the B-loop</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="adaptive"><span>Adaptive timelapse</span><small>ongoing, cadence</small></label>
                         <label class="op-mode"><input type="radio" name="op-mode" value="library"><span>From library</span><small>a saved tactic</small></label>
                         <label class="op-mode"><input type="radio" name="op-mode" value="plan"><span>Continue a plan</span><small>a campaign item</small></label>
                         <label class="op-mode"><input type="radio" name="op-mode" value="agent"><span>Hand to agent</span><small>let it compose</small></label>
@@ -724,7 +767,7 @@
             </div>
 
             <!-- Map view: graphical XY position over safe/caution/forbidden zones -->
-            <div class="devices-view devices-view-map" id="devices-view-map">
+            <div class="devices-view devices-view-map" id="devices-view-map" style="display:none">
                 <div class="devices-map-wrap" id="devices-map-wrap">
                     <!-- SVG ground plane -->
                     <svg id="devices-map-svg" class="devices-map-svg" preserveAspectRatio="xMidYMid meet">
@@ -813,51 +856,11 @@
                         </div>
                     </div>
 
-                    <!-- BOTTOM LEFT (above scale bar): bottom-camera live thumbnail -->
-                    <div class="devices-camera-panel" id="devices-camera-panel">
-                        <div class="devices-camera-head">
-                            <span class="devices-camera-title">
-                                <span class="devices-camera-led" id="devices-camera-led"></span>
-                                <span>Bottom camera</span>
-                            </span>
-                            <div class="devices-camera-head-btns">
-                                <button class="devices-camera-expand" id="devices-camera-expand" type="button"
-                                        title="Enlarge view" aria-label="Enlarge bottom-camera view"
-                                        aria-pressed="false">⤢</button>
-                                <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
-                            </div>
-                        </div>
-                        <div class="devices-camera-stage">
-                            <img class="devices-camera-img" id="devices-camera-img" alt="bottom camera live frame">
-                            <!-- Centre reticle. The <g> inside receives the same
-                                 transform as the <img> (re-expressed in viewBox
-                                 units) so it tracks the FOV centre through
-                                 zoom/pan. Transform sits on the inner <g> rather
-                                 than on the SVG element itself, so the renderer
-                                 re-rasterises at the new geometry instead of
-                                 bitmap-scaling 1px strokes. -->
-                            <svg class="devices-camera-crosshair" id="devices-camera-crosshair"
-                                 viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                                <g id="devices-camera-crosshair-group">
-                                    <line x1="0" y1="50" x2="100" y2="50"/>
-                                    <line x1="50" y1="0" x2="50" y2="100"/>
-                                </g>
-                            </svg>
-                            <div class="devices-camera-placeholder" id="devices-camera-placeholder">
-                                <div class="devices-camera-placeholder-icon">
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="3" y="6" width="18" height="13" rx="2"/>
-                                        <circle cx="12" cy="12.5" r="3.6"/>
-                                        <path d="M8 6l1.5-2h5L16 6"/>
-                                    </svg>
-                                </div>
-                                <div class="devices-camera-placeholder-text">Stream off</div>
-                            </div>
-                        </div>
-                        <div class="devices-camera-foot">
-                            <span class="devices-camera-meta" id="devices-camera-meta">—</span>
-                        </div>
-                    </div>
+                    <!-- The bottom-camera thumbnail that used to live here was removed
+                         (2026-07-18). The Map is a spatial view; the live camera belongs
+                         to Operate, which owns the stream lifecycle. Two surfaces painting
+                         the same stream meant a hidden one kept decoding frames and fought
+                         over start/stop. One surface per stream. -->
 
                     <!-- BOTTOM RIGHT: zone key -->
                     <div class="devices-map-legend">

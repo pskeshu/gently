@@ -33,7 +33,20 @@ const OperateManager = (function () {
     let _marking = false;
     const _states = {};              // id -> marked|centered|lowering|focused|imaged
     let _embryos = [];               // canonical EMBRYOS_UPDATE list
-    let _headLowered = false;        // global: is the SPIM head below safe travel?
+    // Is the SPIM head below safe travel? Retract is a RELATIVE move (+100 µm),
+    // so there is no absolute "safe travel" height to derive this from — asking
+    // the hardware cannot answer it. Persist it instead, so the ordinary reaction
+    // to something looking stuck (F5) doesn't come back claiming the head is up
+    // and re-enable an absolute XY move with the objective down.
+    const HEAD_KEY = 'gently.operate.headLowered';
+    function loadHeadLowered() {
+        try { return sessionStorage.getItem(HEAD_KEY) === '1'; } catch (_) { return false; }
+    }
+    function setHeadLowered(v) {
+        _headLowered = !!v;
+        try { sessionStorage.setItem(HEAD_KEY, _headLowered ? '1' : '0'); } catch (_) {}
+    }
+    let _headLowered = loadHeadLowered();
     let _acquiring = false;
 
     // viewport / streams
@@ -48,13 +61,18 @@ const OperateManager = (function () {
     // device telemetry
     let _lastXY = null;              // {X,Y}
     let _fdPos = null, _fdFloor = null;
+    let _bzPos = null;
+    // Real travel limits, reported by the device layer alongside every position.
+    // These drive the gauge tracks; until they arrive a gauge shows its readout
+    // but no marker, rather than inventing a scale.
+    let _bzMin = null, _bzMax = null, _fdMin = null, _fdMax = null;
     let _galvo = 0.0, _piezo = 50.0, _ledOn = false;
 
     // Phase C "Run": _runState null = not in Run; 'choose' = chooser; 'running' = live.
     // Every Run mode emits one tactic scoped to the marked set. _roles maps each
     // embryo to a role ('test'=subject default, 'calibration'=reference).
     let _runState = null;
-    let _runMode = 'adaptive';
+    let _runMode = 'manual';
     const _roles = {};
     let _runMeta = null;             // summary of the active run (for the run-spine)
     let _runPlan = null;             // operation plan {tactics:[]} for the run-spine
@@ -79,7 +97,9 @@ const OperateManager = (function () {
             'op-stepper', 'op-loop-emb', 'op-st-head', 'op-st-floor', 'op-st-led', 'op-st-led-wrap',
             'op-st-laser', 'op-st-laser-wrap', 'op-st-cam', 'op-minimap', 'op-board', 'op-board-count',
             'op-survey-btn', 'op-badge', 'op-cam-stage', 'op-cam-img', 'op-mark-canvas', 'op-cam-ph',
-            'op-rail', 'op-rail-head', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
+            'op-rail', 'op-rail-head', 'op-cancel', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
+            'op-bz-track', 'op-bz-mark', 'op-bz-min', 'op-bz-max', 'op-gauge-fd',
+            'op-fd-track', 'op-fd-mark', 'op-fd-min', 'op-fd-max', 'op-fd-floorband', 'op-fd-d1',
             'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
             'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
             'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus',
@@ -119,6 +139,10 @@ const OperateManager = (function () {
 
     // The single driver — every state change routes through here.
     function renderStep() {
+        // Never drive the hardware or repaint from a hidden view — renderStep
+        // auto-starts the bottom camera at b1 and stops the inactive one, so
+        // running it while another view is on screen fights for the streams.
+        if (!_active) return;
         const step = effectiveStep();
         const cam = cameraForStep(step);
 
@@ -135,23 +159,30 @@ const OperateManager = (function () {
         const st = _selected ? (_states[_selected] || 'marked') : null;
         const rank = st ? STATE_RANK[st] : -1;
         const order = { b1: 0, b2: 1, b3: 2, bc: 3, b4: 4 };
+        // 'is-ahead' replaces the old 'is-locked': a step you have not reached yet
+        // is drawn quieter, but it is still reachable. The only genuinely
+        // unavailable nodes are ones with nothing to act on (no embryos marked)
+        // or while a run owns the hardware.
         D['op-stepper'].querySelectorAll('.op-node').forEach(n => {
             const node = n.dataset.node;
-            n.classList.remove('is-active', 'is-done', 'is-locked');
+            n.classList.remove('is-active', 'is-done', 'is-ahead');
             const active = STEP_NODE[step] === node;
+            if (active) n.classList.add('is-active');
             if (node === 'a1' || node === 'a2') {
-                if (active) n.classList.add('is-active');
-                else if (_embryos.length) n.classList.add('is-done');
+                if (!active && _embryos.length) n.classList.add('is-done');
             } else if (node === 'run') {
-                if (active) n.classList.add('is-active');
-                else if (_embryos.length && _selected) n.classList.add('is-done');
-                else if (!_embryos.length) n.classList.add('is-locked');
+                if (!active && _embryos.length && _selected) n.classList.add('is-done');
+                else if (!active && !_embryos.length) n.classList.add('is-ahead');
             } else {
                 const oi = order[node];
-                if (active) n.classList.add('is-active');
-                else if (rank > oi) n.classList.add('is-done');
-                else if (!_selected || rank < oi) n.classList.add('is-locked');
+                if (!active && rank > oi) n.classList.add('is-done');
+                else if (!active && (!_selected || rank < oi)) n.classList.add('is-ahead');
             }
+            const unavailable = (_runState === 'running')
+                || (node !== 'a1' && node !== 'a2' && !_embryos.length);
+            n.disabled = unavailable;
+            if (active) n.setAttribute('aria-current', 'step');
+            else n.removeAttribute('aria-current');
         });
         if (D['op-loop-emb']) {
             const emb = _embryos.find(e => e.id === _selected);
@@ -209,6 +240,55 @@ const OperateManager = (function () {
         if (!p || !p.jpeg_b64) return;
         D['op-cam-img'].src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
         if (!D['op-cam-img'].classList.contains('has-frame')) { D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none'; }
+    }
+
+    // ── Z instruments ─────────────────────────────────────────────────────
+    // Two travel gauges, always on. Each shows the axis's real range, where in
+    // that range it currently sits, and — for the F-drive — how much travel is
+    // left before the floor. The device layer already returns {position, min,
+    // max, distance_to_floor} on every axis call and every nudge; these readers
+    // just stop throwing min/max away.
+    function absorbAxis(axis, d) {
+        if (!d) return;
+        const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
+        if (axis === 'bz') {
+            if (num(d.position) != null) _bzPos = num(d.position);
+            if (num(d.min) != null) _bzMin = num(d.min);
+            if (num(d.max) != null) _bzMax = num(d.max);
+        } else {
+            if (num(d.position) != null) _fdPos = num(d.position);
+            if (num(d.min) != null) _fdMin = num(d.min);
+            if (num(d.max) != null) _fdMax = num(d.max);
+            if (num(d.distance_to_floor) != null) _fdFloor = num(d.distance_to_floor);
+        }
+        renderGauges();
+    }
+
+    function paintGauge(prefix, pos, min, max) {
+        const read = D[`op-${prefix}-pos`], mark = D[`op-${prefix}-mark`];
+        if (read) read.textContent = pos == null ? '—' : pos.toFixed(1);
+        if (!mark) return;
+        const span = (min == null || max == null) ? null : (max - min);
+        if (pos == null || span == null || !(span > 0)) { mark.style.display = 'none'; return; }
+        mark.style.display = 'block';
+        // Track is drawn max-at-top, so a higher position sits higher.
+        const frac = Math.min(1, Math.max(0, (pos - min) / span));
+        mark.style.bottom = `${(frac * 100).toFixed(2)}%`;
+        if (D[`op-${prefix}-min`]) D[`op-${prefix}-min`].textContent = Math.round(min);
+        if (D[`op-${prefix}-max`]) D[`op-${prefix}-max`].textContent = Math.round(max);
+    }
+
+    function renderGauges() {
+        paintGauge('bz', _bzPos, _bzMin, _bzMax);
+        paintGauge('fd', _fdPos, _fdMin, _fdMax);
+        if (D['op-fd-floor']) D['op-fd-floor'].textContent = _fdFloor == null ? '—' : Math.round(_fdFloor);
+        // No floor band is computed: distance_to_floor is exactly (position -
+        // min), so the floor IS the bottom of the track. The marker's height
+        // above the base already reads as remaining travel. The base line is a
+        // static hard-limit mark in CSS.
+        const g = D['op-gauge-fd'] || document.getElementById('op-gauge-fd');
+        if (g) g.classList.toggle('is-near-floor', _fdFloor != null && _fdFloor < 100);
+        gateFdriveNudges();
     }
 
     // ── status strip ──────────────────────────────────────────────────────
@@ -368,15 +448,18 @@ const OperateManager = (function () {
     }
 
     // ── bottom-cam frames ──────────────────────────────────────────────────
+    // Both frame handlers bail when the view is hidden. Without this a hidden
+    // Operate keeps base64-decoding every frame behind whatever view is on
+    // screen, and races the visible surface for stream ownership.
     function onBottomFrame(p) {
-        if (!p || !p.jpeg_b64) return;
+        if (!_active || !p || !p.jpeg_b64) return;
         _lastFrame = p;
         if (p.focus_score != null) { _bzScore = p.focus_score; if (D['op-bz-score']) D['op-bz-score'].textContent = Number(p.focus_score).toFixed(3); }
         const cam = cameraForStep(effectiveStep());
         if (cam === 'bottom' && !_marking) setImg(p);
     }
     function onLightsheetFrame(p) {
-        if (!p || !p.jpeg_b64) return;
+        if (!_active || !p || !p.jpeg_b64) return;
         _lastSpimFrame = p;
         if (p.focus_score != null) { _spimScore = p.focus_score; if (D['op-spim-score']) D['op-spim-score'].textContent = Number(p.focus_score).toFixed(3); }
         if (cameraForStep(effectiveStep()) === 'spim') setImg(p);
@@ -400,7 +483,7 @@ const OperateManager = (function () {
     }
     async function nudgeBottomZ(delta) {
         if (_marking) { toast('Finish marking first'); return; }
-        try { const d = await postJSON('/api/devices/stage/bottom_z/nudge', { delta }); if (d.position != null) D['op-bz-pos'].textContent = Number(d.position).toFixed(1); }
+        try { absorbAxis('bz', await postJSON('/api/devices/stage/bottom_z/nudge', { delta })); }
         catch (e) { toast(`Bottom-Z nudge blocked (${e.status || e.message})`); }
     }
 
@@ -526,14 +609,13 @@ const OperateManager = (function () {
         // auto-grey down-nudges that would exceed remaining distance-to-floor
         if (D['op-fd-d100']) D['op-fd-d100'].disabled = _fdFloor != null && _fdFloor < 100;
         if (D['op-fd-d10']) D['op-fd-d10'].disabled = _fdFloor != null && _fdFloor < 10;
+        if (D['op-fd-d1']) D['op-fd-d1'].disabled = _fdFloor != null && _fdFloor < 1;
     }
     async function nudgeFdrive(delta) {
         if (delta < 0 && _fdFloor != null && Math.abs(delta) > _fdFloor) { toast('Too close to the floor for that step'); return; }
         try {
-            const d = await postJSON('/api/devices/spim/fdrive/nudge', { delta });
-            if (d.position != null) { _fdPos = d.position; D['op-fd-pos'].textContent = Number(d.position).toFixed(1); }
-            if (d.distance_to_floor != null) { _fdFloor = d.distance_to_floor; D['op-fd-floor'].textContent = Number(d.distance_to_floor).toFixed(0); }
-            if (delta < 0) { _headLowered = true; if (_selected) advanceState(_selected, 'lowering'); }
+            absorbAxis('fd', await postJSON('/api/devices/spim/fdrive/nudge', { delta }));
+            if (delta < 0) { setHeadLowered(true); if (_selected) advanceState(_selected, 'lowering'); }
             renderStep();  // refresh gauge + gates + status
         } catch (e) { toast(`F-drive nudge blocked (${e.status || e.message})`); }
     }
@@ -623,8 +705,16 @@ const OperateManager = (function () {
     async function retractAndAdvance() {
         D['op-retract'].disabled = true;
         try {
-            await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }).catch(() => {});
-            _headLowered = false; _fdFloor = null;
+            // A retract that fails must NOT report the head as up — that is the
+            // state Center trusts before commanding an absolute XY move.
+            try {
+                absorbAxis('fd', await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
+                setHeadLowered(false);
+            } catch (e) {
+                toast(`Retract failed (${e.status || e.message}) — head still down`);
+                renderStep();
+                return;
+            }
             const next = _embryos.find(e => _states[e.id] !== 'imaged');
             if (next) { selectEmbryo(next.id); toast(`Next: embryo ${labelFor(next)}`); }
             else {
@@ -858,6 +948,44 @@ const OperateManager = (function () {
     // ── lifecycle ──────────────────────────────────────────────────────────
     function surveyMore() { _selected = null; _step = null; _runState = null; if (_marking) exitMarking(); renderStep(); }
 
+    // Move the view cursor to a stepper node. Progress (_states) is a record of
+    // what has happened and is never rewound here — only the cursor moves, so
+    // revisiting Center does not un-image an embryo.
+    function gotoNode(node) {
+        if (!node || _runState === 'running') return;
+        if (_marking && node !== 'a2') exitMarking();
+        if (node === 'a1' || node === 'a2') {
+            _selected = null; _runState = null;
+            if (node === 'a2') { if (!enterMarking([])) return; }
+            else _step = null;
+            renderStep(); return;
+        }
+        if (node === 'run') {
+            if (!_embryos.length) { toast('Mark some embryos first'); return; }
+            _selected = null; _step = null; _runState = 'choose'; renderStep(); return;
+        }
+        // A per-embryo step needs an embryo. Fall back to the first unimaged one
+        // rather than refusing, so the node is never a dead click.
+        if (!_selected) {
+            const cand = _embryos.find(e => _states[e.id] !== 'imaged') || _embryos[0];
+            if (!cand) { toast('Mark some embryos first'); return; }
+            _selected = cand.id;
+        }
+        _runState = null;
+        setStep(node);
+    }
+
+    // Leave the current step. Escape and the always-visible Cancel both land
+    // here. Deliberately does NOT touch _headLowered — abandoning a step never
+    // means the objective came back up.
+    function cancelStep() {
+        if (_marking) { exitMarking(); renderStep(); toast('Marking cancelled'); return; }
+        if (_runState === 'running') { toast('Stop the run from the run panel'); return; }
+        if (_runState === 'choose') { _runState = null; renderStep(); return; }
+        if (_selected) { _selected = null; _step = null; renderStep(); toast('Back to survey'); return; }
+        toast('Nothing to leave');
+    }
+
     function wire() {
         if (_wired) return; _wired = true;
         cacheDom();
@@ -881,14 +1009,35 @@ const OperateManager = (function () {
         D['op-acquire'].addEventListener('click', acquireSelected);
         D['op-retract'].addEventListener('click', retractAndAdvance);
         D['op-survey-btn'].addEventListener('click', surveyMore);
-        // Re-enter the Run chooser by clicking the "Run" stepper node — so a
-        // different run mode can be chosen for an already-marked set (e.g. after
-        // a manual sweep). Without this the chooser is a one-time gate.
+        // The stepper is navigation. Any node can be reached in any order, forward
+        // or back. This is safe because nothing here arms a motion: the gates that
+        // matter (Center blocked while the head is down, down-nudges fenced by the
+        // floor) are evaluated against live hardware state in renderStep, not
+        // against how far through the sequence you are. Moving the cursor cannot
+        // un-lower the head or forget the floor.
         if (D['op-stepper']) D['op-stepper'].addEventListener('click', e => {
             const n = e.target.closest('.op-node');
-            if (n && n.dataset.node === 'run' && _embryos.length && !_marking && _runState !== 'running') {
-                _selected = null; _step = null; _runState = 'choose'; renderStep();
-            }
+            if (n) gotoNode(n.dataset.node);
+        });
+        // Arrow keys traverse the stepper once it has focus.
+        if (D['op-stepper']) D['op-stepper'].addEventListener('keydown', e => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            const nodes = [...D['op-stepper'].querySelectorAll('.op-node')];
+            const i = nodes.indexOf(e.target.closest('.op-node'));
+            if (i < 0) return;
+            e.preventDefault();
+            const next = nodes[i + (e.key === 'ArrowRight' ? 1 : -1)];
+            if (next) next.focus();
+        });
+        if (D['op-cancel']) D['op-cancel'].addEventListener('click', cancelStep);
+        // Escape leaves the current step from anywhere in the view.
+        document.addEventListener('keydown', e => {
+            if (!_active || e.key !== 'Escape') return;
+            // e.target is not always an Element (it can be `document`), and
+            // Element.matches does not exist on those — guard before calling it.
+            const t = e.target;
+            if (t instanceof Element && t.matches('input, textarea, select, [contenteditable]')) return;
+            e.preventDefault(); cancelStep();
         });
         // Phase C: Run chooser + run-spine
         document.querySelectorAll('input[name="op-mode"]').forEach(r =>
@@ -907,6 +1056,23 @@ const OperateManager = (function () {
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
                 const pos = p && p.positions; if (!pos) return;
                 if (pos.xy_stage && Array.isArray(pos.xy_stage)) { _lastXY = { X: pos.xy_stage[0], Y: pos.xy_stage[1] }; if (_active) renderMiniMap(); }
+                if (!_active) return;
+                // The device layer publishes F-drive and bottom-Z at 1 Hz tagged
+                // with `kind`, explicitly for this view. Consuming it keeps the
+                // gauges tracking real motion instead of going stale after the
+                // one-shot read on activate.
+                let moved = false;
+                for (const v of Object.values(pos)) {
+                    if (!v || typeof v !== 'object' || v.Position == null) continue;
+                    const val = Number(v.Position);
+                    if (!Number.isFinite(val)) continue;
+                    if (v.kind === 'fdrive') {
+                        _fdPos = val;
+                        if (_fdMin != null) _fdFloor = val - _fdMin;
+                        moved = true;
+                    } else if (v.kind === 'bottom_z') { _bzPos = val; moved = true; }
+                }
+                if (moved) renderGauges();
             });
         }
     }
@@ -915,8 +1081,8 @@ const OperateManager = (function () {
         wire();
         if (_active) return; _active = true;
         try { const s = await getJSON('/api/embryos/current'); onEmbryosUpdate(s); } catch (_) { renderStep(); }
-        try { const b = await getJSON('/api/devices/stage/bottom_z'); if (b.position != null) D['op-bz-pos'].textContent = Number(b.position).toFixed(1); } catch (_) {}
-        try { const f = await getJSON('/api/devices/spim/fdrive'); if (f.position != null) { _fdPos = f.position; D['op-fd-pos'].textContent = Number(f.position).toFixed(1); } if (f.distance_to_floor != null) { _fdFloor = f.distance_to_floor; D['op-fd-floor'].textContent = Number(f.distance_to_floor).toFixed(0); } } catch (_) {}
+        try { absorbAxis('bz', await getJSON('/api/devices/stage/bottom_z')); } catch (_) {}
+        try { absorbAxis('fd', await getJSON('/api/devices/spim/fdrive')); } catch (_) {}
         renderStep();
     }
     function deactivate() {

@@ -4,9 +4,16 @@
    overlaid instruments, and a right rail that shows ONLY the active step's
    controls. Theme-aware via the global tokens. */
 
+/* The Operate grid must respond to the width it actually gets, not the width of
+   the window. With the agent panel open (the default) this container is roughly
+   560px on a 1792px display, which the old fixed 264px/248px side columns
+   overflowed — collapsing the viewport to a sliver and letting the rail overlap
+   it. Side columns are now allowed to shrink, and the stack breakpoint is a
+   container query so it fires on the real available width. */
+.devices-view-operate { container-type: inline-size; container-name: operate; }
 .operate {
     display: grid;
-    grid-template-columns: 264px minmax(0, 1fr) 248px;
+    grid-template-columns: minmax(200px, 264px) minmax(0, 1fr) minmax(206px, 248px);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
         "head head head"
@@ -47,22 +54,31 @@
 .op-phase b { font-weight: 700; color: var(--text); margin-left: 0.35rem; }
 .op-phase-div { width: 1px; height: 16px; background: var(--border-strong); margin: 0 0.3rem; }
 .op-arrow { color: var(--text-muted); font-size: 0.7rem; }
+/* Every node is a <button>: the stepper is navigation, so it reads and behaves
+   like a control. 'is-ahead' means not reached yet — quieter, but reachable. */
 .op-node {
-    font-size: 0.78rem;
-    font-weight: 600;
+    font: 600 0.78rem/1.35 'Inter Tight', system-ui, sans-serif;
     color: var(--text-muted);
-    padding: 0.1rem 0.5rem;
+    padding: 0.16rem 0.55rem;
     border-radius: 999px;
     border: 1px solid transparent;
+    background: transparent;
     white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s, opacity 0.12s;
 }
+.op-node:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+.op-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.op-node:disabled { opacity: 0.3; cursor: not-allowed; }
 .op-node.is-done { color: var(--accent-green); }
 .op-node.is-done::before { content: "✓ "; }
-.op-node.is-active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.op-node.is-locked { opacity: 0.4; }
-/* the Run node is a re-entry point to the chooser once embryos are marked */
-.op-stepper .op-node[data-node="run"]:not(.is-locked) { cursor: pointer; }
-.op-stepper .op-node[data-node="run"]:not(.is-locked):hover { color: var(--accent); }
+.op-node.is-active {
+    color: var(--text);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.op-node.is-ahead { opacity: 0.45; }
+.op-node.is-ahead:hover:not(:disabled) { opacity: 1; }
 
 .op-status {
     display: flex;
@@ -167,7 +183,111 @@
     border-radius: 10px;
     padding: 0.85rem 0.8rem;
 }
+.op-rail-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
 .op-rail-head { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.op-cancel {
+    flex: 0 0 auto;
+    font: 600 0.7rem/1 'Inter Tight', system-ui, sans-serif;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.28rem 0.55rem;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+}
+.op-cancel:hover { color: var(--accent-orange); border-color: var(--accent-orange); }
+.op-cancel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── INSTRUMENT SHELF ──────────────────────────────────────────────────────
+   Two travel gauges that outlive every step. Each is a vertical track scaled to
+   the axis's real limits, with the current position marked on it — so "where am
+   I in Z" is a glance, not a number to interpret. The F-drive additionally
+   carries the floor as a band drawn to scale at the bottom of its travel. */
+.op-shelf {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.6rem 0.55rem;
+    background: color-mix(in srgb, var(--bg-dark) 55%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+/* Feet align across both gauges even though the axes carry different numbers of
+   nudge steps — the foot is pushed to the bottom rather than following content. */
+.op-gauge { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.op-gauge-foot { margin-top: auto; }
+.op-gauge-head { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.op-gauge-name {
+    font-size: 0.63rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.op-gauge-read { display: flex; align-items: baseline; gap: 0.2rem; }
+.op-gauge-read b {
+    font-size: 1.02rem; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.op-gauge-read i { font-style: normal; font-size: 0.63rem; color: var(--text-muted); }
+
+/* Track, scale and steps sit shoulder to shoulder and size to their content —
+   the buttons must not stretch across the panel, or the group stops reading as
+   one instrument. */
+.op-gauge-body {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    justify-content: start;
+    gap: 0.45rem;
+    align-items: stretch;
+}
+.op-gauge-track {
+    position: relative;
+    width: 10px;
+    min-height: 104px;
+    border-radius: 999px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+.op-gauge-mark {
+    /* Hidden until a real position arrives — an unpositioned marker parked at
+       the bottom of the track reads as "the axis is at its limit". */
+    display: none;
+    position: absolute; left: -3px; right: -3px; height: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+    transition: bottom 0.18s ease-out;
+}
+
+/* The floor is the bottom of the travel, so it is a static hard-limit mark, not
+   a computed band. How much room is left is the marker's height above it. */
+.op-gauge-floor {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: var(--accent-orange);
+}
+.op-gauge-scale {
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-size: 0.58rem; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.op-gauge-nudge { display: flex; flex-direction: column; gap: 0.2rem; justify-content: center; }
+.op-gauge-nudge .op-nbtn {
+    flex: 0 0 auto;
+    width: 62px; min-width: 0;
+    padding: 0.22rem 0.3rem;
+    font-size: 0.68rem;
+    text-align: center;
+}
+.op-gauge-foot {
+    font-size: 0.66rem; color: var(--text-muted); font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.op-gauge-foot b { color: var(--text); }
+/* Approaching the floor is the one moment this panel should raise its voice. */
+.op-gauge.is-near-floor .op-gauge-foot b { color: var(--accent-orange); }
+.op-gauge.is-near-floor .op-gauge-track { border-color: var(--accent-orange); }
+
+@media (max-width: 1040px) {
+    .op-shelf { grid-template-columns: 1fr; }
+    .op-gauge-track { min-height: 72px; }
+}
 /* progressive disclosure: only the active step's group renders */
 .op-group { display: none; flex-direction: column; gap: 0.7rem; }
 .op-rail[data-active="a1"] .op-group[data-step="a1"],
@@ -271,7 +391,33 @@
 
 .op-empty { color: var(--text-muted); font-size: 0.78rem; padding: 0.5rem 0.2rem; }
 
-@media (max-width: 1040px) {
-    .operate { grid-template-columns: 1fr; grid-template-rows: auto auto 56vh auto;
-        grid-template-areas: "head" "spine" "stage" "rail"; height: auto; }
+/* Below ~900px of available width the three columns cannot coexist without
+   starving the viewport, so stack them: header, viewport, controls, worklist.
+   The viewport leads — it is the thing being looked at. */
+@container operate (max-width: 900px) {
+    .operate {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(320px, 52vh) auto auto;
+        grid-template-areas: "head" "stage" "rail" "spine";
+        /* The view is a `flex: 1; min-height: 0` child of a scrolling container,
+           so it hands the grid a fixed slice of height and the auto rows get
+           squeezed to nothing. max-content makes the grid size to its rows
+           instead and overflow the view; .devices-container then scrolls. */
+        height: auto;
+        min-height: max-content;
+    }
+    .op-spine, .op-rail {
+        max-height: none;
+        overflow-y: visible;
+        min-height: 0;
+    }
+    /* Side by side once stacked — they are short and the width is there. */
+    .op-shelf { grid-template-columns: 1fr 1fr; }
+}
+/* Fallback for engines without container queries. */
+@supports not (container-type: inline-size) {
+    @media (max-width: 1040px) {
+        .operate { grid-template-columns: 1fr; grid-template-rows: auto auto 56vh auto;
+            grid-template-areas: "head" "spine" "stage" "rail"; height: auto; }
+    }
 }
