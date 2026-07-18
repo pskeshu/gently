@@ -545,7 +545,7 @@
                     <span class="op-phase">Acquire<b id="op-loop-emb"></b></span>
                     <button class="op-node" type="button" data-node="b1">Center</button>
                     <span class="op-arrow" aria-hidden="true">→</span>
-                    <button class="op-node" type="button" data-node="b2">Lower</button>
+                    <button class="op-node" type="button" data-node="b2">Approach</button>
                     <span class="op-arrow" aria-hidden="true">→</span>
                     <button class="op-node" type="button" data-node="b3">Focus</button>
                     <span class="op-arrow" aria-hidden="true">→</span>
@@ -553,23 +553,38 @@
                     <span class="op-arrow" aria-hidden="true">→</span>
                     <button class="op-node" type="button" data-node="b4">Acquire</button>
                   </div>
-                  <div class="op-status">
-                    <span class="op-stat"><i>HEAD</i><b id="op-st-head">—</b></span>
-                    <span class="op-stat"><i>FLOOR</i><b id="op-st-floor">—</b></span>
-                    <span class="op-stat" id="op-st-led-wrap"><i>LED</i><b id="op-st-led">OFF</b></span>
-                    <span class="op-stat" id="op-st-laser-wrap"><i>LASER</i><b id="op-st-laser">OFF</b></span>
-                    <span class="op-stat"><i>CAM</i><b id="op-st-cam">—</b></span>
+                  <!-- Safety strip: the four things that can damage a sample or waste a
+                       run, readable without leaving the step you are on. Each says what
+                       it is, not just a value. -->
+                  <div class="op-status" aria-label="Instrument safety status">
+                    <span class="op-stat" title="Is the sample stage raised toward the SPIM objective? Centering is blocked while it is.">
+                      <i>SAMPLE STAGE</i><b id="op-st-head">—</b></span>
+                    <span class="op-stat" title="Travel left before the sample stage reaches its hard limit.">
+                      <i>TRAVEL LEFT</i><b id="op-st-floor">—</b></span>
+                    <span class="op-stat" id="op-st-led-wrap" title="Brightfield LED. Emitting means the sample is being illuminated.">
+                      <i>LED</i><b id="op-st-led">OFF</b></span>
+                    <span class="op-stat" id="op-st-laser-wrap" title="Excitation laser. Emitting means the sample is being exposed.">
+                      <i>LASER</i><b id="op-st-laser">OFF</b></span>
+                    <span class="op-stat" title="Which camera is streaming right now.">
+                      <i>CAMERA</i><b id="op-st-cam">—</b></span>
                   </div>
                 </header>
 
-                <!-- LEFT SPINE — dish mini-map + the embryo worklist ("the plan") -->
+                <!-- LEFT SPINE — where the embryos are (map) and the list of the ones
+                     marked for imaging. Named for what it holds, not for a metaphor. -->
                 <aside class="op-spine">
+                  <div class="op-board-head"><span>Where they are</span></div>
                   <div class="op-minimap-wrap">
                     <svg class="op-minimap" id="op-minimap" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
                   </div>
-                  <div class="op-board-head"><span>The plan</span><span class="op-board-count" id="op-board-count">0 / 0 imaged</span></div>
-                  <div class="op-board" id="op-board"><div class="op-empty">No embryos yet</div></div>
-                  <button class="op-btn op-btn-ghost op-survey-btn" id="op-survey-btn" type="button">＋ Survey / mark more</button>
+                  <div class="op-board-head">
+                    <span>Marked embryos</span>
+                    <span class="op-board-count" id="op-board-count">0 / 0 imaged</span>
+                  </div>
+                  <div class="op-board" id="op-board">
+                    <div class="op-empty">Nothing marked yet. Focus the bottom camera, then Mark.</div>
+                  </div>
+                  <button class="op-btn op-btn-ghost op-survey-btn" id="op-survey-btn" type="button">＋ Mark more embryos</button>
                 </aside>
 
                 <!-- CENTER — the single live viewport; source + overlays swap per step -->
@@ -620,7 +635,7 @@
 
                     <div class="op-gauge" id="op-gauge-fd">
                       <div class="op-gauge-head">
-                        <span class="op-gauge-name">SPIM&nbsp;head</span>
+                        <span class="op-gauge-name" title="F-drive: raises the sample stage toward the SPIM objective. Lower number = closer.">Sample&nbsp;→&nbsp;objective</span>
                         <span class="op-gauge-read"><b id="op-fd-pos">—</b><i>µm</i></span>
                       </div>
                       <div class="op-gauge-body">
@@ -632,15 +647,12 @@
                           <span id="op-fd-max">—</span>
                           <span id="op-fd-min">—</span>
                         </div>
-                        <div class="op-gauge-nudge" id="op-fd-nudge">
-                          <button class="op-nbtn" data-fd="100" type="button">▲&nbsp;100</button>
-                          <button class="op-nbtn" data-fd="10" type="button">▲&nbsp;10</button>
-                          <button class="op-nbtn" data-fd="-1" id="op-fd-d1" type="button">▼&nbsp;1</button>
-                          <button class="op-nbtn" data-fd="-10" id="op-fd-d10" type="button">▼&nbsp;10</button>
-                          <button class="op-nbtn" data-fd="-100" id="op-fd-d100" type="button">▼&nbsp;100</button>
-                        </div>
+                        <!-- Steps are generated from the current height: coarse while
+                             the sample is far from the objective, fine as it closes in.
+                             See fdriveSteps() in operate.js. -->
+                        <div class="op-gauge-nudge" id="op-fd-nudge"></div>
                       </div>
-                      <div class="op-gauge-foot">to floor <b id="op-fd-floor">—</b> µm</div>
+                      <div class="op-gauge-foot"><span id="op-fd-band">—</span> · <b id="op-fd-floor">—</b> µm left</div>
                     </div>
                   </div>
 
@@ -663,8 +675,9 @@
                   </div>
 
                   <div class="op-group" data-step="b2">
-                    <div class="op-hint">Lower with ▼ on the SPIM-head gauge. The floor band shows
-                      how much travel is left; steps that would cross it are disabled.</div>
+                    <div class="op-hint">▼ moves the sample toward the objective, ▲ backs it away. Step
+                      sizes coarsen or refine with the remaining distance; steps that would
+                      cross the hard limit are disabled.</div>
                     <button class="op-btn op-btn-primary" id="op-tofocus" type="button">Focus SPIM →</button>
                   </div>
 

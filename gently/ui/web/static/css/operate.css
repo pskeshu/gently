@@ -204,9 +204,12 @@
    the axis's real limits, with the current position marked on it — so "where am
    I in Z" is a glance, not a number to interpret. The F-drive additionally
    carries the floor as a band drawn to scale at the bottom of its travel. */
+/* `hidden` must beat the display rules below, or a hidden gauge still renders. */
+.op-shelf[hidden], .op-gauge[hidden] { display: none; }
 .op-shelf {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* Flex, not a 2-column grid: only the axis in play is shown, and the
+       survivor should take the space rather than leave a hole beside it. */
+    display: flex;
     gap: 0.5rem;
     padding: 0.6rem 0.55rem;
     background: color-mix(in srgb, var(--bg-dark) 55%, transparent);
@@ -215,7 +218,7 @@
 }
 /* Feet align across both gauges even though the axes carry different numbers of
    nudge steps — the foot is pushed to the bottom rather than following content. */
-.op-gauge { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.op-gauge { flex: 1 1 0; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
 .op-gauge-foot { margin-top: auto; }
 .op-gauge-head { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .op-gauge-name {
@@ -411,8 +414,6 @@
         overflow-y: visible;
         min-height: 0;
     }
-    /* Side by side once stacked — they are short and the width is there. */
-    .op-shelf { grid-template-columns: 1fr 1fr; }
 }
 /* Fallback for engines without container queries. */
 @supports not (container-type: inline-size) {

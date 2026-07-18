@@ -98,7 +98,7 @@ const OperateManager = (function () {
             'op-st-laser', 'op-st-laser-wrap', 'op-st-cam', 'op-minimap', 'op-board', 'op-board-count',
             'op-survey-btn', 'op-badge', 'op-cam-stage', 'op-cam-img', 'op-mark-canvas', 'op-cam-ph',
             'op-rail', 'op-rail-head', 'op-cancel', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
-            'op-bz-track', 'op-bz-mark', 'op-bz-min', 'op-bz-max', 'op-gauge-fd',
+            'op-bz-track', 'op-bz-mark', 'op-bz-min', 'op-bz-max', 'op-gauge-fd', 'op-shelf', 'op-fd-band',
             'op-fd-track', 'op-fd-mark', 'op-fd-min', 'op-fd-max', 'op-fd-floorband', 'op-fd-d1',
             'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
             'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
@@ -129,8 +129,8 @@ const OperateManager = (function () {
 
     const RAIL_HEADS = {
         a1: 'Focus the bottom objective', a2: 'Mark all embryos',
-        b1: 'Center the embryo', b2: 'Lower the SPIM head', b3: 'Focus the SPIM objective',
-        bc: 'Calibrate piezo-galvo', b4: 'Acquire the volume', b5: 'Retract & advance',
+        b1: 'Center the embryo', b2: 'Approach the objective', b3: 'Focus the SPIM objective',
+        bc: 'Calibrate piezo-galvo', b4: 'Acquire the volume', b5: 'Back off & advance',
         c0: 'Run — choose how to image', running: 'Run — live',
     };
     const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', bc: 'bc', b4: 'b4', b5: 'b4', c0: 'run', running: 'run' };
@@ -219,10 +219,10 @@ const OperateManager = (function () {
 
         // gating
         if (D['op-center']) {
-            if (_headLowered) { D['op-center'].textContent = 'Retract head first'; D['op-center'].disabled = true; }
+            if (isEngaged()) { D['op-center'].textContent = 'Back off the objective first'; D['op-center'].disabled = true; }
             else { D['op-center'].textContent = 'Center stage on embryo'; D['op-center'].disabled = false; }
         }
-        gateFdriveNudges();
+        renderGauges();   // also picks which axis this step may act on
 
         drawOverlay(step);
         renderStatus();
@@ -278,6 +278,55 @@ const OperateManager = (function () {
         if (D[`op-${prefix}-max`]) D[`op-${prefix}-max`].textContent = Math.round(max);
     }
 
+    // The F-drive raises the sample stage toward the SPIM objective, travelling
+    // from ~25000 µm down to a sample that sits around 50–60. Operators do that
+    // in bands: a big jump to ~5000, then thousands, then hundreds, then tens as
+    // it closes in. Offering ±1 at 25000 (2500 clicks) or ±1000 at 200 (a crash)
+    // is useless either way, so the offered steps follow the current height.
+    const FD_BANDS = [
+        { above: 10000, steps: [5000, 1000], label: 'coarse approach' },
+        { above: 2000, steps: [1000, 500], label: 'approach' },
+        { above: 1000, steps: [500, 100], label: 'near sample' },
+        { above: 200, steps: [100, 50], label: 'close' },
+        { above: -Infinity, steps: [50, 10, 5], label: 'fine — at sample' },
+    ];
+    function fdBand(pos) {
+        if (pos == null) return FD_BANDS[FD_BANDS.length - 1];
+        return FD_BANDS.find(b => pos > b.above) || FD_BANDS[FD_BANDS.length - 1];
+    }
+    function renderFdNudges() {
+        const host = D['op-fd-nudge'];
+        if (!host) return;
+        const band = fdBand(_fdPos);
+        const key = band.steps.join(',');
+        if (host.dataset.band !== key) {
+            host.dataset.band = key;
+            // Coarsest outermost, mirroring the bottom-focus stack: ups above,
+            // downs below, both getting finer toward the middle.
+            const ups = band.steps.map(s => `<button class="op-nbtn" data-fd="${s}" type="button">▲&nbsp;${s}</button>`);
+            const downs = [...band.steps].reverse().map(s => `<button class="op-nbtn" data-fd="${-s}" type="button">▼&nbsp;${s}</button>`);
+            host.innerHTML = ups.join('') + downs.join('');
+        }
+        // With no position yet the finest steps are the safe default, but do not
+        // claim to be at the sample — say the position is unknown.
+        if (D['op-fd-band']) D['op-fd-band'].textContent = _fdPos == null ? 'position unknown' : band.label;
+    }
+
+    // The sample can be driven at the controller box, not just from here, so
+    // engagement cannot be inferred from UI clicks alone — a latched flag would
+    // still read "clear" while someone hand-drove the stage up to the objective.
+    // Anything inside this much remaining travel counts as engaged, which is
+    // where XY motion stops being safe.
+    // RIG-NOTE: 1000 µm is the band where operators switch to hundred-µm steps.
+    // Confirm against the real geometry before trusting it on the rig.
+    const ENGAGED_WITHIN_UM = 1000;
+    function engagementFromTelemetry() {
+        if (_fdFloor == null) return null;
+        return _fdFloor < ENGAGED_WITHIN_UM;
+    }
+    // Fail safe: either signal alone is enough to declare engaged.
+    function isEngaged() { return _headLowered || engagementFromTelemetry() === true; }
+
     function renderGauges() {
         paintGauge('bz', _bzPos, _bzMin, _bzMax);
         paintGauge('fd', _fdPos, _fdMin, _fdMax);
@@ -288,13 +337,41 @@ const OperateManager = (function () {
         // static hard-limit mark in CSS.
         const g = D['op-gauge-fd'] || document.getElementById('op-gauge-fd');
         if (g) g.classList.toggle('is-near-floor', _fdFloor != null && _fdFloor < 100);
+        renderFdNudges();
         gateFdriveNudges();
+        showRelevantGauge();
+        // The safety strip reads the same telemetry. Repaint it here or it goes
+        // stale under uncommanded motion — someone driving from the controller
+        // box would watch TRAVEL LEFT sit still while the sample closed in.
+        renderStatus();
+    }
+
+    // Only the axis you can actually act on is shown. During the bottom-camera
+    // steps the SPIM head is not part of the job, and offering its controls
+    // there invites moving the wrong axis; during the SPIM steps the bottom
+    // objective is equally irrelevant. Awareness of the other axis is not lost —
+    // the header safety strip carries HEAD at every step.
+    function showRelevantGauge() {
+        const cam = cameraForStep(effectiveStep());
+        const bz = document.getElementById('op-gauge-bz');
+        const fd = document.getElementById('op-gauge-fd');
+        // 'none' (the Run chooser / live run) owns no axis — show neither.
+        if (bz) bz.hidden = cam !== 'bottom';
+        if (fd) fd.hidden = cam !== 'spim';
+        const shelf = D['op-shelf'] || document.getElementById('op-shelf');
+        if (shelf) shelf.hidden = cam === 'none';
     }
 
     // ── status strip ──────────────────────────────────────────────────────
     function renderStatus() {
-        D['op-st-head'].textContent = _headLowered ? '▼ lowered' : '▲ up';
-        D['op-st-head'].parentElement.classList.toggle('is-down', _headLowered);
+        // Deliberately direction-neutral: the F-drive number falls as the sample
+        // closes on the objective, but which way the hardware physically travels
+        // is not something this layer should assert. What matters is whether the
+        // sample is engaged with the objective, because that blocks XY motion.
+        // Telemetry wins over the latched flag when we have it, and either alone
+        // is enough to lock — never trust "clear" from only one of them.
+        D['op-st-head'].textContent = isEngaged() ? 'engaged — XY locked' : 'clear';
+        D['op-st-head'].parentElement.classList.toggle('is-down', isEngaged());
         D['op-st-floor'].textContent = _fdFloor != null ? `${Math.round(_fdFloor)} µm` : '—';
         D['op-st-led'].textContent = _ledOn ? 'EMITTING' : 'OFF';
         D['op-st-led-wrap'].classList.toggle('is-emitting', _ledOn);
@@ -320,7 +397,13 @@ const OperateManager = (function () {
         const imaged = _embryos.filter(e => _states[e.id] === 'imaged').length;
         D['op-board-count'].textContent = `${imaged} / ${_embryos.length} imaged`;
         D['op-board'].innerHTML = '';
-        if (!_embryos.length) { const e = document.createElement('div'); e.className = 'op-empty'; e.textContent = 'No embryos yet'; D['op-board'].appendChild(e); return; }
+        if (!_embryos.length) {
+            const e = document.createElement('div');
+            e.className = 'op-empty';
+            e.textContent = 'Nothing marked yet. Focus the bottom camera, then Mark.';
+            D['op-board'].appendChild(e);
+            return;
+        }
         _embryos.forEach(emb => {
             const st = _states[emb.id] || 'marked';
             const rank = STATE_RANK[st];
@@ -410,7 +493,6 @@ const OperateManager = (function () {
         if (step === 'a2') return drawMarkers();
         const ctx = canvasCtx();
         if (step === 'b1') drawReticle(ctx);
-        else if (step === 'b2') drawFloorGauge(ctx);
     }
     function drawMarkers() {
         const r = renderedRect(); const ctx = canvasCtx();
@@ -433,20 +515,9 @@ const OperateManager = (function () {
         ctx.fillStyle = 'rgba(34,211,238,0.85)'; ctx.font = '600 10px Inter Tight, sans-serif';
         ctx.fillText('SPIM FOV', cx - bw / 2, cy - bh / 2 - 4);
     }
-    function drawFloorGauge(ctx) {
-        const sb = D['op-mark-canvas']; const pad = 24, h = 26, y = sb.height - pad - h, w = sb.width - 2 * pad, x = pad;
-        const floor = _fdFloor;
-        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, w, h);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
-        // fill: full when far from floor, shrinks toward floor
-        const MAXD = 500;
-        const frac = floor == null ? 0 : Math.max(0, Math.min(1, floor / MAXD));
-        const col = floor == null ? '#555' : floor <= 30 ? '#ef4444' : floor < 150 ? '#fb923c' : '#4ade80';
-        ctx.fillStyle = col; ctx.fillRect(x + 2, y + 2, (w - 4) * frac, h - 4);
-        ctx.fillStyle = '#fff'; ctx.font = '700 13px Inter Tight, sans-serif';
-        ctx.fillText(floor == null ? 'distance to floor —' : `${Math.round(floor)} µm to floor (30 µm hard floor)`, x + 8, y + h - 8);
-    }
-
+    // The viewport no longer draws a floor bar. It hardcoded a 500 µm full-scale
+    // and a literal "30 µm hard floor" caption, so it disagreed with the real
+    // axis limits, and the travel gauge in the rail now shows this properly.
     // ── bottom-cam frames ──────────────────────────────────────────────────
     // Both frame handlers bail when the view is hidden. Without this a hidden
     // Operate keeps base64-decoding every frame behind whatever view is on
@@ -606,10 +677,14 @@ const OperateManager = (function () {
 
     // ── B2 lower (F-drive, fenced) ─────────────────────────────────────────
     function gateFdriveNudges() {
-        // auto-grey down-nudges that would exceed remaining distance-to-floor
-        if (D['op-fd-d100']) D['op-fd-d100'].disabled = _fdFloor != null && _fdFloor < 100;
-        if (D['op-fd-d10']) D['op-fd-d10'].disabled = _fdFloor != null && _fdFloor < 10;
-        if (D['op-fd-d1']) D['op-fd-d1'].disabled = _fdFloor != null && _fdFloor < 1;
+        // Grey any down-step that would drive past the remaining travel. The
+        // buttons are generated per band, so gate whatever is currently there.
+        const host = D['op-fd-nudge'];
+        if (!host) return;
+        host.querySelectorAll('[data-fd]').forEach(b => {
+            const d = Number(b.dataset.fd);
+            b.disabled = d < 0 && _fdFloor != null && Math.abs(d) > _fdFloor;
+        });
     }
     async function nudgeFdrive(delta) {
         if (delta < 0 && _fdFloor != null && Math.abs(delta) > _fdFloor) { toast('Too close to the floor for that step'); return; }
