@@ -1058,18 +1058,11 @@ class EmbryoDataset:
             volume = volume[0]
 
         if volume.ndim == 3:
-            z_depth, height, width = volume.shape
-            # Extract View A (left half) if dual-view format
-            if width > height * 1.5:
-                volume = volume[:, :, : width // 2]
-            # Max projection
+            # View A already selected by the 4D branch above. No aspect-ratio
+            # split: native SPIM frames are 2048x512 and would be halved.
             projection = np.max(volume, axis=0)
         else:
             projection = volume
-            # Extract View A if 2D dual-view
-            height, width = projection.shape
-            if width > height * 1.5:
-                projection = projection[:, : width // 2]
 
         # Normalize and encode
         from gently.core.imaging import image_to_base64, normalize_to_uint8

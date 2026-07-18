@@ -93,10 +93,8 @@ def create_router(server) -> APIRouter:
                             data = data[0]
                         # Handle 3D volumes - generate three-view projection
                         if data.ndim == 3:
-                            z_depth, height, width = data.shape
-                            # Handle dual-view format
-                            if width > height * 2:
-                                data = data[:, :, : width // 2]
+                            # View A already selected by the 4D branch above;
+                            # never split a 3D volume by aspect ratio.
                             # Auto-crop and project
                             bounds = compute_crop_bounds(data)
                             data = apply_crop_bounds(data, bounds)

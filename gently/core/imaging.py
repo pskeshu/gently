@@ -350,11 +350,12 @@ def load_volume(path: Path) -> np.ndarray:
         raise ImportError("tifffile is required for load_volume")
     vol = _tifffile.imread(str(path))
     vol = np.squeeze(vol)
-    if vol.ndim == 3:
-        z_depth, height, width = vol.shape
-        # Extract View A (left half) if dual-view format
-        if width > height * 2:
-            vol = vol[:, :, : width // 2]
+    # A 3D volume is a single view — do NOT split by aspect ratio. Native SPIM
+    # frames are 2048x512 (4:1), so a width-based "dual-view" guess fires on
+    # every real frame and discards half the image. Explicit 4D (Views, Z, Y, X)
+    # volumes are the only real dual-view form; squeeze leaves those at ndim 4.
+    if vol.ndim == 4:
+        vol = vol[0]
     return vol
 
 
