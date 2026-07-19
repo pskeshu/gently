@@ -41,11 +41,10 @@ jobs:
   # anthropic, …) mypy resolves their actual types instead of Any, surfacing
   # genuine mismatches the deps-less run above cannot see. This is what a
   # contributor gets from `uv run mypy .` after `uv sync` (see CONTRIBUTING.md).
-  # Non-blocking for now (continue-on-error) while the remaining deps-only
-  # errors are worked through — flip this to a required gate once it is clean.
+  # Required gate: the deps-only errors have been cleared (issue #63), so a
+  # regression here now fails the workflow like the deps-less run above.
   mypy-strict:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
