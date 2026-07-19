@@ -103,3 +103,95 @@ body.ux-v2 .cx-answer.hidden { display: none; }
 body.ux-v2 .cx-answer-input { flex: 1; min-width: 0; border: 1px solid var(--border, #cbd5e1); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 12px; }
 body.ux-v2 .cx-answer-go { border: 0; background: var(--accent, #2f6df6); color: #fff; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
 body.ux-v2 .cx-empty { font-size: 12.5px; color: var(--text-muted, #94a3b8); font-style: italic; padding: 2px 0 4px; }
+
+/* ── PROCESS CONSOLE ──────────────────────────────────────────────────────
+   Header drawer over the agent + device-layer output. Monospace and dense on
+   purpose: this is a terminal the packaged app otherwise denies you, not a
+   styled log viewer. */
+.logc-open { position: relative; }
+.logc-dot {
+    position: absolute; top: 3px; right: 3px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent-orange);
+    box-shadow: 0 0 0 2px var(--bg-dark);
+}
+
+.logc { position: fixed; inset: 0; z-index: 1200; }
+.logc[hidden] { display: none; }
+.logc-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); }
+.logc-panel {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: min(62vh, 640px);
+    display: flex; flex-direction: column;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-strong);
+    box-shadow: 0 -12px 32px var(--panel-edge-shadow);
+}
+.logc-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+}
+.logc-tabs { display: flex; gap: 0.3rem; }
+.logc-tab {
+    font: 600 0.76rem/1 'Inter Tight', system-ui, sans-serif;
+    color: var(--text-muted);
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    padding: 0.34rem 0.6rem; cursor: pointer;
+    transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.logc-tab:hover { color: var(--text); }
+.logc-tab.is-active {
+    color: var(--text); background: var(--bg-hover); border-color: var(--border);
+}
+.logc-tab:focus-visible, .logc-btn:focus-visible, .logc-level:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.logc-tools { display: flex; align-items: center; gap: 0.35rem; }
+.logc-level {
+    font: 500 0.72rem/1 'Inter Tight', system-ui, sans-serif;
+    color: var(--text); background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.4rem;
+}
+.logc-btn {
+    font: 600 0.72rem/1 'Inter Tight', system-ui, sans-serif;
+    color: var(--text-muted); background: transparent;
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.32rem 0.55rem; cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+}
+.logc-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.logc-btn.is-on { color: var(--accent); border-color: var(--accent); }
+.logc-close { font-size: 0.8rem; line-height: 1; }
+
+.logc-meta {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.68rem; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--border);
+}
+
+.logc-body {
+    flex: 1 1 auto; min-height: 0;
+    margin: 0; padding: 0.6rem 0.85rem;
+    overflow: auto;
+    /* --bg-dark/--text are a matched pair in BOTH themes. --img-bg is not: it
+       stays dark under the light theme, which put dark text on a dark panel. */
+    background: var(--bg-dark);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--text);
+    white-space: pre;
+}
+/* Focused on open so keyboard scrolling works; the ring would otherwise frame
+   the whole panel on every open. */
+.logc-body:focus { outline: none; }
+.logc-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.logc-line { display: block; }
+.logc-line.is-warn { color: var(--accent-orange); }
+.logc-line.is-error { color: var(--accent-red, #ef4444); font-weight: 600; }
+
+@media (max-width: 720px) {
+    .logc-panel { height: 78vh; }
+    .logc-head { flex-wrap: wrap; gap: 0.5rem; }
+}

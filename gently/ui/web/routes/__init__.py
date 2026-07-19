@@ -15,6 +15,7 @@ from .data import create_router as create_data_router
 from .device_layer import create_router as create_device_layer_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
+from .logs import create_router as create_logs_router
 from .notebook import create_router as create_notebook_router
 from .operation_plan import create_router as create_operation_plan_router
 from .pages import create_router as create_pages_router
@@ -37,6 +38,7 @@ def register_all_routes(server):
         create_campaigns_router,
         create_experiments_router,
         create_images_router,
+        create_logs_router,
         create_volumes_router,
         create_data_router,
         create_websocket_router,
