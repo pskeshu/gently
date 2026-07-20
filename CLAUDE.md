@@ -63,8 +63,8 @@ The storage paths throughout this file (`D:\Gently3\...`) are the Windows
 microscope PCs, where `D:` is the dedicated data drive. Off-Windows that default
 is **not an absolute path**: it resolves against the cwd and silently creates a
 junk directory literally named `D:` with session data inside it
-(`gently/settings.py`, tracked as issue #56). Always set an explicit path when
-running on Linux or macOS:
+(`gently/settings.py`). Always set an explicit path when running on Linux or
+macOS:
 
 ```bash
 GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser
@@ -78,9 +78,9 @@ no login gate, and no browser window. The UI is then on `http://localhost:8080`.
 All data lives under `D:\Gently3\` (env: `GENTLY_STORAGE_PATH`). **No SQLite databases.** Everything is human-browsable files.
 
 ### Key store classes
-- **`FileStore`** (`gently/core/file_store.py`) — replaces `GentlyStore`. Manages sessions, embryos, volumes, projections, predictions, traces. Drop-in API replacement.
-- **`FileContextStore`** (`gently/harness/memory/file_store.py`) — replaces `ContextStore` / `agent_mind.db`. Manages campaigns, plans, learnings, observations, agent state. Drop-in API replacement.
-- **Root manifest**: `D:\Gently3\gently.yaml` — documents the structure for humans and agents.
+- **`FileStore`** (`gently/core/file_store.py`) — sessions, embryos, volumes, projections, predictions, traces.
+- **`FileContextStore`** (`gently/harness/memory/file_store.py`) — campaigns, plans, learnings, observations, agent state.
+- **Root manifest**: `gently.yaml` at the storage root — documents the structure for humans and agents.
 
 ### Directory layout
 ```
@@ -136,29 +136,39 @@ D:/Gently3/
   incoming/{uuid}.tif                      # transient device staging
 ```
 
-### Legacy stores (D:\Gently2\ — read-only reference)
-The old SQLite-based stores are preserved but no longer written to:
-- `gently.db` (GentlyStore) — replaced by FileStore
-- `context/agent_mind.db` (ContextStore) — replaced by FileContextStore
-- `D:\gently\dataset.db` — legacy benchmarking DB
+### Superseded stores — do not wire new code to these
+
+The SQLite-era classes are **still in the package and still have passing tests**,
+so they look live. They have no production callers; only `tests/` instantiate
+them. Use the file stores above instead.
+
+- `GentlyStore` (`gently/core/store.py`) → use `FileStore`
+- `ContextStore` (`gently/harness/memory/store.py`, `agent_mind.db`) → use `FileContextStore`
+- `gently/dataset/` still defaults to `D:/gently/dataset.db` (legacy benchmarking DB)
+
+Their data lives under the old `D:\Gently2\` root, read-only reference only.
 
 ## Logging
 
-Both the agent and device layer write logs to `D:\Gently3\logs\`:
+Both the agent and device layer write logs to `<storage root>/logs/`:
 
 - **Agent**: `gently_YYYYMMDD_HHMMSS.log` — INFO+ to file, console level configurable via `-v` flag
 - **Device layer**: `device_layer_YYYYMMDD_HHMMSS.log` — INFO level
 
-To check logs during a session:
+To check logs during a session (the expansion keeps these working off-Windows,
+where the `D:/Gently3` default does not apply — see above):
+
 ```bash
-# Latest agent log
-tail -f D:/Gently3/logs/$(ls -t D:/Gently3/logs/gently_*.log | head -1)
+LOGS="${GENTLY_STORAGE_PATH:-D:/Gently3}/logs"
+
+# Latest agent log  (ls prints the full path — do not prefix $LOGS again)
+tail -f "$(ls -t "$LOGS"/gently_*.log | head -1)"
 
 # Latest device layer log
-tail -f D:/Gently3/logs/$(ls -t D:/Gently3/logs/device_layer_*.log | head -1)
+tail -f "$(ls -t "$LOGS"/device_layer_*.log | head -1)"
 
 # Filter for errors
-grep -E "ERROR|Traceback" D:/Gently3/logs/gently_*.log
+grep -E "ERROR|Traceback" "$LOGS"/gently_*.log
 ```
 
 ## Perception
@@ -215,14 +225,3 @@ the Desktop shortcut points at; rebuild with `npm run build` to refresh it.
 ### Deferred
 Bundling the Python env (torch/anthropic/perception) for a redistributable
 installer — today's build launches the repo's `.venv`, so it's single-machine.
-
-## Debugging Data Sources
-
-- **Agent logs**: `D:\Gently3\logs\gently_*.log`
-- **Device layer logs**: `D:\Gently3\logs\device_layer_*.log`
-- **Perception traces**: `D:\Gently3\sessions\{session}\embryos\{embryo}\traces\` — per-timepoint JSON
-- **Predictions**: `D:\Gently3\sessions\{session}\embryos\{embryo}\predictions.jsonl`
-- **Volume staging**: `D:\Gently3\incoming\`
-- **Agent memory**: `D:\Gently3\agent\` — campaigns, learnings, observations (all YAML)
-- **Session state**: `D:\Gently3\sessions\{session}\session.yaml`
-- **Timelapse state**: `D:\Gently3\sessions\{session}\timelapse.yaml`
