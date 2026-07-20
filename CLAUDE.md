@@ -40,9 +40,8 @@ whichever remote it finds. Pass `--base development --repo gently-project/gently
 
 CONTRIBUTING.md is canonical for the toolchain. The trap it doesn't mention:
 **the pre-commit hook is not installed in a fresh clone**, so commits silently
-bypass ruff and mypy. That is how an unformatted file reached CI on #100. Run
-`pre-commit install` once per clone, then `pre-commit run --all-files` before
-opening a PR.
+bypass ruff and mypy. Run `pre-commit install` once per clone, then
+`pre-commit run --all-files` before opening a PR.
 
 Non-obvious CI behaviour, all in `.github/workflows/lint.yml`:
 
