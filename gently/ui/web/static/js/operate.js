@@ -1,388 +1,121 @@
 /**
- * Operate view — "The Operator Spine".
+ * Operate — three independent instrument surfaces.
  *
- * One guided surface for the bottom-cam → SPIM workflow. A single state driver
- * (`renderStep`) reads the selected embryo + its progress and sets EVERYTHING in
- * lockstep: the header stepper ("you are here"), the always-on safety status
- * strip, the left worklist + dish mini-map, the one live viewport (its camera
- * source + on-image overlays), and which single control group the right rail
- * shows. Exactly one camera and one step are live at a time.
+ *   Bottom cam   see the dish, focus the bottom objective, find embryos
+ *   SPIM head    bring the objectives to height over the sample
+ *   Acquisition  the embryo roster and what to run on it
  *
- * Phase A (no embryo selected): A1 focus bottom objective → A2 mark all (one
- * frozen FOV, positions only) → Confirm into the canonical list.
- * Phase B (per selected embryo): B1 center → B2 lower SPIM head (fenced, floor) →
- * B3 focus SPIM (LED) → B4 acquire → B5 retract & advance.
+ * There are no steps, no phases and no progress ladder. Every pane is fully
+ * live whenever it is visible.
  *
- * Safety: manual fenced nudges only (no autofocus); F-drive floor honored and
- * down-nudges auto-grey near it; XY centering blocked while the head is lowered;
- * 'focused' is earned at B3 (never on a stray F-drive nudge); LED is force-closed
- * on step-leave and view-leave.
+ * THE INVARIANT: no control anywhere reads `_pane`. It is consulted by exactly
+ * two things — render dispatch, and which camera stream owns MMCore. If a
+ * `disabled`, `hidden` or early-return ever starts keying off `_pane`, the step
+ * model has grown back and this rewrite has been undone.
+ *
+ * Gating comes from live hardware state only: the XY interlock (moveStageTo /
+ * OperateMath.isEngaged) and the F-drive floor (OperateMath.stepAllowed).
+ * Selection is a cursor — it parameterises requests and never disables anything.
+ *
+ * Pure geometry, banding and the interlock predicate live in operate-math.js so
+ * they can be unit-tested (tests/js/operate-math.test.mjs).
  */
 const OperateManager = (function () {
-    const BASE_UM_PER_PX = 6.5 / 10.0;   // pixel_size_um / objective_mag
+    const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
     const MARK_HIT_PX = 14;
-    const SVG_NS = 'http://www.w3.org/2000/svg';
-    const ROLE_NEUTRAL = '#8a8f98';
-    const STATE_RANK = { marked: 0, centered: 1, lowering: 2, focused: 3, calibrated: 4, imaged: 5 };
 
     let _wired = false, _active = false;
 
-    // workflow state
-    let _selected = null;            // embryo id, or null = Phase A (survey)
-    let _step = null;                // explicit B-step for the selected embryo
-    let _marking = false;
-    const _states = {};              // id -> marked|centered|lowering|focused|imaged
-    let _embryos = [];               // canonical EMBRYOS_UPDATE list
-    // Is the SPIM head below safe travel? Retract is a RELATIVE move (+100 µm),
-    // so there is no absolute "safe travel" height to derive this from — asking
-    // the hardware cannot answer it. Persist it instead, so the ordinary reaction
-    // to something looking stuck (F5) doesn't come back claiming the head is up
-    // and re-enable an absolute XY move with the objective down.
+    // ── navigation: the ONLY navigation state in this file ──────────────────
+    let _pane = 'bottom';
+
+    // ── session facts (owned by the bus, mirrored here) ─────────────────────
+    let _embryos = [];
+    // A CURSOR, not a step. It parameterises request bodies and readouts. It
+    // must never appear in a `disabled` or visibility expression.
+    let _selected = null;
+
+    // ── device state ────────────────────────────────────────────────────────
+    let _xy = null;                 // {x, y} from DEVICE_STATE_UPDATE
+    // Last bottom-cam frame. Kept because the marking canvas needs its geometry
+    // and capture position; the SPIM frame is only ever displayed, so it isn't.
+    let _lastBottom = null;
+
+    // ── stream ownership, per pane ──────────────────────────────────────────
+    let _bottomOn = false, _bottomWasOn = false;
+    let _spimOn = false, _spimWasOn = false;
+
+    // ── the interlock latch ─────────────────────────────────────────────────
+    // Retract is a RELATIVE move, so there is no absolute "safe height" to
+    // derive this from — asking the hardware cannot answer it. Persist it, so
+    // the ordinary reaction to something looking stuck (F5) doesn't come back
+    // claiming the head is up and re-enable an absolute XY move with the
+    // objective down. Telemetry can still clear it (see OperateMath.isEngaged).
     const HEAD_KEY = 'gently.operate.headLowered';
     function loadHeadLowered() {
         try { return sessionStorage.getItem(HEAD_KEY) === '1'; } catch (_) { return false; }
     }
+    let _headLowered = loadHeadLowered();
     function setHeadLowered(v) {
         _headLowered = !!v;
         try { sessionStorage.setItem(HEAD_KEY, _headLowered ? '1' : '0'); } catch (_) {}
+        renderLock();
     }
-    let _headLowered = loadHeadLowered();
-    let _acquiring = false;
 
-    // viewport / streams
-    let _camOn = false, _spimOn = false, _camStarting = false;
-    let _lastFrame = null;           // last live bottom-cam payload
-    let _lastSpimFrame = null;
-    let _bzScore = null, _spimScore = null;
+    // ── marking ─────────────────────────────────────────────────────────────
+    // Markers are held in STAGE coordinates and re-projected onto whatever frame
+    // is current, so they stay attached to the sample instead of the viewport.
+    // That is what lets marking be always-on rather than a mode you enter.
+    let _markers = [];
 
-    // marking
-    let _frozenSrc = null, _frozenFrame = null, _captureStage = [0, 0], _markers = [];
-
-    // device telemetry
-    let _lastXY = null;              // {X,Y}
-    let _fdPos = null, _fdFloor = null;
-    let _bzPos = null;
-    // Real travel limits, reported by the device layer alongside every position.
-    // These drive the gauge tracks; until they arrive a gauge shows its readout
-    // but no marker, rather than inventing a scale.
-    let _bzMin = null, _bzMax = null, _fdMin = null, _fdMax = null;
-    let _galvo = 0.0, _piezo = 50.0, _ledOn = false;
-
-    // Phase C "Run": _runState null = not in Run; 'choose' = chooser; 'running' = live.
-    // Every Run mode emits one tactic scoped to the marked set. _roles maps each
-    // embryo to a role ('test'=subject default, 'calibration'=reference).
-    let _runState = null;
-    let _runMode = 'manual';
-    const _roles = {};
-    let _runMeta = null;             // summary of the active run (for the run-spine)
-    let _runPlan = null;             // operation plan {tactics:[]} for the run-spine
+    // ── emitters / run ──────────────────────────────────────────────────────
+    let _ledOn = false, _acquiring = false;
+    let _galvo = 0.0, _piezo = 50.0;
+    let _mode = 'single';
+    let _selectedLib = null;
     let _runPaused = false;
-    let _selectedLib = null, _selectedPlan = null;
 
-    // DOM (cached on wire)
-    const D = {};
-
+    // ── primitives ──────────────────────────────────────────────────────────
     function $(id) { return document.getElementById(id); }
     function toast(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m); }
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
 
     async function postJSON(url, body) {
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-        if (!res.ok) { const t = await res.text().catch(() => ''); const e = new Error(`${res.status} ${t}`); e.status = res.status; throw e; }
-        return res.json().catch(() => ({}));
-    }
-    async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(String(r.status)); return r.json(); }
-
-    function cacheDom() {
-        [
-            'op-stepper', 'op-loop-emb', 'op-st-head', 'op-st-floor', 'op-st-led', 'op-st-led-wrap',
-            'op-st-laser', 'op-st-laser-wrap', 'op-st-cam', 'op-minimap', 'op-board', 'op-board-count',
-            'op-survey-btn', 'op-badge', 'op-cam-stage', 'op-cam-img', 'op-mark-canvas', 'op-cam-ph',
-            'op-rail', 'op-rail-head', 'op-cancel', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
-            'op-bz-track', 'op-bz-mark', 'op-bz-min', 'op-bz-max', 'op-gauge-fd', 'op-shelf', 'op-fd-band',
-            'op-fd-track', 'op-fd-mark', 'op-fd-min', 'op-fd-max', 'op-fd-floorband', 'op-fd-d1',
-            'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
-            'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
-            'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus',
-            'op-calibrate', 'op-cal-result', 'op-cal-skip', 'op-acquire', 'op-retract',
-            'op-rolechips', 'op-modes', 'op-panel-adaptive', 'op-panel-library', 'op-panel-plan', 'op-panel-agent',
-            'op-tl-interval', 'op-tl-stop', 'op-tl-condval', 'op-tl-monitor', 'op-lib-list', 'op-plan-list',
-            'op-run-start', 'op-runspine', 'op-run-pause', 'op-run-stop', 'op-run-open',
-        ].forEach(id => { D[id] = $(id); });
-    }
-
-    // ── step model ───────────────────────────────────────────────────────
-    function stepForState(st) {
-        return { marked: 'b1', centered: 'b2', lowering: 'b2', focused: 'bc', calibrated: 'b4', imaged: 'b5' }[st] || 'b1';
-    }
-    function effectiveStep() {
-        if (_marking) return 'a2';
-        if (_runState === 'running') return 'running';
-        if (_runState === 'choose') return 'c0';
-        if (_selected) return _step || 'b1';
-        return 'a1';
-    }
-    function cameraForStep(step) {
-        if (step === 'a1' || step === 'a2' || step === 'b1') return 'bottom';
-        if (step === 'b2' || step === 'b3' || step === 'bc' || step === 'b4' || step === 'b5') return 'spim';
-        return 'none';  // c0 / running are non-camera (the dish map carries context)
-    }
-
-    const RAIL_HEADS = {
-        a1: 'Focus the bottom objective', a2: 'Mark all embryos',
-        b1: 'Center the embryo', b2: 'Approach the objective', b3: 'Focus the SPIM objective',
-        bc: 'Calibrate piezo-galvo', b4: 'Acquire the volume', b5: 'Back off & advance',
-        c0: 'Run — choose how to image', running: 'Run — live',
-    };
-    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', bc: 'bc', b4: 'b4', b5: 'b4', c0: 'run', running: 'run' };
-
-    function setStep(s) { _step = s; renderStep(); }
-
-    // The single driver — every state change routes through here.
-    function renderStep() {
-        // Never drive the hardware or repaint from a hidden view — renderStep
-        // auto-starts the bottom camera at b1 and stops the inactive one, so
-        // running it while another view is on screen fights for the streams.
-        if (!_active) return;
-        const step = effectiveStep();
-        const cam = cameraForStep(step);
-
-        // rail group + head
-        if (D['op-rail']) D['op-rail'].dataset.active = step;
-        if (D['op-rail-head']) {
-            const emb = _embryos.find(e => e.id === _selected);
-            D['op-rail-head'].textContent = emb
-                ? `Embryo ${labelFor(emb)} · ${RAIL_HEADS[step]}`
-                : RAIL_HEADS[step];
-        }
-
-        // stepper nodes (done/active/locked) driven by selected embryo's state
-        const st = _selected ? (_states[_selected] || 'marked') : null;
-        const rank = st ? STATE_RANK[st] : -1;
-        const order = { b1: 0, b2: 1, b3: 2, bc: 3, b4: 4 };
-        // 'is-ahead' replaces the old 'is-locked': a step you have not reached yet
-        // is drawn quieter, but it is still reachable. The only genuinely
-        // unavailable nodes are ones with nothing to act on (no embryos marked)
-        // or while a run owns the hardware.
-        D['op-stepper'].querySelectorAll('.op-node').forEach(n => {
-            const node = n.dataset.node;
-            n.classList.remove('is-active', 'is-done', 'is-ahead');
-            const active = STEP_NODE[step] === node;
-            if (active) n.classList.add('is-active');
-            if (node === 'a1' || node === 'a2') {
-                if (!active && _embryos.length) n.classList.add('is-done');
-            } else if (node === 'run') {
-                if (!active && _embryos.length && _selected) n.classList.add('is-done');
-                else if (!active && !_embryos.length) n.classList.add('is-ahead');
-            } else {
-                const oi = order[node];
-                if (!active && rank > oi) n.classList.add('is-done');
-                else if (!active && (!_selected || rank < oi)) n.classList.add('is-ahead');
-            }
-            const unavailable = (_runState === 'running')
-                || (node !== 'a1' && node !== 'a2' && !_embryos.length);
-            n.disabled = unavailable;
-            if (active) n.setAttribute('aria-current', 'step');
-            else n.removeAttribute('aria-current');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
         });
-        if (D['op-loop-emb']) {
-            const emb = _embryos.find(e => e.id === _selected);
-            const idx = emb ? _embryos.indexOf(emb) + 1 : 0;
-            D['op-loop-emb'].textContent = emb ? ` · ${idx}/${_embryos.length}` : '';
+        const text = await res.text().catch(() => '');
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { /* not JSON */ }
+        if (!res.ok) {
+            const e = new Error(`${res.status} ${data.error || text}`);
+            e.status = res.status;
+            // A fenced nudge answers 400 but still reports where the axis
+            // actually is. Carry the body so the caller can re-absorb it
+            // instead of leaving the gauge stale.
+            e.data = data;
+            throw e;
         }
-
-        // viewport: badge + stop the inactive camera
-        if (D['op-badge']) {
-            D['op-badge'].textContent = cam === 'none'
-                ? RAIL_HEADS[step]
-                : (cam === 'bottom' ? 'Bottom cam' : 'SPIM · side A') + ' — ' + RAIL_HEADS[step].toLowerCase();
-        }
-        ensureInactiveCameraStopped(cam);
-        // B1 (Center) needs a live bottom view but has no Start button (the
-        // chooser stops all cameras) — auto-start it so centering has feedback.
-        if (step === 'b1' && !_camOn && !_camStarting && !_marking) {
-            _camStarting = true;
-            fetch('/api/devices/bottom_camera/stream/start', { method: 'POST' })
-                .then(r => r.json()).then(d => { _camStarting = false; applyCam(!!d.streaming); })
-                .catch(() => { _camStarting = false; });
-        }
-        // show the right frame
-        if (cam === 'bottom' && !_marking && _lastFrame) setImg(_lastFrame);
-        else if (cam === 'spim' && _lastSpimFrame) setImg(_lastSpimFrame);
-        else if (cam === 'spim' && !_spimOn) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'SPIM view off'; }
-        else if (cam === 'bottom' && !_camOn && !_marking) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'Camera off'; }
-        else if (cam === 'none') {
-            D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = '';
-            D['op-cam-ph'].textContent = step === 'running'
-                ? `Run live — ${_embryos.length} embryo${_embryos.length === 1 ? '' : 's'} (see the dish map)`
-                : `${_embryos.length} embryo${_embryos.length === 1 ? '' : 's'} marked — choose how to image`;
-        }
-
-        // gating
-        if (D['op-center']) {
-            if (isEngaged()) { D['op-center'].textContent = 'Back off the objective first'; D['op-center'].disabled = true; }
-            else { D['op-center'].textContent = 'Center stage on embryo'; D['op-center'].disabled = false; }
-        }
-        renderGauges();   // also picks which axis this step may act on
-
-        drawOverlay(step);
-        renderStatus();
-        renderBoard();
-        renderMiniMap();
-        if (step === 'c0') renderChooser();
-        else if (step === 'running') renderRunSpine();
+        return data;
+    }
+    async function getJSON(url) {
+        const res = await fetch(url);
+        const text = await res.text().catch(() => '');
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { /* not JSON */ }
+        if (!res.ok) { const e = new Error(String(res.status)); e.status = res.status; e.data = data; throw e; }
+        return data;
     }
 
-    function ensureInactiveCameraStopped(cam) {
-        if (cam !== 'bottom' && _camOn) { fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {}); applyCam(false); }
-        if (cam !== 'spim' && _spimOn) { fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {}); _spimOn = false; D['op-spim-toggle'].textContent = 'Start view'; D['op-spim-toggle'].classList.remove('op-btn-on'); }
+    function labelFor(emb) {
+        const m = emb && emb.id && String(emb.id).match(/(\d+)/);
+        return m ? m[1] : '?';
     }
-    function setImg(p) {
-        if (!p || !p.jpeg_b64) return;
-        D['op-cam-img'].src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
-        if (!D['op-cam-img'].classList.contains('has-frame')) { D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none'; }
-    }
-
-    // ── Z instruments ─────────────────────────────────────────────────────
-    // Two travel gauges, always on. Each shows the axis's real range, where in
-    // that range it currently sits, and — for the F-drive — how much travel is
-    // left before the floor. The device layer already returns {position, min,
-    // max, distance_to_floor} on every axis call and every nudge; these readers
-    // just stop throwing min/max away.
-    function absorbAxis(axis, d) {
-        if (!d) return;
-        const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
-        if (axis === 'bz') {
-            if (num(d.position) != null) _bzPos = num(d.position);
-            if (num(d.min) != null) _bzMin = num(d.min);
-            if (num(d.max) != null) _bzMax = num(d.max);
-        } else {
-            if (num(d.position) != null) _fdPos = num(d.position);
-            if (num(d.min) != null) _fdMin = num(d.min);
-            if (num(d.max) != null) _fdMax = num(d.max);
-            if (num(d.distance_to_floor) != null) _fdFloor = num(d.distance_to_floor);
-        }
-        renderGauges();
-    }
-
-    function paintGauge(prefix, pos, min, max) {
-        const read = D[`op-${prefix}-pos`], mark = D[`op-${prefix}-mark`];
-        if (read) read.textContent = pos == null ? '—' : pos.toFixed(1);
-        if (!mark) return;
-        const span = (min == null || max == null) ? null : (max - min);
-        if (pos == null || span == null || !(span > 0)) { mark.style.display = 'none'; return; }
-        mark.style.display = 'block';
-        // Track is drawn max-at-top, so a higher position sits higher.
-        const frac = Math.min(1, Math.max(0, (pos - min) / span));
-        mark.style.bottom = `${(frac * 100).toFixed(2)}%`;
-        if (D[`op-${prefix}-min`]) D[`op-${prefix}-min`].textContent = Math.round(min);
-        if (D[`op-${prefix}-max`]) D[`op-${prefix}-max`].textContent = Math.round(max);
-    }
-
-    // The F-drive raises the sample stage toward the SPIM objective, travelling
-    // from ~25000 µm down to a sample that sits around 50–60. Operators do that
-    // in bands: a big jump to ~5000, then thousands, then hundreds, then tens as
-    // it closes in. Offering ±1 at 25000 (2500 clicks) or ±1000 at 200 (a crash)
-    // is useless either way, so the offered steps follow the current height.
-    const FD_BANDS = [
-        { above: 10000, steps: [5000, 1000], label: 'coarse approach' },
-        { above: 2000, steps: [1000, 500], label: 'approach' },
-        { above: 1000, steps: [500, 100], label: 'near sample' },
-        { above: 200, steps: [100, 50], label: 'close' },
-        { above: -Infinity, steps: [50, 10, 5], label: 'fine — at sample' },
-    ];
-    function fdBand(pos) {
-        if (pos == null) return FD_BANDS[FD_BANDS.length - 1];
-        return FD_BANDS.find(b => pos > b.above) || FD_BANDS[FD_BANDS.length - 1];
-    }
-    function renderFdNudges() {
-        const host = D['op-fd-nudge'];
-        if (!host) return;
-        const band = fdBand(_fdPos);
-        const key = band.steps.join(',');
-        if (host.dataset.band !== key) {
-            host.dataset.band = key;
-            // Coarsest outermost, mirroring the bottom-focus stack: ups above,
-            // downs below, both getting finer toward the middle.
-            const ups = band.steps.map(s => `<button class="op-nbtn" data-fd="${s}" type="button">▲&nbsp;${s}</button>`);
-            const downs = [...band.steps].reverse().map(s => `<button class="op-nbtn" data-fd="${-s}" type="button">▼&nbsp;${s}</button>`);
-            host.innerHTML = ups.join('') + downs.join('');
-        }
-        // With no position yet the finest steps are the safe default, but do not
-        // claim to be at the sample — say the position is unknown.
-        if (D['op-fd-band']) D['op-fd-band'].textContent = _fdPos == null ? 'position unknown' : band.label;
-    }
-
-    // The sample can be driven at the controller box, not just from here, so
-    // engagement cannot be inferred from UI clicks alone — a latched flag would
-    // still read "clear" while someone hand-drove the stage up to the objective.
-    // Anything inside this much remaining travel counts as engaged, which is
-    // where XY motion stops being safe.
-    // RIG-NOTE: 1000 µm is the band where operators switch to hundred-µm steps.
-    // Confirm against the real geometry before trusting it on the rig.
-    const ENGAGED_WITHIN_UM = 1000;
-    function engagementFromTelemetry() {
-        if (_fdFloor == null) return null;
-        return _fdFloor < ENGAGED_WITHIN_UM;
-    }
-    // Fail safe: either signal alone is enough to declare engaged.
-    function isEngaged() { return _headLowered || engagementFromTelemetry() === true; }
-
-    function renderGauges() {
-        paintGauge('bz', _bzPos, _bzMin, _bzMax);
-        paintGauge('fd', _fdPos, _fdMin, _fdMax);
-        if (D['op-fd-floor']) D['op-fd-floor'].textContent = _fdFloor == null ? '—' : Math.round(_fdFloor);
-        // No floor band is computed: distance_to_floor is exactly (position -
-        // min), so the floor IS the bottom of the track. The marker's height
-        // above the base already reads as remaining travel. The base line is a
-        // static hard-limit mark in CSS.
-        const g = D['op-gauge-fd'] || document.getElementById('op-gauge-fd');
-        if (g) g.classList.toggle('is-near-floor', _fdFloor != null && _fdFloor < 100);
-        renderFdNudges();
-        gateFdriveNudges();
-        showRelevantGauge();
-        // The safety strip reads the same telemetry. Repaint it here or it goes
-        // stale under uncommanded motion — someone driving from the controller
-        // box would watch TRAVEL LEFT sit still while the sample closed in.
-        renderStatus();
-    }
-
-    // Only the axis you can actually act on is shown. During the bottom-camera
-    // steps the SPIM head is not part of the job, and offering its controls
-    // there invites moving the wrong axis; during the SPIM steps the bottom
-    // objective is equally irrelevant. Awareness of the other axis is not lost —
-    // the header safety strip carries HEAD at every step.
-    function showRelevantGauge() {
-        const cam = cameraForStep(effectiveStep());
-        const bz = document.getElementById('op-gauge-bz');
-        const fd = document.getElementById('op-gauge-fd');
-        // 'none' (the Run chooser / live run) owns no axis — show neither.
-        if (bz) bz.hidden = cam !== 'bottom';
-        if (fd) fd.hidden = cam !== 'spim';
-        const shelf = D['op-shelf'] || document.getElementById('op-shelf');
-        if (shelf) shelf.hidden = cam === 'none';
-    }
-
-    // ── status strip ──────────────────────────────────────────────────────
-    function renderStatus() {
-        // Deliberately direction-neutral: the F-drive number falls as the sample
-        // closes on the objective, but which way the hardware physically travels
-        // is not something this layer should assert. What matters is whether the
-        // sample is engaged with the objective, because that blocks XY motion.
-        // Telemetry wins over the latched flag when we have it, and either alone
-        // is enough to lock — never trust "clear" from only one of them.
-        D['op-st-head'].textContent = isEngaged() ? 'engaged — XY locked' : 'clear';
-        D['op-st-head'].parentElement.classList.toggle('is-down', isEngaged());
-        D['op-st-floor'].textContent = _fdFloor != null ? `${Math.round(_fdFloor)} µm` : '—';
-        D['op-st-led'].textContent = _ledOn ? 'EMITTING' : 'OFF';
-        D['op-st-led-wrap'].classList.toggle('is-emitting', _ledOn);
-        D['op-st-laser'].textContent = _acquiring ? 'EMITTING' : 'OFF';
-        D['op-st-laser-wrap'].classList.toggle('is-emitting', _acquiring);
-        const cam = cameraForStep(effectiveStep());
-        const on = cam === 'bottom' ? _camOn : _spimOn;
-        D['op-st-cam'].textContent = `${cam === 'bottom' ? 'bottom' : 'SPIM'} ${on ? '● live' : '○ off'}`;
-    }
-
-    // ── left spine: worklist + mini-map ────────────────────────────────────
     function resolveXY(emb) {
         const f = emb && emb.position_fine;
         if (f && Number.isFinite(f.x) && Number.isFinite(f.y)) return { x: f.x, y: f.y };
@@ -390,782 +123,1056 @@ const OperateManager = (function () {
         if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) return { x: c.x, y: c.y };
         return null;
     }
-    function labelFor(emb) { const m = emb && emb.id && String(emb.id).match(/(\d+)/); return m ? m[1] : '?'; }
 
-    function renderBoard() {
-        if (!D['op-board']) return;
-        const imaged = _embryos.filter(e => _states[e.id] === 'imaged').length;
-        D['op-board-count'].textContent = `${imaged} / ${_embryos.length} imaged`;
-        D['op-board'].innerHTML = '';
-        if (!_embryos.length) {
-            const e = document.createElement('div');
-            e.className = 'op-empty';
-            e.textContent = 'Nothing marked yet. Focus the bottom camera, then Mark.';
-            D['op-board'].appendChild(e);
-            return;
+    // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
+    // The ONLY caller of /api/devices/stage/move in this file. The server does
+    // NOT interlock XY against the F-drive — routes/data.py validates that x and
+    // y are floats and nothing else — so this predicate is the whole guard.
+    // Do not add a second fetch of this endpoint; grep the URL string before
+    // touching XY motion.
+    async function moveStageTo(x, y, why) {
+        if (isEngaged()) {
+            toast('Sample is at the objective — back it off before moving XY');
+            return false;
         }
-        _embryos.forEach(emb => {
-            const st = _states[emb.id] || 'marked';
-            const rank = STATE_RANK[st];
-            const xy = resolveXY(emb);
-            const row = document.createElement('div');
-            row.className = 'op-brow' + (emb.id === _selected ? ' is-sel' : '');
-            row.addEventListener('click', () => selectEmbryo(emb.id));
-
-            const dot = document.createElement('span');
-            dot.className = 'op-bdot'; dot.textContent = labelFor(emb);
-            if (st === 'imaged') dot.style.background = 'var(--accent-green)';
-            row.appendChild(dot);
-
-            const meta = document.createElement('span'); meta.className = 'op-bmeta';
-            const lab = document.createElement('span'); lab.className = 'op-blabel';
-            lab.textContent = xy ? `(${xy.x.toFixed(0)}, ${xy.y.toFixed(0)})` : `embryo ${labelFor(emb)}`;
-            meta.appendChild(lab);
-            const track = document.createElement('span'); track.className = 'op-track';
-            ['centered', 'lowering', 'focused', 'imaged'].forEach((k, i) => {
-                const t = document.createElement('span'); t.className = 'op-tnode';
-                if (rank >= STATE_RANK[k]) t.classList.add('on-' + k);
-                track.appendChild(t);
-            });
-            meta.appendChild(track);
-            row.appendChild(meta);
-
-            const sc = document.createElement('span'); sc.className = 'op-bstate'; sc.textContent = st;
-            row.appendChild(sc);
-            D['op-board'].appendChild(row);
-        });
-    }
-
-    function renderMiniMap() {
-        const svg = D['op-minimap']; if (!svg) return;
-        while (svg.firstChild) svg.removeChild(svg.firstChild);
-        const pts = _embryos.map(e => resolveXY(e)).filter(Boolean);
-        if (_lastXY) pts.push({ x: _lastXY.X, y: _lastXY.Y });
-        if (!pts.length) return;
-        let xMin = Math.min(...pts.map(p => p.x)), xMax = Math.max(...pts.map(p => p.x));
-        let yMin = Math.min(...pts.map(p => p.y)), yMax = Math.max(...pts.map(p => p.y));
-        const span = Math.max(xMax - xMin, yMax - yMin, 100), padf = span * 0.18;
-        const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2, half = span / 2 + padf;
-        const toX = x => ((x - (cx - half)) / (2 * half)) * 100;
-        const toY = y => 100 - ((y - (cy - half)) / (2 * half)) * 100;  // flip Y (stage +Y up)
-        const r = 2.4;
-        _embryos.forEach(emb => {
-            const xy = resolveXY(emb); if (!xy) return;
-            const st = _states[emb.id] || 'marked';
-            const c = document.createElementNS(SVG_NS, 'circle');
-            c.setAttribute('cx', toX(xy.x)); c.setAttribute('cy', toY(xy.y)); c.setAttribute('r', r);
-            const col = st === 'imaged' ? 'var(--accent-green)' : (st === 'focused' || st === 'calibrated') ? 'var(--accent-orange)'
-                : (st === 'centered' || st === 'lowering') ? 'var(--accent)' : ROLE_NEUTRAL;
-            c.setAttribute('fill', col);
-            if (emb.id === _selected) { c.setAttribute('stroke', 'var(--text)'); c.setAttribute('stroke-width', '1.2'); }
-            svg.appendChild(c);
-        });
-        if (_lastXY) {  // stage crosshair
-            const X = toX(_lastXY.X), Y = toY(_lastXY.Y);
-            [[X - 4, Y, X + 4, Y], [X, Y - 4, X, Y + 4]].forEach(([x1, y1, x2, y2]) => {
-                const l = document.createElementNS(SVG_NS, 'line');
-                l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-                l.setAttribute('stroke', 'var(--accent-cyan)'); l.setAttribute('stroke-width', '0.8');
-                svg.appendChild(l);
-            });
+        try {
+            await postJSON('/api/devices/stage/move', { x, y });
+            if (why) toast(why);
+            return true;
+        } catch (e) {
+            toast(`Move failed (${e.status || e.message})`);
+            return false;
         }
     }
+    function isEngaged() {
+        return M ? M.isEngaged(_headLowered, fd.floor()) : _headLowered;
+    }
 
-    // ── viewport overlays ──────────────────────────────────────────────────
+    // ══ Z INSTRUMENT ════════════════════════════════════════════════════════
+    // One factory, two instances. The axes differ enormously in scale — the
+    // bottom objective has a ~200 µm throw, the F-drive runs 30→25000 µm onto a
+    // sample sitting at ~50 — so the F-drive gets position-banded steps and a
+    // log track, and the bottom axis a fixed ladder on a linear one.
+    function makeZAxis(cfg) {
+        const st = { pos: null, min: null, max: null, floor: null, status: 'unknown' };
+        let busy = false;
+
+        const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
+
+        function absorb(d) {
+            if (!d) return;
+            if (num(d.position) != null) st.pos = num(d.position);
+            if (num(d.min) != null) st.min = num(d.min);
+            if (num(d.max) != null) st.max = num(d.max);
+            if (num(d.distance_to_floor) != null) st.floor = num(d.distance_to_floor);
+            else if (st.pos != null && st.min != null) st.floor = st.pos - st.min;
+            if (st.pos != null) st.status = 'ok';
+            render();
+        }
+        // 1 Hz position stream. Without this the gauge goes stale the moment
+        // someone drives the axis at the controller box instead of from here.
+        function absorbTelemetry(val) {
+            if (!Number.isFinite(val)) return;
+            st.pos = val;
+            if (st.min != null) st.floor = val - st.min;
+            if (st.status !== 'absent') st.status = 'ok';
+            render();
+        }
+        function fail(e) {
+            const msg = String((e && e.data && e.data.error) || (e && e.message) || '');
+            // An axis this rig does not have is a FACT, not an error: the device
+            // layer 503s with "device not found". Render it as absent, quietly.
+            st.status = (e && e.status === 503 && /not found/i.test(msg)) ? 'absent' : 'error';
+            render();
+        }
+
+        function steps() {
+            if (!cfg.bands) return cfg.steps;
+            return (M ? M.fdBand(st.pos) : { steps: cfg.steps }).steps;
+        }
+        function bandLabel() {
+            if (!cfg.bands) return '';
+            if (st.pos == null) return 'position unknown';
+            return (M ? M.fdBand(st.pos).label : '');
+        }
+
+        function renderNudges() {
+            const host = $(cfg.root + '-nudge');
+            if (!host) return;
+            if (st.status === 'absent') { host.innerHTML = ''; host.dataset.band = ''; return; }
+            const s = steps();
+            const key = s.join(',');
+            if (host.dataset.band !== key) {
+                host.dataset.band = key;
+                host.style.gridTemplateColumns = `repeat(${s.length}, minmax(0, 1fr))`;
+                // Ups on the top row, downs on the bottom, columns aligned by
+                // magnitude, so the control maps to the motion.
+                host.innerHTML =
+                    s.map(v => `<button class="op-nbtn" data-nudge="${v}" type="button">▲&nbsp;${v}</button>`).join('') +
+                    s.map(v => `<button class="op-nbtn" data-nudge="${-v}" type="button">▼&nbsp;${v}</button>`).join('');
+            }
+            host.querySelectorAll('[data-nudge]').forEach(b => {
+                const d = Number(b.dataset.nudge);
+                b.disabled = busy || (M ? !M.stepAllowed(d, st.floor) : false);
+            });
+        }
+
+        function renderTicks() {
+            const host = $(cfg.root + '-ticks');
+            if (!host || !cfg.ticks) return;
+            const key = `${st.min},${st.max}`;
+            if (host.dataset.k === key) return;
+            host.dataset.k = key;
+            if (st.status !== 'ok' || st.min == null || st.max == null) { host.innerHTML = ''; return; }
+            host.innerHTML = cfg.ticks
+                .filter(t => t > st.min && t < st.max)
+                .map(t => {
+                    const f = M ? M.gaugeFraction(t, st.min, st.max, cfg.scale) : null;
+                    return f == null ? '' : `<span style="bottom:${(f * 100).toFixed(2)}%">${t}</span>`;
+                }).join('');
+        }
+
+        function render() {
+            const g = $(cfg.gauge);
+            if (g) {
+                g.dataset.status = st.status;
+                g.classList.toggle('is-near-floor',
+                    st.status === 'ok' && st.floor != null && st.floor < 100);
+            }
+            const read = $(cfg.root + '-pos');
+            if (read) {
+                read.textContent = st.status === 'absent' ? 'n/a'
+                    : (st.pos == null ? '—' : st.pos.toFixed(1));
+            }
+            const mark = $(cfg.root + '-mark');
+            // Null fraction means "do not draw a marker" — a marker parked at
+            // the bottom of the track reads as "at the limit", which is a lie
+            // when the truth is that nothing is known yet.
+            const frac = (st.status === 'ok' && M)
+                ? M.gaugeFraction(st.pos, st.min, st.max, cfg.scale) : null;
+            if (mark) {
+                if (frac == null) mark.style.display = 'none';
+                else { mark.style.display = 'block'; mark.style.bottom = `${(frac * 100).toFixed(2)}%`; }
+            }
+            const lo = $(cfg.root + '-min'), hi = $(cfg.root + '-max');
+            if (lo) lo.textContent = st.min == null ? '—' : Math.round(st.min);
+            if (hi) hi.textContent = st.max == null ? '—' : Math.round(st.max);
+
+            const track = $(cfg.root + '-track');
+            if (track) {
+                track.setAttribute('aria-valuetext',
+                    st.status === 'absent' ? 'axis not present'
+                        : st.pos == null ? 'unknown' : `${st.pos.toFixed(1)} micrometres`);
+            }
+            // An absent or unreachable axis says so wherever this gauge has room
+            // for a line of text — the banded axis uses its band caption, the
+            // plain one its foot.
+            const statusText = st.status === 'absent' ? 'axis not present on this rig'
+                : st.status === 'error' ? 'position unavailable' : null;
+            const band = $(cfg.root + '-band');
+            if (band) band.textContent = statusText || bandLabel();
+            const floor = $(cfg.root + '-floor');
+            if (floor) floor.textContent = st.floor == null ? '—' : Math.round(st.floor);
+            const foot = $(cfg.root + '-foot');
+            if (foot) foot.textContent = statusText || '';
+            renderTicks();
+            renderNudges();
+            renderLock();
+        }
+
+        async function nudge(delta) {
+            if (M && !M.stepAllowed(delta, st.floor)) {
+                toast('Too close to the floor for that step');
+                return;
+            }
+            busy = true; renderNudges();
+            try {
+                absorb(await postJSON(cfg.nudge, { delta }));
+                if (cfg.onDown && delta < 0) cfg.onDown();
+                if (cfg.onUp && delta > 0) cfg.onUp(st);
+            } catch (e) {
+                // Even a refused nudge reports the real position — take it.
+                if (e && e.data && e.data.position != null) absorb(e.data);
+                toast(`${cfg.label} nudge blocked (${e.status || e.message})`);
+            } finally { busy = false; renderNudges(); }
+        }
+
+        async function refresh() {
+            try { absorb(await getJSON(cfg.get)); } catch (e) { fail(e); }
+        }
+
+        function wire() {
+            const host = $(cfg.root + '-nudge');
+            if (host) {
+                host.addEventListener('click', e => {
+                    const b = e.target.closest('[data-nudge]');
+                    if (b && !b.disabled) nudge(Number(b.dataset.nudge));
+                });
+            }
+            const track = $(cfg.root + '-track');
+            if (track) {
+                track.addEventListener('keydown', e => {
+                    const s = steps();
+                    const fine = s[s.length - 1], coarse = s[0];
+                    const map = { ArrowUp: fine, ArrowDown: -fine, PageUp: coarse, PageDown: -coarse };
+                    if (map[e.key] == null) return;
+                    e.preventDefault();
+                    nudge(map[e.key]);
+                });
+            }
+        }
+
+        return {
+            wire, refresh, absorb, absorbTelemetry, render, nudge,
+            floor: () => st.floor,
+            status: () => st.status,
+        };
+    }
+
+    const bz = makeZAxis({
+        root: 'op-bz', gauge: 'op-gauge-bz', label: 'Bottom-Z',
+        get: '/api/devices/stage/bottom_z',
+        nudge: '/api/devices/stage/bottom_z/nudge',
+        steps: [10, 1], scale: 'linear', bands: false,
+    });
+    const fd = makeZAxis({
+        root: 'op-fd', gauge: 'op-gauge-fd', label: 'F-drive',
+        get: '/api/devices/spim/fdrive',
+        nudge: '/api/devices/spim/fdrive/nudge',
+        bands: true, scale: 'log', ticks: [100, 1000, 10000],
+        steps: [50, 10, 5],
+        onDown: () => setHeadLowered(true),
+    });
+
+    // ══ THE INTERLOCK, MADE VISIBLE ═════════════════════════════════════════
+    // Enforcement alone is not enough: with click-to-center always available,
+    // the operator must be able to see WHY a click will not do anything. The
+    // affordance withdraws itself (locked cursor) and the banner says so.
+    function renderLock() {
+        const eng = isEngaged();
+        const d = fd.floor();
+        ['bottom', 'spim'].forEach(p => {
+            const el = $(`op-lock-${p}`);
+            if (el) el.hidden = !eng;
+            const dd = $(`op-lock-${p}-d`);
+            if (dd) dd.textContent = d == null ? '—' : Math.round(d);
+        });
+        const cam = $('op-cam-bottom');
+        if (cam) cam.classList.toggle('is-locked', eng);
+        drawMarkers();
+    }
+    // Always reachable, unlike the old design where clearing the latch lived on
+    // a step you might never arrive at — lower the head, never reach it, and XY
+    // stayed locked forever with no escape short of clearing sessionStorage.
+    async function backOff() {
+        try {
+            fd.absorb(await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
+            // A retract that FAILS must not report the head as up: that is the
+            // state the XY chokepoint trusts before commanding an absolute move.
+            setHeadLowered(false);
+            toast('Backed off 100 µm');
+        } catch (e) {
+            if (e && e.data && e.data.position != null) fd.absorb(e.data);
+            toast(`Back-off failed (${e.status || e.message}) — head still down`);
+        }
+    }
+
+    // ══ VIEWPORT ════════════════════════════════════════════════════════════
+    function frameOf(p) {
+        if (!p || !Array.isArray(p.shape)) return null;
+        return { w: p.shape[1], h: p.shape[0], downsample: p.downsample || 1 };
+    }
+    function stageOf(p) {
+        if (p && Array.isArray(p.stage_position) && p.stage_position.length === 2) return p.stage_position;
+        // The device layer OMITS stage_position rather than defaulting it to
+        // [0,0] when it cannot know it. Honour that: fall back to the position
+        // stream, never to the origin.
+        if (_xy && Number.isFinite(_xy.x) && Number.isFinite(_xy.y)) return [_xy.x, _xy.y];
+        return null;
+    }
+    function setImg(imgId, phId, p) {
+        const img = $(imgId), ph = $(phId);
+        if (!img || !p || !p.jpeg_b64) return;
+        img.src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
+        if (!img.classList.contains('has-frame')) {
+            img.classList.add('has-frame');
+            if (ph) ph.style.display = 'none';
+        }
+    }
+    function clearImg(imgId, phId, text) {
+        const img = $(imgId), ph = $(phId);
+        if (img) img.classList.remove('has-frame');
+        if (ph) { ph.style.display = ''; if (text) ph.textContent = text; }
+    }
+
+    // Letterbox geometry for an object-fit: contain image, in CSS pixels.
+    // Measured off the CANVAS, not its host: it is the element being drawn into,
+    // and using one source for geometry and for the backing store keeps them
+    // from disagreeing.
     function renderedRect() {
-        const sb = D['op-cam-stage'].getBoundingClientRect();
-        const fw = _frozenFrame ? _frozenFrame.w : (_lastFrame ? _lastFrame.shape[1] : sb.width);
-        const fh = _frozenFrame ? _frozenFrame.h : (_lastFrame ? _lastFrame.shape[0] : sb.height);
+        const c = $('op-mark-canvas');
+        if (!c) return null;
+        const sb = c.getBoundingClientRect();
+        if (!(sb.width > 0 && sb.height > 0)) return null;
+        const f = frameOf(_lastBottom);
+        const fw = f ? f.w : sb.width, fh = f ? f.h : sb.height;
         const ar = fw / fh, sar = sb.width / sb.height;
         let w, h;
-        if (ar > sar) { w = sb.width; h = sb.width / ar; } else { h = sb.height; w = sb.height * ar; }
+        if (ar > sar) { w = sb.width; h = sb.width / ar; }
+        else { h = sb.height; w = sb.height * ar; }
         return { x: (sb.width - w) / 2, y: (sb.height - h) / 2, w, h, fw, fh, sb };
     }
     function canvasCtx() {
-        const sb = D['op-cam-stage'].getBoundingClientRect();
-        D['op-mark-canvas'].width = Math.round(sb.width); D['op-mark-canvas'].height = Math.round(sb.height);
-        const ctx = D['op-mark-canvas'].getContext('2d');
-        ctx.clearRect(0, 0, D['op-mark-canvas'].width, D['op-mark-canvas'].height);
+        const c = $('op-mark-canvas');
+        if (!c) return null;
+        const r = c.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0)) return null;
+        // The backing store must track the CSS box or everything drawn is
+        // scaled — a stale height renders circles as ellipses. Scaling by dpr
+        // keeps it crisp on fractional-ratio displays; the transform then lets
+        // every drawing call stay in CSS pixels.
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+        const ctx = c.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, r.width, r.height);
         return ctx;
     }
-    function drawOverlay(step) {
-        if (!D['op-mark-canvas']) return;
-        if (step === 'a2') return drawMarkers();
-        const ctx = canvasCtx();
-        if (step === 'b1') drawReticle(ctx);
+    // Project a stage-space marker onto the current frame, then onto the canvas.
+    function markerToCanvas(m, r) {
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        if (!f || !cap || !M) return null;
+        const px = M.stageToFrame(m.stageX, m.stageY, f, cap);
+        if (!px) return null;
+        return { cx: r.x + (px[0] / r.fw) * r.w, cy: r.y + (px[1] / r.fh) * r.h, px };
     }
+    // Registered embryos, projected onto the current frame. These are the
+    // click-to-center targets; pending markers are a separate, editable set.
+    function embryoPoints(r) {
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        if (!f || !cap || !M) return [];
+        const out = [];
+        _embryos.forEach(emb => {
+            const xy = resolveXY(emb);
+            if (!xy) return;
+            const px = M.stageToFrame(xy.x, xy.y, f, cap);
+            if (!px) return;
+            out.push({ emb, cx: r.x + (px[0] / r.fw) * r.w, cy: r.y + (px[1] / r.fh) * r.h });
+        });
+        return out;
+    }
+
     function drawMarkers() {
-        const r = renderedRect(); const ctx = canvasCtx();
+        // Render dispatch, not gating: the canvas has no size while its pane is
+        // hidden, so there is nothing to draw onto.
+        if (_pane !== 'bottom') return;
+        const ctx = canvasCtx();
+        if (!ctx) return;
+        const r = renderedRect();
+        if (!r) return;
+
+        // Registered embryos first, so pending markers draw over them.
+        embryoPoints(r).forEach(({ emb, cx, cy }) => {
+            const sel = emb.id === _selected;
+            ctx.save();
+            ctx.strokeStyle = isEngaged() ? '#7d8899' : (sel ? '#93c5fd' : '#60a5fa');
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.lineWidth = sel ? 2 : 1.2;
+            if (isEngaged()) ctx.setLineDash([4, 3]);
+            ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.font = '600 11px Inter Tight, sans-serif';
+            ctx.fillText(labelFor(emb), cx + 16, cy + 4);
+            ctx.restore();
+        });
+        const locked = isEngaged();
+        const colour = locked ? '#7d8899' : '#4ade80';
         _markers.forEach((m, i) => {
-            const cx = r.x + (m.fx / r.fw) * r.w, cy = r.y + (m.fy / r.fh) * r.h;
-            ctx.beginPath(); ctx.arc(cx, cy, 11, 0, 7); ctx.lineWidth = 2; ctx.strokeStyle = '#34d399'; ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
-            ctx.fillStyle = '#34d399'; ctx.font = '600 11px Inter Tight, sans-serif'; ctx.fillText(String(i + 1), cx + 13, cy - 8);
+            const p = markerToCanvas(m, r);
+            if (!p) return;
+            const { cx, cy } = p;
+            ctx.save();
+            ctx.strokeStyle = colour;
+            ctx.lineWidth = locked ? 1.2 : 2;
+            if (locked) ctx.setLineDash([4, 3]);
+            ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
+            ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
+            ctx.stroke();
+            ctx.fillStyle = colour;
+            ctx.font = '600 11px Inter Tight, sans-serif';
+            ctx.fillText(String(i + 1), cx + 13, cy - 8);
+            ctx.restore();
         });
     }
-    function drawReticle(ctx) {
-        const sb = D['op-mark-canvas']; const cx = sb.width / 2, cy = sb.height / 2;
-        ctx.strokeStyle = 'rgba(96,165,250,0.85)'; ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.moveTo(cx - 22, cy); ctx.lineTo(cx + 22, cy); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx, cy + 22); ctx.stroke();
-        ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 7); ctx.stroke();
-        // SPIM-FOV footprint box (light-sheet FOV << bottom FOV)
-        const r = renderedRect(); const bw = r.w * 0.22, bh = r.h * 0.22;
-        ctx.setLineDash([5, 3]); ctx.strokeStyle = 'rgba(34,211,238,0.7)';
-        ctx.strokeRect(cx - bw / 2, cy - bh / 2, bw, bh); ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(34,211,238,0.85)'; ctx.font = '600 10px Inter Tight, sans-serif';
-        ctx.fillText('SPIM FOV', cx - bw / 2, cy - bh / 2 - 4);
-    }
-    // The viewport no longer draws a floor bar. It hardcoded a 500 µm full-scale
-    // and a literal "30 µm hard floor" caption, so it disagreed with the real
-    // axis limits, and the travel gauge in the rail now shows this properly.
-    // ── bottom-cam frames ──────────────────────────────────────────────────
-    // Both frame handlers bail when the view is hidden. Without this a hidden
-    // Operate keeps base64-decoding every frame behind whatever view is on
-    // screen, and races the visible surface for stream ownership.
-    function onBottomFrame(p) {
-        if (!_active || !p || !p.jpeg_b64) return;
-        _lastFrame = p;
-        if (p.focus_score != null) { _bzScore = p.focus_score; if (D['op-bz-score']) D['op-bz-score'].textContent = Number(p.focus_score).toFixed(3); }
-        const cam = cameraForStep(effectiveStep());
-        if (cam === 'bottom' && !_marking) setImg(p);
-    }
-    function onLightsheetFrame(p) {
-        if (!_active || !p || !p.jpeg_b64) return;
-        _lastSpimFrame = p;
-        if (p.focus_score != null) { _spimScore = p.focus_score; if (D['op-spim-score']) D['op-spim-score'].textContent = Number(p.focus_score).toFixed(3); }
-        if (cameraForStep(effectiveStep()) === 'spim') setImg(p);
-    }
 
-    // ── A1 focus bottom ────────────────────────────────────────────────────
-    async function toggleCamera() {
-        D['op-cam-toggle'].disabled = true;
-        try {
-            const ep = _camOn ? '/api/devices/bottom_camera/stream/stop' : '/api/devices/bottom_camera/stream/start';
-            const d = await postJSON(ep, {}); applyCam(!!d.streaming);
-        } catch (e) { toast(`Camera toggle failed (${e.status || e.message})`); }
-        finally { D['op-cam-toggle'].disabled = false; }
-    }
-    function applyCam(on) {
-        _camOn = on;
-        D['op-cam-toggle'].textContent = on ? 'Stop camera' : 'Start camera';
-        D['op-cam-toggle'].classList.toggle('op-btn-on', on);
-        if (!on && !_marking) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'Camera off'; }
-        renderStatus();
-    }
-    async function nudgeBottomZ(delta) {
-        if (_marking) { toast('Finish marking first'); return; }
-        try { absorbAxis('bz', await postJSON('/api/devices/stage/bottom_z/nudge', { delta })); }
-        catch (e) { toast(`Bottom-Z nudge blocked (${e.status || e.message})`); }
-    }
-
-    // ── A2 mark ────────────────────────────────────────────────────────────
-    function umPerPxDisplay() { return BASE_UM_PER_PX * ((_frozenFrame && _frozenFrame.downsample) || 1); }
-    function frameToStage(fx, fy) {
-        const u = umPerPxDisplay(), cx = _frozenFrame.w / 2, cy = _frozenFrame.h / 2;
-        return [_captureStage[0] + (fx - cx) * u, _captureStage[1] - (fy - cy) * u];
-    }
-    function enterMarking(cands) {
-        if (!_lastFrame) { toast('Start the camera first'); return false; }
-        // Absolute stage origin for pixel→stage conversion. Prefer the XY
-        // stamped on the live frame by the device layer; fall back to the
-        // position stream. NEVER default to [0, 0] — that silently converts
-        // clicks to offsets from stage origin, so embryos land hundreds of µm
-        // off and calibration images empty field. Block marking instead.
-        const capStage = (Array.isArray(_lastFrame.stage_position) && _lastFrame.stage_position.length === 2)
-            ? _lastFrame.stage_position
-            : (_lastXY ? [_lastXY.X, _lastXY.Y] : null);
-        if (!capStage) { toast('Stage position unknown — wait for the position readout, then mark'); return false; }
-        _marking = true;
-        _frozenFrame = { w: _lastFrame.shape[1], h: _lastFrame.shape[0], downsample: _lastFrame.downsample || 1 };
-        _captureStage = capStage;
-        _frozenSrc = `data:${_lastFrame.mime || 'image/jpeg'};base64,${_lastFrame.jpeg_b64}`;
-        D['op-cam-img'].src = _frozenSrc; D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none';
-        _markers = [];
-        (cands || []).forEach(c => {
-            const ds = _frozenFrame.downsample;
-            const fx = c.pixel_x != null ? c.pixel_x / ds : _frozenFrame.w / 2;
-            const fy = c.pixel_y != null ? c.pixel_y / ds : _frozenFrame.h / 2;
-            const s = (c.stage_x_um != null && c.stage_y_um != null) ? [c.stage_x_um, c.stage_y_um] : frameToStage(fx, fy);
-            _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'sam' });
-        });
-        D['op-cam-stage'].classList.add('is-marking');
-        renderStep(); updateMarkCount();
-        return true;
-    }
-    function exitMarking() {
-        _marking = false; _markers = []; _frozenSrc = null; _frozenFrame = null;
-        D['op-cam-stage'].classList.remove('is-marking');
-    }
-    function updateMarkCount() {
-        const n = _markers.length;
-        if (D['op-mark-count']) D['op-mark-count'].textContent = `(${n})`;
-        if (D['op-confirm']) D['op-confirm'].disabled = n === 0;
-        if (D['op-clear']) D['op-clear'].disabled = n === 0;
-    }
     function onCanvasClick(e) {
-        if (!_marking) return;
-        const r = renderedRect(), rect = D['op-mark-canvas'].getBoundingClientRect();
+        const r = renderedRect();
+        const c = $('op-mark-canvas');
+        if (!r || !c) return;
+        const rect = c.getBoundingClientRect();
         const cxv = e.clientX - rect.left, cyv = e.clientY - rect.top;
+
+        // Click a pending marker to remove it.
         for (let i = 0; i < _markers.length; i++) {
-            const mx = r.x + (_markers[i].fx / r.fw) * r.w, my = r.y + (_markers[i].fy / r.fh) * r.h;
-            if (Math.hypot(cxv - mx, cyv - my) <= MARK_HIT_PX) { _markers.splice(i, 1); drawMarkers(); updateMarkCount(); return; }
+            const p = markerToCanvas(_markers[i], r);
+            if (p && Math.hypot(cxv - p.cx, cyv - p.cy) <= MARK_HIT_PX) {
+                _markers.splice(i, 1); drawMarkers(); renderMarkCount(); return;
+            }
+        }
+        // Click a registered embryo to select it and centre the stage on it.
+        // Always available — the interlock lives in moveStageTo, not here.
+        for (const p of embryoPoints(r)) {
+            if (Math.hypot(cxv - p.cx, cyv - p.cy) <= MARK_HIT_PX) {
+                centerOnEmbryo(p.emb);
+                return;
+            }
         }
         if (cxv < r.x || cxv > r.x + r.w || cyv < r.y || cyv > r.y + r.h) return;
-        const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh, s = frameToStage(fx, fy);
-        _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'manual' });
-        drawMarkers(); updateMarkCount();
+
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        if (!f) { toast('Start the camera first'); return; }
+        // NEVER default the capture position to [0,0]: that silently converts
+        // clicks into offsets from stage origin, so embryos land hundreds of µm
+        // away and calibration images empty field. Refuse to mark instead.
+        if (!cap) { toast('Stage position unknown — wait for the readout, then mark'); return; }
+
+        const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh;
+        const s = M && M.frameToStage(fx, fy, f, cap);
+        if (!s) { toast('Cannot place a marker without a stage position'); return; }
+        _markers.push({ stageX: s[0], stageY: s[1], source: 'manual' });
+        drawMarkers(); renderMarkCount();
     }
+
+    async function centerOnEmbryo(emb) {
+        const xy = resolveXY(emb);
+        if (!xy) { toast('That embryo has no recorded position'); return; }
+        selectEmbryo(emb.id);
+        await moveStageTo(xy.x, xy.y, `Centred on embryo ${labelFor(emb)}`);
+    }
+
+    function renderMarkCount() {
+        const n = _markers.length;
+        const c = $('op-mark-count'); if (c) c.textContent = n;
+        const ok = $('op-confirm'); if (ok) ok.disabled = n === 0;
+        const cl = $('op-clear'); if (cl) cl.disabled = n === 0;
+    }
+
+    // ══ BOTTOM PANE ═════════════════════════════════════════════════════════
+    async function toggleBottomCam() {
+        const b = $('op-cam-toggle'); if (b) b.disabled = true;
+        try {
+            const ep = _bottomOn ? '/api/devices/bottom_camera/stream/stop'
+                : '/api/devices/bottom_camera/stream/start';
+            const d = await postJSON(ep, {});
+            applyBottomCam(!!d.streaming);
+            _bottomWasOn = _bottomOn;
+        } catch (e) { toast(`Camera toggle failed (${e.status || e.message})`); }
+        finally { if (b) b.disabled = false; }
+    }
+    function applyBottomCam(on) {
+        _bottomOn = on;
+        const b = $('op-cam-toggle');
+        if (b) { b.textContent = on ? 'Stop camera' : 'Start camera'; b.classList.toggle('is-on', on); }
+        if (!on) clearImg('op-img-bottom', 'op-ph-bottom', 'Camera off');
+        renderSubnavMeta();
+    }
+
     async function runDetect() {
-        if (!_marking && !enterMarking([])) return;
-        D['op-detect'].disabled = true; D['op-detect'].textContent = 'Detecting…';
+        const b = $('op-detect');
+        if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
+        const note = $('op-detect-note');
         try {
             const d = await postJSON('/api/devices/detect_embryos', {});
             const cands = Array.isArray(d.embryos) ? d.embryos : [];
-            if (_lastFrame && d.stage_position) { _lastFrame.stage_position = d.stage_position; _captureStage = d.stage_position; }
+            const f = frameOf(_lastBottom);
+            const cap = d.stage_position || stageOf(_lastBottom);
+            let added = 0;
             cands.forEach(c => {
-                const ds = _frozenFrame.downsample;
-                const fx = c.pixel_x != null ? c.pixel_x / ds : _frozenFrame.w / 2;
-                const fy = c.pixel_y != null ? c.pixel_y / ds : _frozenFrame.h / 2;
-                const s = (c.stage_x_um != null && c.stage_y_um != null) ? [c.stage_x_um, c.stage_y_um] : frameToStage(fx, fy);
-                _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'sam' });
+                let sx = c.stage_x_um, sy = c.stage_y_um;
+                if ((sx == null || sy == null) && f && cap && M && c.pixel_x != null && c.pixel_y != null) {
+                    const s = M.frameToStage(c.pixel_x / f.downsample, c.pixel_y / f.downsample, f, cap);
+                    if (s) { sx = s[0]; sy = s[1]; }
+                }
+                if (sx == null || sy == null) return;
+                _markers.push({ stageX: sx, stageY: sy, source: 'sam' });
+                added++;
             });
-            drawMarkers(); updateMarkCount();
-            toast(`Detected ${cands.length} candidate${cands.length === 1 ? '' : 's'}`);
-        } catch (e) { toast(`Detect failed (${e.status || e.message})`); }
-        finally { D['op-detect'].disabled = false; D['op-detect'].textContent = 'Detect (SAM)'; }
+            drawMarkers(); renderMarkCount();
+            if (note) note.textContent = `${added} candidate${added === 1 ? '' : 's'} added — edit them on the image, then register.`;
+            toast(`Detected ${added} candidate${added === 1 ? '' : 's'}`);
+        } catch (e) {
+            if (e.status === 503) {
+                if (note) note.textContent = 'Automatic detection is unavailable on this rig — mark by clicking the image.';
+            } else {
+                toast(`Detect failed (${e.status || e.message})`);
+            }
+        } finally { if (b) { b.disabled = false; b.textContent = 'Detect automatically'; } }
     }
+
     async function confirmMarks() {
         if (!_markers.length) return;
-        if (!Array.isArray(_captureStage) || _captureStage.length !== 2) {
-            toast('Stage position unknown — cannot register markers'); return;
-        }
-        D['op-confirm'].disabled = true;
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        if (!cap) { toast('Stage position unknown — cannot register markers'); return; }
+        const b = $('op-confirm'); if (b) b.disabled = true;
         try {
-            const markers = _markers.map(m => ({ stage_x_um: m.stageX, stage_y_um: m.stageY, pixel_x: m.fx, pixel_y: m.fy, source: m.source }));
-            const d = await postJSON('/api/devices/embryos/confirm', {
-                markers, image_b64: _frozenSrc ? _frozenSrc.split(',')[1] : undefined,
-                frame: _frozenFrame ? { w: _frozenFrame.w, h: _frozenFrame.h, downsample: _frozenFrame.downsample } : undefined,
-                stage_position: _captureStage,
+            // The payload shape is a hard contract with _persist_detection_labels
+            // (routes/data.py), which turns every confirm into training data for
+            // the localiser that will replace SAM. Pixel coords are projected
+            // from stage space against the frame being submitted.
+            const markers = _markers.map(m => {
+                const px = (f && M) ? M.stageToFrame(m.stageX, m.stageY, f, cap) : null;
+                return {
+                    stage_x_um: m.stageX, stage_y_um: m.stageY,
+                    pixel_x: px ? px[0] : undefined, pixel_y: px ? px[1] : undefined,
+                    source: m.source,
+                };
             });
-            toast(`Registered ${(d.registered || []).length} embryo${(d.registered || []).length === 1 ? '' : 's'}`);
-            exitMarking();  // EMBRYOS_UPDATE refreshes the board, then auto-select first
-        } catch (e) { toast(`Confirm failed (${e.status || e.message})`); D['op-confirm'].disabled = false; }
+            const d = await postJSON('/api/devices/embryos/confirm', {
+                markers,
+                image_b64: _lastBottom ? _lastBottom.jpeg_b64 : undefined,
+                frame: f ? { w: f.w, h: f.h, downsample: f.downsample } : undefined,
+                stage_position: cap,
+            });
+            const n = (d.registered || []).length;
+            _markers = [];
+            drawMarkers(); renderMarkCount();
+            toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
+        } catch (e) {
+            toast(`Register failed (${e.status || e.message})`);
+            if (b) b.disabled = false;
+        }
     }
 
-    // ── B1 center ──────────────────────────────────────────────────────────
-    function selectEmbryo(id) {
-        _selected = id;
-        if (id) _step = stepForState(_states[id] || 'marked');
-        renderStep();
-    }
-    async function centerOnSelected() {
-        if (_headLowered) { toast('Retract the SPIM head first'); return; }
-        const emb = _embryos.find(e => e.id === _selected), xy = emb ? resolveXY(emb) : null;
-        if (!xy) return;
-        D['op-center'].disabled = true; D['op-center'].textContent = 'Centering…';
-        try {
-            await postJSON('/api/devices/stage/move', { x: xy.x, y: xy.y });
-            advanceState(_selected, 'centered'); setStep('b2');
-            toast(`Centred on embryo ${labelFor(emb)}`);
-        } catch (e) { toast(`Center failed (${e.status || e.message})`); D['op-center'].disabled = false; D['op-center'].textContent = 'Center stage on embryo'; }
-    }
-    function advanceState(id, st) {
-        if (!id) return;
-        if (STATE_RANK[st] > STATE_RANK[_states[id] || 'marked']) _states[id] = st;
-        renderStep();
-    }
-
-    // ── B2 lower (F-drive, fenced) ─────────────────────────────────────────
-    function gateFdriveNudges() {
-        // Grey any down-step that would drive past the remaining travel. The
-        // buttons are generated per band, so gate whatever is currently there.
-        const host = D['op-fd-nudge'];
-        if (!host) return;
-        host.querySelectorAll('[data-fd]').forEach(b => {
-            const d = Number(b.dataset.fd);
-            b.disabled = d < 0 && _fdFloor != null && Math.abs(d) > _fdFloor;
-        });
-    }
-    async function nudgeFdrive(delta) {
-        if (delta < 0 && _fdFloor != null && Math.abs(delta) > _fdFloor) { toast('Too close to the floor for that step'); return; }
-        try {
-            absorbAxis('fd', await postJSON('/api/devices/spim/fdrive/nudge', { delta }));
-            if (delta < 0) { setHeadLowered(true); if (_selected) advanceState(_selected, 'lowering'); }
-            renderStep();  // refresh gauge + gates + status
-        } catch (e) { toast(`F-drive nudge blocked (${e.status || e.message})`); }
-    }
-
-    // ── B3 focus SPIM ──────────────────────────────────────────────────────
+    // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
-        D['op-spim-toggle'].disabled = true;
+        const b = $('op-spim-toggle'); if (b) b.disabled = true;
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
-            const d = await postJSON(ep, {}); _spimOn = !!d.streaming;
-            D['op-spim-toggle'].textContent = _spimOn ? 'Stop view' : 'Start view';
-            D['op-spim-toggle'].classList.toggle('op-btn-on', _spimOn);
-            if (!_spimOn) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; }
-            renderStatus();
+            const d = await postJSON(ep, {});
+            applySpim(!!d.streaming);
+            _spimWasOn = _spimOn;
         } catch (e) { toast(`SPIM view toggle failed (${e.status || e.message})`); }
-        finally { D['op-spim-toggle'].disabled = false; }
+        finally { if (b) b.disabled = false; }
     }
+    function applySpim(on) {
+        _spimOn = on;
+        const b = $('op-spim-toggle');
+        if (b) { b.textContent = on ? 'Stop view' : 'Start view'; b.classList.toggle('is-on', on); }
+        if (!on) clearImg('op-img-spim', 'op-ph-spim', 'View off');
+        renderSubnavMeta();
+    }
+
     let _lsTimer = null;
     function postLsParams() {
         if (_lsTimer) clearTimeout(_lsTimer);
-        _lsTimer = setTimeout(() => { postJSON('/api/devices/lightsheet/live/params', { galvo: _galvo, piezo: _piezo, exposure: 20, side: 'A' }).catch(() => {}); }, 120);
+        _lsTimer = setTimeout(() => {
+            postJSON('/api/devices/lightsheet/live/params',
+                { galvo: _galvo, piezo: _piezo, exposure: 20, side: 'A' }).catch(() => {});
+        }, 120);
     }
-    function nudgeGalvo(d) { _galvo = Math.max(-5, Math.min(5, _galvo + d)); D['op-gv'].textContent = _galvo.toFixed(1); postLsParams(); }
-    function nudgePiezo(d) { _piezo = Math.max(0, Math.min(200, _piezo + d)); D['op-pz'].textContent = _piezo.toFixed(0); postLsParams(); }
+    function nudgeGalvo(d) {
+        _galvo = Math.max(-5, Math.min(5, _galvo + d));
+        const el = $('op-gv'); if (el) el.textContent = _galvo.toFixed(1);
+        postLsParams();
+    }
+    function nudgePiezo(d) {
+        _piezo = Math.max(0, Math.min(200, _piezo + d));
+        const el = $('op-pz'); if (el) el.textContent = _piezo.toFixed(0);
+        postLsParams();
+    }
     async function toggleLed() {
         _ledOn = !_ledOn;
-        D['op-led'].classList.toggle('op-btn-toggle', true); D['op-led'].setAttribute('aria-pressed', _ledOn ? 'true' : 'false');
-        D['op-led'].classList.toggle('op-btn-on', _ledOn);
-        try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); } catch (e) { toast(`LED failed (${e.status || e.message})`); }
-        renderStatus();
+        applyLed();
+        try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
+        catch (e) { toast(`LED failed (${e.status || e.message})`); }
+    }
+    function applyLed() {
+        const b = $('op-led');
+        if (b) {
+            b.setAttribute('aria-pressed', _ledOn ? 'true' : 'false');
+            b.classList.toggle('is-emitting', _ledOn);
+        }
+        renderSubnavMeta();
     }
     async function forceLedOff() {
         if (!_ledOn) return;
-        _ledOn = false; D['op-led'].setAttribute('aria-pressed', 'false'); D['op-led'].classList.remove('op-btn-on');
+        _ledOn = false; applyLed();
         try { await postJSON('/api/devices/led/set', { state: 'Closed' }); } catch (_) {}
-        renderStatus();
-    }
-    function markInFocus() {
-        if (!_selected) return;
-        advanceState(_selected, 'focused'); forceLedOff(); setStep('bc');
-        toast(`Embryo ${labelFor(_embryos.find(e => e.id === _selected))} in focus`);
     }
 
-    // ── B-cal calibrate (piezo-galvo) ──────────────────────────────────────
     async function calibrateSelected() {
-        if (!_selected) return;
-        if (STATE_RANK[_states[_selected] || 'marked'] < STATE_RANK.focused) { toast('Focus the embryo first'); return; }
-        D['op-calibrate'].disabled = true; D['op-calibrate'].textContent = 'Calibrating…';
-        if (D['op-cal-result']) D['op-cal-result'].textContent = 'sweeping…';
+        if (!_selected) { toast('Select an embryo first'); return; }
+        const b = $('op-calibrate'), out = $('op-cal-result');
+        if (b) { b.disabled = true; b.textContent = 'Calibrating…'; }
+        if (out) out.textContent = 'sweeping…';
         try {
             const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, {});
             const cal = d.calibration || {};
             const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
-            if (D['op-cal-result']) {
-                D['op-cal-result'].textContent = (slope != null)
+            if (out) {
+                out.textContent = (slope != null)
                     ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
                     : 'done';
             }
-            advanceState(_selected, 'calibrated'); setStep('b4');
-            toast(`Calibrated embryo ${labelFor(_embryos.find(e => e.id === _selected))}`);
         } catch (e) {
-            if (D['op-cal-result']) D['op-cal-result'].textContent = 'failed';
+            if (out) out.textContent = 'failed';
             toast(`Calibrate failed (${e.status || e.message})`);
-        } finally {
-            D['op-calibrate'].disabled = false; D['op-calibrate'].textContent = 'Calibrate this embryo';
+        } finally { if (b) { b.disabled = false; b.textContent = 'Calibrate piezo–galvo'; } }
+    }
+
+    function renderSpimTarget() {
+        const el = $('op-spim-target');
+        if (!el) return;
+        const emb = _embryos.find(e => e.id === _selected);
+        el.textContent = emb ? `Selected: embryo ${labelFor(emb)}` : 'No embryo selected';
+    }
+
+    // ══ ACQUISITION PANE ════════════════════════════════════════════════════
+    function selectEmbryo(id) {
+        _selected = id;
+        renderRoster(); renderSpimTarget(); renderSingle();
+    }
+
+    function renderRoster() {
+        const host = $('op-roster');
+        const count = $('op-roster-count');
+        if (count) count.textContent = _embryos.length;
+        if (!host) return;
+        host.innerHTML = '';
+        if (!_embryos.length) {
+            const box = document.createElement('div');
+            box.className = 'op-empty';
+            box.innerHTML = 'No embryos marked yet.' +
+                '<button class="op-btn" type="button" data-goto="bottom">Go to Bottom cam</button>';
+            host.appendChild(box);
+            return;
         }
-    }
-    function skipCalibration() {
-        if (!_selected) return;
-        advanceState(_selected, 'calibrated'); setStep('b4');
-        toast('Calibration skipped');
-    }
-
-    // ── B4 acquire ─────────────────────────────────────────────────────────
-    async function acquireSelected() {
-        if (!_selected || STATE_RANK[_states[_selected] || 'marked'] < STATE_RANK.focused) { toast('Focus the embryo first'); return; }
-        D['op-acquire'].disabled = true; D['op-acquire'].textContent = 'Acquiring…'; _acquiring = true; renderStatus();
-        try {
-            await postJSON('/api/devices/acquire/volume', { num_slices: 50, exposure_ms: 10.0 });
-            advanceState(_selected, 'imaged'); setStep('b5');
-            toast('Volume acquired');
-        } catch (e) { toast(`Acquire failed (${e.status || e.message})`); }
-        finally { _acquiring = false; D['op-acquire'].disabled = false; D['op-acquire'].textContent = 'Acquire volume'; await forceLedOff(); renderStatus(); }
-    }
-
-    // ── B5 retract & advance ───────────────────────────────────────────────
-    async function retractAndAdvance() {
-        D['op-retract'].disabled = true;
-        try {
-            // A retract that fails must NOT report the head as up — that is the
-            // state Center trusts before commanding an absolute XY move.
-            try {
-                absorbAxis('fd', await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
-                setHeadLowered(false);
-            } catch (e) {
-                toast(`Retract failed (${e.status || e.message}) — head still down`);
-                renderStep();
-                return;
-            }
-            const next = _embryos.find(e => _states[e.id] !== 'imaged');
-            if (next) { selectEmbryo(next.id); toast(`Next: embryo ${labelFor(next)}`); }
-            else {
-                // Done imaging — return to the Run chooser (not Focus) so another
-                // run mode can be chosen for the same marked set.
-                _selected = null; _step = null; _runState = 'choose'; renderStep();
-                toast('All embryos imaged');
-            }
-        } finally { D['op-retract'].disabled = false; }
-    }
-
-    // ── embryo SSOT ────────────────────────────────────────────────────────
-    function onEmbryosUpdate(p) {
-        const wasEmpty = _embryos.length === 0;
-        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
-        const ids = new Set(_embryos.map(e => e.id));
-        Object.keys(_states).forEach(id => { if (!ids.has(id)) delete _states[id]; });
-        Object.keys(_roles).forEach(id => { if (!ids.has(id)) delete _roles[id]; });
-        _embryos.forEach(e => {
-            if (!_states[e.id]) _states[e.id] = 'marked';
-            // seed role from the embryo if present, else default to subject ('test')
-            if (!_roles[e.id]) _roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test';
+        _embryos.forEach(emb => {
+            const xy = resolveXY(emb);
+            const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
+            const row = document.createElement('div');
+            row.className = 'op-rrow' + (emb.id === _selected ? ' is-sel' : '');
+            row.tabIndex = 0;
+            row.dataset.embryo = emb.id;
+            row.innerHTML =
+                `<span class="op-rlabel">Embryo ${escapeHtml(labelFor(emb))}</span>` +
+                `<span class="op-rxy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>` +
+                `<button class="op-rrole${role === 'calibration' ? ' is-reference' : ''}" type="button" ` +
+                `data-role-for="${escapeHtml(emb.id)}">${role === 'calibration' ? 'ref' : 'subj'}</button>` +
+                `<button class="op-rcenter" type="button" title="Centre the stage on this embryo" ` +
+                `data-center="${escapeHtml(emb.id)}">Centre</button>`;
+            host.appendChild(row);
         });
-        if (_selected && !ids.has(_selected)) { _selected = null; _step = null; }
-        // After the first marking confirm, enter the Phase C Run chooser
-        // (NOT the old auto-dive into the manual loop).
-        if (wasEmpty && _embryos.length && !_selected && !_marking && _runState === null) {
-            _runState = 'choose';
-        }
-        renderStep();
     }
 
-    // ── Phase C: Run chooser + run-spine ───────────────────────────────────
-    function escapeHtml(s) {
-        return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    // Roles are read from the canonical embryo list and written through the
+    // endpoint — deliberately NOT mirrored in a local map, which in the old
+    // design drifted from _embryos and needed a reconciliation loop.
+    async function toggleRole(id) {
+        const emb = _embryos.find(e => e.id === id);
+        if (!emb) return;
+        const cur = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
+        const next = cur === 'calibration' ? 'test' : 'calibration';
+        emb.role = next;
+        renderRoster();
+        const roles = {};
+        _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
+        try { await postJSON('/api/embryos/roles', { roles }); }
+        catch (e) { toast(`Roles failed (${e.status || e.message})`); }
     }
 
-    function renderChooser() {
-        if (D['op-rolechips']) {
-            D['op-rolechips'].innerHTML = '';
-            _embryos.forEach(emb => {
-                const role = _roles[emb.id] || 'test';
-                const chip = document.createElement('button');
-                chip.type = 'button';
-                chip.className = 'op-rolechip' + (role === 'calibration' ? ' is-reference' : '');
-                chip.textContent = `${labelFor(emb)} · ${role === 'calibration' ? 'ref' : 'subj'}`;
-                chip.title = 'Click to toggle subject / reference';
-                chip.addEventListener('click', () => {
-                    _roles[emb.id] = (_roles[emb.id] === 'calibration') ? 'test' : 'calibration';
-                    renderChooser();
-                });
-                D['op-rolechips'].appendChild(chip);
-            });
-        }
-        document.querySelectorAll('.op-modepanel').forEach(p => p.classList.toggle('is-shown', p.dataset.mode === _runMode));
-        if (D['op-tl-stop'] && D['op-tl-condval']) {
-            const s = D['op-tl-stop'].value;
-            D['op-tl-condval'].style.display = (s === 'timepoints' || s === 'duration') ? '' : 'none';
-        }
-        if (_runMode === 'library') loadLibrary();
-        if (_runMode === 'plan') loadPlanItems();
+    function setMode(m) {
+        _mode = m;
+        document.querySelectorAll('#op-modes [data-mode]').forEach(b =>
+            b.classList.toggle('is-on', b.dataset.mode === m));
+        ['single', 'adaptive', 'library', 'agent'].forEach(k => {
+            const p = $(`op-panel-${k}`);
+            if (p) p.hidden = k !== m;
+        });
+        if (m === 'library') loadLibrary();
+        renderSingle();
+    }
+
+    function renderSingle() {
+        const t = $('op-single-target'), d = $('op-single-delta');
+        const emb = _embryos.find(e => e.id === _selected);
+        if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'none selected';
+        if (!d) return;
+        const xy = emb ? resolveXY(emb) : null;
+        // A fact, not a gate: the operator is told how far off the stage is and
+        // decides for themselves. Acquire is never disabled on this.
+        if (!xy || !_xy) { d.textContent = '—'; return; }
+        const dx = xy.x - _xy.x, dy = xy.y - _xy.y;
+        d.textContent = `${Math.round(Math.hypot(dx, dy))} µm away`;
     }
 
     async function loadLibrary() {
-        if (!D['op-lib-list']) return;
+        const host = $('op-lib-list');
+        if (!host) return;
         try {
             const d = await getJSON('/api/tactic_library');
             const items = (d && d.tactics) || [];
-            if (!items.length) { D['op-lib-list'].innerHTML = '<div class="op-empty">No saved tactics</div>'; return; }
-            D['op-lib-list'].innerHTML = '';
-            items.forEach(t => {
-                const b = document.createElement('button');
-                b.type = 'button';
-                b.className = 'op-libitem' + (t.id === _selectedLib ? ' is-sel' : '');
-                b.innerHTML = `${escapeHtml(t.name || t.id)}<small>${escapeHtml(t.kind || '')}</small>`;
-                b.addEventListener('click', () => { _selectedLib = t.id; loadLibrary(); });
-                D['op-lib-list'].appendChild(b);
-            });
-        } catch (_) { D['op-lib-list'].innerHTML = '<div class="op-empty">Library unavailable</div>'; }
-    }
-    function loadPlanItems() {
-        // Plan resolution lives in the agent (resume_plan + execute_plan_item);
-        // Start hands the roster to the agent to attach + continue the right item.
-        if (D['op-plan-list']) {
-            D['op-plan-list'].innerHTML = '<div class="op-empty">Start hands these embryos to the agent to attach a plan item and continue imaging.</div>';
-        }
+            if (!items.length) { host.innerHTML = '<div class="op-empty">No saved tactics</div>'; return; }
+            host.innerHTML = items.map(t =>
+                `<button class="op-libitem${t.id === _selectedLib ? ' is-sel' : ''}" type="button" ` +
+                `data-lib="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}` +
+                `<small>${escapeHtml(t.kind || '')}</small></button>`).join('');
+        } catch (_) { host.innerHTML = '<div class="op-empty">Library unavailable</div>'; }
     }
 
-    async function applyRoles() {
-        const roles = {};
-        _embryos.forEach(e => { roles[e.id] = _roles[e.id] || 'test'; });
-        try { await postJSON('/api/embryos/roles', { roles }); } catch (e) { toast(`Roles failed (${e.status || e.message})`); }
+    function subjectIds() {
+        const subs = _embryos.filter(e => e.role !== 'calibration').map(e => e.id);
+        return subs.length ? subs : _embryos.map(e => e.id);
     }
 
     async function startRun() {
-        // Persist the chooser's role toggles for EVERY mode (manual included).
-        await applyRoles();
-        if (_runMode === 'manual') {
-            // record a cosmetic oneshot tactic so even a manual sweep shows on the spine
-            postJSON('/api/operate/run-tactic', {
-                tactic: { kind: 'oneshot', name: 'Manual sweep', structure: { note: 'manual one-by-one' } },
-                embryo_ids: _embryos.map(e => e.id),
-            }).catch(() => {});
-            _runState = null;
-            if (_embryos.length) selectEmbryo(_embryos[0].id);
-            return;
-        }
-        const subjects = _embryos.filter(e => (_roles[e.id] || 'test') !== 'calibration').map(e => e.id);
-        const embryo_ids = subjects.length ? subjects : _embryos.map(e => e.id);
-        if (_runMode === 'adaptive') {
-            const interval = Math.max(1, Number(D['op-tl-interval'].value) || 120);
-            const stopSel = D['op-tl-stop'].value;
-            const monitoring = D['op-tl-monitor'].value;
-            // Send the combined stop form the orchestrator parser understands
-            // ('timepoints:N' / 'duration:Xh'); a bare 'timepoints' silently
-            // degrades to manual (never stops).
-            let stop_condition = stopSel;
-            if (stopSel === 'timepoints') stop_condition = `timepoints:${Math.max(1, Number(D['op-tl-condval'].value) || 1)}`;
-            else if (stopSel === 'duration') stop_condition = `duration:${Math.max(1, Number(D['op-tl-condval'].value) || 1)}h`;
-            const body = { embryo_ids, interval_seconds: interval, stop_condition, monitoring_mode: monitoring };
-            D['op-run-start'].disabled = true; D['op-run-start'].textContent = 'Starting…';
-            try {
-                await postJSON('/api/devices/timelapse/start', body);
-                _runMeta = { mode: 'adaptive', interval, stop: stop_condition, monitoring, n: embryo_ids.length };
-                _runState = 'running'; _runPaused = false;
-                toast(`Adaptive timelapse started — ${embryo_ids.length} subject${embryo_ids.length === 1 ? '' : 's'}`);
-                renderStep();
-            } catch (e) {
-                toast(`Start failed (${e.status || e.message})`);
-            } finally { D['op-run-start'].disabled = false; D['op-run-start'].textContent = 'Start run'; }
-            return;
-        }
-        const roster = _embryos.map(e => {
-            const xy = resolveXY(e);
-            const r = _roles[e.id] === 'calibration' ? 'reference' : 'subject';
-            return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
-        }).join(', ');
-
-        if (_runMode === 'library') {
-            if (!_selectedLib) { toast('Pick a saved tactic'); return; }
-            D['op-run-start'].disabled = true; D['op-run-start'].textContent = 'Starting…';
-            try {
-                const d = await postJSON('/api/operate/run-tactic', { library_id: _selectedLib, embryo_ids });
-                if (d.success) {
-                    _runMeta = { mode: 'library', n: embryo_ids.length };
-                    _runState = 'running'; _runPaused = false; toast('Tactic started'); renderStep();
-                } else { toast(`Run failed: ${(d.result && d.result.message) || '?'}`); }
-            } catch (e) { toast(`Start failed (${e.status || e.message})`); }
-            finally { D['op-run-start'].disabled = false; D['op-run-start'].textContent = 'Start run'; }
-            return;
-        }
-        if (_runMode === 'plan' || _runMode === 'agent') {
-            // The agent owns plan resolution + composed tactics; hand off the roster.
-            const prompt = _runMode === 'plan'
-                ? `Continue a plan on these ${_embryos.length} marked embryos — attach this session to the right plan item and start imaging: ${roster}.`
-                : `I marked ${_embryos.length} embryos: ${roster}. Propose and start an Operation Plan to image them.`;
-            if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
-                AgentChat.togglePanel(true);
-                if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
-            } else { toast('Agent chat unavailable'); }
-            _runState = 'running'; renderStep();
-            return;
-        }
+        const b = $('op-run-start');
+        const done = () => { if (b) { b.disabled = false; b.textContent = 'Start'; } };
+        if (b) { b.disabled = true; b.textContent = 'Starting…'; }
+        try {
+            if (_mode === 'single') {
+                if (!_selected) { toast('Select an embryo first'); return; }
+                _acquiring = true; renderSubnavMeta();
+                try {
+                    await postJSON('/api/devices/acquire/volume', {
+                        num_slices: Math.max(1, Number(($('op-vol-slices') || {}).value) || 50),
+                        exposure_ms: Math.max(1, Number(($('op-vol-exp') || {}).value) || 10),
+                    });
+                    toast('Volume acquired');
+                } finally { _acquiring = false; await forceLedOff(); renderSubnavMeta(); }
+                return;
+            }
+            if (_mode === 'adaptive') {
+                const interval = Math.max(1, Number(($('op-tl-interval') || {}).value) || 120);
+                const sel = ($('op-tl-stop') || {}).value || 'manual';
+                const val = Math.max(1, Number(($('op-tl-condval') || {}).value) || 1);
+                // The orchestrator parses the COMBINED form ('timepoints:N' /
+                // 'duration:Xh'). A bare 'timepoints' silently degrades to manual,
+                // i.e. a timelapse that never stops.
+                let stop_condition = sel;
+                if (sel === 'timepoints') stop_condition = `timepoints:${val}`;
+                else if (sel === 'duration') stop_condition = `duration:${val}h`;
+                await postJSON('/api/devices/timelapse/start', {
+                    embryo_ids: subjectIds(),
+                    interval_seconds: interval,
+                    stop_condition,
+                    monitoring_mode: ($('op-tl-monitor') || {}).value || 'idle',
+                });
+                toast('Adaptive timelapse started');
+                renderRun();
+                return;
+            }
+            if (_mode === 'library') {
+                if (!_selectedLib) { toast('Pick a saved tactic'); return; }
+                const d = await postJSON('/api/operate/run-tactic',
+                    { library_id: _selectedLib, embryo_ids: subjectIds() });
+                if (d.success) { toast('Tactic started'); renderRun(); }
+                else toast(`Run failed: ${(d.result && d.result.message) || '?'}`);
+                return;
+            }
+            if (_mode === 'agent') {
+                const roster = _embryos.map(e => {
+                    const xy = resolveXY(e);
+                    const r = e.role === 'calibration' ? 'reference' : 'subject';
+                    return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
+                }).join(', ');
+                const prompt = `I marked ${_embryos.length} embryos: ${roster}. ` +
+                    'Propose and start an Operation Plan to image them.';
+                if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
+                    AgentChat.togglePanel(true);
+                    if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
+                } else toast('Agent chat unavailable');
+            }
+        } catch (e) {
+            toast(`Start failed (${e.status || e.message})`);
+        } finally { done(); }
     }
 
-    async function renderRunSpine() {
-        if (!D['op-runspine']) return;
+    // Run presence is DERIVED from the server, not from a client flag. The old
+    // design kept it in memory, so F5 during a running timelapse lost the whole
+    // panel — and left a client state machine that could re-grow into steps.
+    async function renderRun() {
+        const host = $('op-runspine'), actions = $('op-run-actions');
+        if (!host) return;
         let tactics = [];
-        try { const d = await getJSON('/api/operation_plan'); tactics = (d && d.plan && d.plan.tactics) || []; } catch (_) {}
-        D['op-runspine'].innerHTML = '';
-        if (tactics.length) {
-            tactics.forEach(t => D['op-runspine'].appendChild(tacticCard(t)));
-        } else if (_runMeta) {
-            // Fallback card when the plan fetch is empty/failed — shaped per mode
-            // (a library run carries no interval/stop/monitoring).
-            const n = _runMeta.n || 0;
-            const subj = `${n} subject${n === 1 ? '' : 's'}`;
-            const card = document.createElement('div');
-            card.className = 'op-tcard st-active';
-            if (_runMeta.mode === 'adaptive') {
-                const stopTxt = (_runMeta.stop === 'manual' || _runMeta.stop == null) ? 'until stopped' : _runMeta.stop;
-                const ivl = _runMeta.interval != null ? `${escapeHtml(String(_runMeta.interval))}s · ` : '';
-                card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Adaptive timelapse</span><span class="op-tcard-state">active</span></div>'
-                    + `<div class="op-tcard-kind">standing_timelapse · ${escapeHtml(_runMeta.monitoring || 'idle')}</div>`
-                    + `<div class="op-tcard-meta">${ivl}${subj} · ${escapeHtml(stopTxt)}</div>`;
-            } else {
-                card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Tactic</span><span class="op-tcard-state">active</span></div>'
-                    + `<div class="op-tcard-meta">${subj}</div>`;
-            }
-            D['op-runspine'].appendChild(card);
-        } else {
-            D['op-runspine'].innerHTML = '<div class="op-empty">Run active.</div>';
+        try {
+            const d = await getJSON('/api/operation_plan');
+            tactics = (d && d.plan && d.plan.tactics) || [];
+        } catch (_) { /* leave empty */ }
+        const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
+        if (actions) actions.hidden = live.length === 0;
+        if (!tactics.length) {
+            host.innerHTML = '<div class="op-empty">Nothing running.</div>';
+            return;
         }
-        if (D['op-run-pause']) D['op-run-pause'].textContent = _runPaused ? 'Resume' : 'Pause';
+        host.innerHTML = tactics.map(tacticCard).join('');
+        _runPaused = live.some(t => t.state === 'paused');
+        const p = $('op-run-pause');
+        if (p) p.textContent = _runPaused ? 'Resume' : 'Pause';
     }
     function tacticCard(t) {
-        const card = document.createElement('div');
         const state = t.state || 'planned';
-        card.className = 'op-tcard st-' + state;
         const struct = t.structure || {};
         const meta = [];
         if (struct.cadence_s != null) meta.push(`${struct.cadence_s}s`);
         if (struct.interval != null) meta.push(`${struct.interval}s`);
         if (struct.status) meta.push(struct.status);
         if (t.live && t.live.signal != null) meta.push(`signal ${t.live.signal}`);
-        card.innerHTML = `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span><span class="op-tcard-state">${escapeHtml(state)}</span></div>`
-            + `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>`
-            + (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '')
-            + (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '');
-        return card;
+        return `<div class="op-tcard st-${escapeHtml(state)}">` +
+            `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span>` +
+            `<span class="op-tcard-state">${escapeHtml(state)}</span></div>` +
+            `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>` +
+            (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '') +
+            (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '') +
+            '</div>';
     }
-
     async function pauseRun() {
         try {
-            if (_runPaused) { await postJSON('/api/devices/timelapse/resume', {}); _runPaused = false; toast('Resumed'); }
-            else { await postJSON('/api/devices/timelapse/pause', {}); _runPaused = true; toast('Paused'); }
-            renderRunSpine();
+            await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
+            toast(_runPaused ? 'Resumed' : 'Paused');
         } catch (e) { toast(`Pause/resume failed (${e.status || e.message})`); }
+        renderRun();
     }
     async function stopRun() {
         if (!window.confirm('Stop the run?')) return;
-        try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); } catch (e) { toast(`Stop failed (${e.status || e.message})`); }
-        _runState = 'choose'; _runMeta = null; _runPaused = false;
-        toast('Run stopped'); renderStep();
-    }
-    function openInOperations() {
-        const nav = [...document.querySelectorAll('[data-tab]')].find(n => /operations/i.test(n.textContent || ''));
-        if (nav) nav.click(); else toast('Operations tab not found');
+        try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); toast('Run stopped'); }
+        catch (e) { toast(`Stop failed (${e.status || e.message})`); }
+        renderRun();
     }
 
-    // ── lifecycle ──────────────────────────────────────────────────────────
-    function surveyMore() { _selected = null; _step = null; _runState = null; if (_marking) exitMarking(); renderStep(); }
-
-    // Move the view cursor to a stepper node. Progress (_states) is a record of
-    // what has happened and is never rewound here — only the cursor moves, so
-    // revisiting Center does not un-image an embryo.
-    function gotoNode(node) {
-        if (!node || _runState === 'running') return;
-        if (_marking && node !== 'a2') exitMarking();
-        if (node === 'a1' || node === 'a2') {
-            _selected = null; _runState = null;
-            if (node === 'a2') { if (!enterMarking([])) return; }
-            else _step = null;
-            renderStep(); return;
-        }
-        if (node === 'run') {
-            if (!_embryos.length) { toast('Mark some embryos first'); return; }
-            _selected = null; _step = null; _runState = 'choose'; renderStep(); return;
-        }
-        // A per-embryo step needs an embryo. Fall back to the first unimaged one
-        // rather than refusing, so the node is never a dead click.
-        if (!_selected) {
-            const cand = _embryos.find(e => _states[e.id] !== 'imaged') || _embryos[0];
-            if (!cand) { toast('Mark some embryos first'); return; }
-            _selected = cand.id;
-        }
-        _runState = null;
-        setStep(node);
+    // ══ PANES ═══════════════════════════════════════════════════════════════
+    // Camera ownership is keyed on VISIBILITY, not on a step. Both cameras
+    // contend for MMCore, and the client swaps .src per frame with no throttle,
+    // so two live decoders is the condition that risks a Video-TDR freeze. "The
+    // camera is live while you are looking at it" guarantees at most one.
+    const PANES = {
+        bottom: {
+            onEnter() { if (_bottomWasOn && !_bottomOn) toggleBottomCam(); drawMarkers(); },
+            onLeave() { _bottomWasOn = _bottomOn; if (_bottomOn) stopBottom(); },
+            render() { renderMarkCount(); drawMarkers(); bz.render(); },
+        },
+        spim: {
+            onEnter() { if (_spimWasOn && !_spimOn) toggleSpim(); },
+            onLeave() { _spimWasOn = _spimOn; if (_spimOn) stopSpim(); forceLedOff(); },
+            render() { renderSpimTarget(); fd.render(); },
+        },
+        acquire: {
+            onEnter() { renderRun(); },
+            onLeave() {},
+            render() { renderRoster(); renderSingle(); },
+        },
+    };
+    function stopBottom() {
+        fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {});
+        applyBottomCam(false);
+    }
+    function stopSpim() {
+        fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {});
+        applySpim(false);
     }
 
-    // Leave the current step. Escape and the always-visible Cancel both land
-    // here. Deliberately does NOT touch _headLowered — abandoning a step never
-    // means the objective came back up.
-    function cancelStep() {
-        if (_marking) { exitMarking(); renderStep(); toast('Marking cancelled'); return; }
-        if (_runState === 'running') { toast('Stop the run from the run panel'); return; }
-        if (_runState === 'choose') { _runState = null; renderStep(); return; }
-        if (_selected) { _selected = null; _step = null; renderStep(); toast('Back to survey'); return; }
-        toast('Nothing to leave');
+    function showPane(name) {
+        if (!PANES[name] || name === _pane) return;
+        const prev = _pane;
+        _pane = name;
+        if (PANES[prev]) PANES[prev].onLeave();
+        ['bottom', 'spim', 'acquire'].forEach(p => {
+            const el = $(`op-pane-${p}`);
+            if (el) el.hidden = p !== name;
+        });
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', name);
+        PANES[name].onEnter();
+        PANES[name].render();
+        renderLock();
+    }
+
+    function renderSubnavMeta() {
+        const el = $('op-subnav-meta');
+        if (!el) return;
+        const bits = [];
+        if (_bottomOn) bits.push('BOTTOM ● LIVE');
+        if (_spimOn) bits.push('SPIM ● LIVE');
+        if (_ledOn) bits.push('LED EMITTING');
+        if (_acquiring) bits.push('LASER EMITTING');
+        el.textContent = bits.join('  ·  ');
+    }
+
+    // ══ EVENTS ══════════════════════════════════════════════════════════════
+    function onBottomFrame(p) {
+        // Bail when hidden, or a hidden Operate keeps base64-decoding every
+        // frame behind whatever is on screen and races for stream ownership.
+        if (!_active || _pane !== 'bottom' || !p || !p.jpeg_b64) return;
+        _lastBottom = p;
+        if (p.focus_score != null) {
+            const el = $('op-bz-score');
+            if (el) el.textContent = Number(p.focus_score).toFixed(3);
+        }
+        setImg('op-img-bottom', 'op-ph-bottom', p);
+        drawMarkers();
+    }
+    function onSpimFrame(p) {
+        if (!_active || _pane !== 'spim' || !p || !p.jpeg_b64) return;
+        if (p.focus_score != null) {
+            const el = $('op-spim-score');
+            if (el) el.textContent = Number(p.focus_score).toFixed(3);
+        }
+        setImg('op-img-spim', 'op-ph-spim', p);
+    }
+    function onEmbryosUpdate(p) {
+        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
+        if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
+        if (!_active) return;
+        renderRoster(); renderSpimTarget(); renderSingle();
     }
 
     function wire() {
-        if (_wired) return; _wired = true;
-        cacheDom();
-        D['op-cam-toggle'].addEventListener('click', toggleCamera);
-        D['op-mark-canvas'].addEventListener('click', onCanvasClick);
-        D['op-bz-nudge'].addEventListener('click', e => { const b = e.target.closest('[data-bz]'); if (b) nudgeBottomZ(Number(b.dataset.bz)); });
-        D['op-tomark'].addEventListener('click', () => { if (enterMarking([])) renderStep(); });
-        D['op-detect'].addEventListener('click', runDetect);
-        D['op-confirm'].addEventListener('click', confirmMarks);
-        D['op-clear'].addEventListener('click', () => { _markers = []; drawMarkers(); updateMarkCount(); });
-        D['op-center'].addEventListener('click', centerOnSelected);
-        D['op-fd-nudge'].addEventListener('click', e => { const b = e.target.closest('[data-fd]'); if (b) nudgeFdrive(Number(b.dataset.fd)); });
-        D['op-tofocus'].addEventListener('click', () => setStep('b3'));
-        D['op-spim-toggle'].addEventListener('click', toggleSpim);
-        D['op-led'].addEventListener('click', toggleLed);
-        document.querySelectorAll('[data-gv]').forEach(b => b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
-        document.querySelectorAll('[data-pz]').forEach(b => b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
-        D['op-infocus'].addEventListener('click', markInFocus);
-        if (D['op-calibrate']) D['op-calibrate'].addEventListener('click', calibrateSelected);
-        if (D['op-cal-skip']) D['op-cal-skip'].addEventListener('click', skipCalibration);
-        D['op-acquire'].addEventListener('click', acquireSelected);
-        D['op-retract'].addEventListener('click', retractAndAdvance);
-        D['op-survey-btn'].addEventListener('click', surveyMore);
-        // The stepper is navigation. Any node can be reached in any order, forward
-        // or back. This is safe because nothing here arms a motion: the gates that
-        // matter (Center blocked while the head is down, down-nudges fenced by the
-        // floor) are evaluated against live hardware state in renderStep, not
-        // against how far through the sequence you are. Moving the cursor cannot
-        // un-lower the head or forget the floor.
-        if (D['op-stepper']) D['op-stepper'].addEventListener('click', e => {
-            const n = e.target.closest('.op-node');
-            if (n) gotoNode(n.dataset.node);
-        });
-        // Arrow keys traverse the stepper once it has focus.
-        if (D['op-stepper']) D['op-stepper'].addEventListener('keydown', e => {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-            const nodes = [...D['op-stepper'].querySelectorAll('.op-node')];
-            const i = nodes.indexOf(e.target.closest('.op-node'));
-            if (i < 0) return;
-            e.preventDefault();
-            const next = nodes[i + (e.key === 'ArrowRight' ? 1 : -1)];
-            if (next) next.focus();
-        });
-        if (D['op-cancel']) D['op-cancel'].addEventListener('click', cancelStep);
-        // Escape leaves the current step from anywhere in the view.
-        document.addEventListener('keydown', e => {
-            if (!_active || e.key !== 'Escape') return;
-            // e.target is not always an Element (it can be `document`), and
-            // Element.matches does not exist on those — guard before calling it.
-            const t = e.target;
-            if (t instanceof Element && t.matches('input, textarea, select, [contenteditable]')) return;
-            e.preventDefault(); cancelStep();
-        });
-        // Phase C: Run chooser + run-spine
-        document.querySelectorAll('input[name="op-mode"]').forEach(r =>
-            r.addEventListener('change', () => { _runMode = r.value; renderChooser(); }));
-        if (D['op-tl-stop']) D['op-tl-stop'].addEventListener('change', renderChooser);
-        if (D['op-run-start']) D['op-run-start'].addEventListener('click', startRun);
-        if (D['op-run-pause']) D['op-run-pause'].addEventListener('click', pauseRun);
-        if (D['op-run-stop']) D['op-run-stop'].addEventListener('click', stopRun);
-        if (D['op-run-open']) D['op-run-open'].addEventListener('click', openInOperations);
-        window.addEventListener('resize', () => { if (_active) drawOverlay(effectiveStep()); });
+        if (_wired) return;
+        _wired = true;
+
+        if (typeof initViewSwitcher === 'function') {
+            // Click delegation only — deliberately NO `views` option.
+            //
+            // initViewSwitcher's `views` binds BARE number keys on document, and
+            // 1-6 are already global main-tab navigation (KeyboardShortcuts in
+            // app.js), with system/calibration/plan switchers claiming 1-3 too.
+            // Binding them here either steals a main-tab key or, with a guard
+            // tight enough to be safe, never fires at all — verified in-browser:
+            // app.js handles the keypress first and moves state.tab, so the
+            // guard then correctly refuses. Three peer surfaces are fine to
+            // click between; a shortcut would need a modifier to be honest.
+            initViewSwitcher('operate-subtab-switcher', showPane);
+        }
+
+        bz.wire(); fd.wire();
+
+        const cam = $('op-cam-toggle'); if (cam) cam.addEventListener('click', toggleBottomCam);
+        const det = $('op-detect'); if (det) det.addEventListener('click', runDetect);
+        const ok = $('op-confirm'); if (ok) ok.addEventListener('click', confirmMarks);
+        const cl = $('op-clear');
+        if (cl) cl.addEventListener('click', () => { _markers = []; drawMarkers(); renderMarkCount(); });
+        const canvas = $('op-mark-canvas'); if (canvas) canvas.addEventListener('click', onCanvasClick);
+
+        const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
+        const led = $('op-led'); if (led) led.addEventListener('click', toggleLed);
+        const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        document.querySelectorAll('[data-gv]').forEach(b =>
+            b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
+        document.querySelectorAll('[data-pz]').forEach(b =>
+            b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
+        document.querySelectorAll('[data-backoff]').forEach(b =>
+            b.addEventListener('click', backOff));
+
+        const modes = $('op-modes');
+        if (modes) {
+            modes.addEventListener('click', e => {
+                const b = e.target.closest('[data-mode]');
+                if (b) setMode(b.dataset.mode);
+            });
+        }
+        const stop = $('op-tl-stop');
+        if (stop) {
+            stop.addEventListener('change', () => {
+                const w = $('op-tl-condwrap');
+                if (w) w.hidden = stop.value === 'manual';
+            });
+        }
+        const lib = $('op-lib-list');
+        if (lib) {
+            lib.addEventListener('click', e => {
+                const b = e.target.closest('[data-lib]');
+                if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
+            });
+        }
+        const roster = $('op-roster');
+        if (roster) {
+            roster.addEventListener('click', e => {
+                const r = e.target.closest('[data-role-for]');
+                if (r) { e.stopPropagation(); toggleRole(r.dataset.roleFor); return; }
+                const c = e.target.closest('[data-center]');
+                if (c) {
+                    e.stopPropagation();
+                    const emb = _embryos.find(x => x.id === c.dataset.center);
+                    if (emb) centerOnEmbryo(emb);
+                    return;
+                }
+                const g = e.target.closest('[data-goto]');
+                if (g) { showPane(g.dataset.goto); return; }
+                const row = e.target.closest('[data-embryo]');
+                if (row) selectEmbryo(row.dataset.embryo);
+            });
+            roster.addEventListener('keydown', e => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const row = e.target.closest('[data-embryo]');
+                if (row) { e.preventDefault(); selectEmbryo(row.dataset.embryo); }
+            });
+        }
+        const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
+        const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
+        const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
+
+        window.addEventListener('resize', () => { if (_active && _pane === 'bottom') drawMarkers(); });
+        // The viewport also changes size without a window resize — revealing the
+        // pane, the agent panel opening, the first frame arriving. Without this
+        // the overlay keeps whatever size it was first drawn at and every marker
+        // sits in the wrong place until the next frame happens to redraw it.
+        const camBox = $('op-cam-bottom');
+        if (camBox && typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(() => { if (_active && _pane === 'bottom') drawMarkers(); }).observe(camBox);
+        }
 
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
-            ClientEventBus.on('LIGHTSHEET_FRAME', onLightsheetFrame);
+            ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
-                const pos = p && p.positions; if (!pos) return;
-                if (pos.xy_stage && Array.isArray(pos.xy_stage)) { _lastXY = { X: pos.xy_stage[0], Y: pos.xy_stage[1] }; if (_active) renderMiniMap(); }
+                const pos = p && p.positions;
+                if (!pos) return;
+                if (Array.isArray(pos.xy_stage)) _xy = { x: pos.xy_stage[0], y: pos.xy_stage[1] };
                 if (!_active) return;
-                // The device layer publishes F-drive and bottom-Z at 1 Hz tagged
-                // with `kind`, explicitly for this view. Consuming it keeps the
-                // gauges tracking real motion instead of going stale after the
-                // one-shot read on activate.
-                let moved = false;
                 for (const v of Object.values(pos)) {
                     if (!v || typeof v !== 'object' || v.Position == null) continue;
                     const val = Number(v.Position);
                     if (!Number.isFinite(val)) continue;
-                    if (v.kind === 'fdrive') {
-                        _fdPos = val;
-                        if (_fdMin != null) _fdFloor = val - _fdMin;
-                        moved = true;
-                    } else if (v.kind === 'bottom_z') { _bzPos = val; moved = true; }
+                    if (v.kind === 'fdrive') fd.absorbTelemetry(val);
+                    else if (v.kind === 'bottom_z') bz.absorbTelemetry(val);
                 }
-                if (moved) renderGauges();
+                if (_pane === 'acquire') renderSingle();
             });
         }
     }
 
     async function activate() {
         wire();
-        if (_active) return; _active = true;
-        try { const s = await getJSON('/api/embryos/current'); onEmbryosUpdate(s); } catch (_) { renderStep(); }
-        try { absorbAxis('bz', await getJSON('/api/devices/stage/bottom_z')); } catch (_) {}
-        try { absorbAxis('fd', await getJSON('/api/devices/spim/fdrive')); } catch (_) {}
-        renderStep();
+        if (_active) return;
+        _active = true;
+        showPaneInitial();
+        try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) {}
+        await Promise.all([bz.refresh(), fd.refresh()]);
+        renderLock();
+        renderSubnavMeta();
+    }
+    function showPaneInitial() {
+        ['bottom', 'spim', 'acquire'].forEach(p => {
+            const el = $(`op-pane-${p}`);
+            if (el) el.hidden = p !== _pane;
+        });
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', _pane);
+        if (PANES[_pane]) { PANES[_pane].onEnter(); PANES[_pane].render(); }
     }
     function deactivate() {
-        if (!_active) return; _active = false;
-        if (_camOn) { fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {}); applyCam(false); }
-        if (_spimOn) { fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {}); _spimOn = false; D['op-spim-toggle'].textContent = 'Start view'; D['op-spim-toggle'].classList.remove('op-btn-on'); }
+        if (!_active) return;
+        _active = false;
+        // Remember what was running so returning restores it, but leave nothing
+        // decoding behind a hidden view.
+        _bottomWasOn = _bottomOn; _spimWasOn = _spimOn;
+        if (_bottomOn) stopBottom();
+        if (_spimOn) stopSpim();
         forceLedOff();
-        if (_marking) exitMarking();
     }
 
     return { activate, deactivate };

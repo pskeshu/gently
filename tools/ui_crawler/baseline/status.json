@@ -36,8 +36,8 @@
     "title": "One-off snap/volume without a session"
   },
   "US-10": {
-    "status": "partial",
-    "title": "Mark embryos (bottom-cam detect \u2192 single list)"
+    "status": "blocked",
+    "title": "Mark embryos on the bottom camera"
   },
   "US-11": {
     "status": "blocked",
@@ -45,11 +45,11 @@
   },
   "US-12": {
     "status": "blocked",
-    "title": "Lower SPIM \u2192 focus \u2192 acquire"
+    "title": "Lower SPIM head, focus, acquire"
   },
   "US-13": {
     "status": "works",
-    "title": "Run chooser + assign roles after marking"
+    "title": "Assign roles and choose a run mode"
   },
   "US-14": {
     "status": "blocked",
@@ -57,7 +57,7 @@
   },
   "US-15": {
     "status": "blocked",
-    "title": "Monitor / pause / stop / resume a run"
+    "title": "Monitor, pause and stop a run"
   },
   "US-16": {
     "status": "works",
@@ -69,7 +69,15 @@
   },
   "US-18": {
     "status": "blocked",
-    "title": "Run a tactic"
+    "title": "Run a saved tactic"
+  },
+  "US-19": {
+    "status": "works",
+    "title": "Operate surfaces are always live"
+  },
+  "US-20": {
+    "status": "works",
+    "title": "XY interlock is visible and escapable"
   },
   "US-25": {
     "status": "works",

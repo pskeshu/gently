@@ -37,7 +37,7 @@
   // Live camera <img> gets base64 data-URI src swaps at frame rate — recording
   // it would add ~100KB+ per frame on the main thread. Blocked from capture;
   // the bus-summary action records that frames were flowing instead.
-  var BLOCK_SELECTOR = "#op-cam-img";
+  var BLOCK_SELECTOR = "#op-img-bottom, #op-img-spim";
   // Machine-driven, high-churn regions: the live map re-renders at stage-poll
   // rate, the 3D occupancy canvas animates, the temperature graph redraws on
   // every reading. In 'balanced' fidelity these are blocked from the DOM stream
