@@ -20,7 +20,8 @@ async def flow(page, url, rec):
     on_pane = await view(page, "acquire")
     await rec.shot("operate-run-monitor")
 
-    spine = await dom_count(page, "#op-runspine")  # derived from /api/operation_plan, not a client flag
+    # Derived from /api/operation_plan, not a client flag.
+    spine = await dom_count(page, "#op-runspine")
     pause = await dom_count(page, "#op-run-pause")
     stop = await dom_count(page, "#op-run-stop")
     # Pause/Stop are hidden until something is actually running — the panel is
