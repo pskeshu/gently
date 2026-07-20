@@ -1,5 +1,91 @@
 # Gently — Microscopy Agent
 
+## Development workflow
+
+Every change branches off `development` and lands through a pull request against
+`development` in **`gently-project/gently`**. Only how you *push* the branch
+differs, depending on whether you have write access to that repo.
+
+**With write access** — push branches straight to the org repo:
+
+```bash
+git clone git@github.com:gently-project/gently.git && cd gently
+git checkout development && git pull
+git checkout -b feature/<thing>
+# ... work, committing as you go ...
+git push -u origin feature/<thing>
+gh pr create --repo gently-project/gently --base development
+```
+
+**Without write access** — fork `gently-project/gently` on GitHub, clone the
+fork, and keep the org repo as a second remote so you can stay current with it:
+
+```bash
+git clone git@github.com:<your-user>/gently.git && cd gently
+git remote add upstream git@github.com:gently-project/gently.git
+git fetch upstream
+git checkout -b feature/<thing> upstream/development
+# ... work, committing as you go ...
+git push -u origin feature/<thing>          # pushes to YOUR fork
+gh pr create --repo gently-project/gently --base development
+```
+
+Either way the PR targets `development` in the org repo. Run `git remote -v` to
+see which name points where before pushing: in a direct clone `origin` *is* the
+org repo, in a fork-based clone `origin` is your fork and `upstream` is the org
+repo. Rebase on `upstream/development` (or `origin/development`) before opening
+the PR so the diff is only your work.
+
+Two defaults will send a PR to the wrong place if you let them:
+
+- The repo's **default branch is `main`, but PRs target `development`.**
+  `gh pr create` without `--base development` proposes `main`.
+- With no `gh` default repo configured, `gh` can resolve to a different remote
+  than you expect. Pass `--repo gently-project/gently` explicitly, or run
+  `gh repo set-default` once.
+
+## Before every commit and push
+
+CI (`.github/workflows/lint.yml`) gates PRs on these. Run them locally first —
+a failure blocks the PR and costs a push/wait/fix round trip:
+
+```bash
+ruff check .            # lint
+ruff format --check .   # formatting  (drop --check to apply the fix)
+mypy .                  # deps-less, mypy==2.1.0 — the REQUIRED gate
+```
+
+(Prefix with `.venv/bin/python -m ` if the venv is not active.)
+
+`.pre-commit-config.yaml` already wires exactly these three hooks, but **the git
+hook is not installed in a fresh clone** — that is how an unformatted file
+reaches CI. Install it once per clone:
+
+```bash
+pre-commit install              # or .venv/bin/pre-commit install if not on PATH
+```
+
+The hooks mirror the required gate exactly: same pinned ruff/mypy versions, and
+mypy runs with `pass_filenames: false, args: ["."]` so it checks the whole tree
+like CI rather than just staged files. First run builds isolated envs and takes
+a few minutes; after that it is seconds. Note the `ruff` hook runs with `--fix`
+and `ruff-format` rewrites files — when they change something the commit aborts
+by design, so `git add` the fixes and commit again.
+
+Things that bite:
+
+- The `lint` job runs its steps **in order and stops at the first failure**, so a
+  ruff error hides whether mypy would have passed. A green run after fixing ruff
+  is not the same as having checked mypy. Run all three locally.
+- `mypy-strict` (`uv run mypy .`, real deps) is a **separate non-blocking job**
+  (`continue-on-error: true`). Only the deps-less `mypy .` inside `lint` can fail
+  a PR. Don't read a green `mypy-strict` as proof the required gate passed.
+- Lint runs on `pull_request` and on pushes to `main`/`development` only. Pushing
+  a feature branch with no PR open runs **nothing** — the first CI signal arrives
+  when the PR is opened, on the whole accumulated diff.
+- **JS is not covered by CI at all.** If you touch `gently/ui/web/static/js/`,
+  run `node --test tests/js/` yourself; nothing else will.
+
 ## Storage Architecture (Gently3 — File-Based)
 
 All data lives under `D:\Gently3\` (env: `GENTLY_STORAGE_PATH`). **No SQLite databases.** Everything is human-browsable files.
@@ -90,7 +176,9 @@ grep -E "ERROR|Traceback" D:/Gently3/logs/gently_*.log
 
 ## Perception
 
-Perception is handled by `gently-perception` (separate repo: `pskeshu/gently-perception`), installed as a pip dependency. The timelapse orchestrator uses `Perceiver()` from `gently_perception` — a self-contained system that loads its own examples and accumulates per-embryo context through sequential calls.
+Perception is handled by `gently-perception` (separate repo:
+`gently-project/gently-perception` — this is what CI clones and what
+`pyproject.toml` expects beside this repo), installed as a pip dependency. The timelapse orchestrator uses `Perceiver()` from `gently_perception` — a self-contained system that loads its own examples and accumulates per-embryo context through sequential calls.
 
 ## Device Layer
 
