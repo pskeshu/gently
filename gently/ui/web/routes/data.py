@@ -1004,6 +1004,7 @@ def create_router(server) -> APIRouter:
         kw: dict = {
             "use_claude_review": bool(payload.get("use_claude_review", False)),
             "use_last_frame": bool(payload.get("use_last_frame", False)),
+            "capture_only": bool(payload.get("capture_only", False)),
         }
         for key, cast in (
             ("exposure_ms", float),

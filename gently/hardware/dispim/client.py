@@ -1147,6 +1147,7 @@ class DiSPIMMicroscope(Microscope):
         min_area: int = 5000,
         max_area: int = 150000,
         use_last_frame: bool = False,
+        capture_only: bool = False,
     ) -> dict:
         """
         Capture image and detect embryos using brightness detection + SAM.
@@ -1199,6 +1200,7 @@ class DiSPIMMicroscope(Microscope):
                 "min_area": min_area,
                 "max_area": max_area,
                 "use_last_frame": use_last_frame,
+                "capture_only": capture_only,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms

@@ -2953,6 +2953,28 @@ class DeviceLayerServer(Service):
                 stage_position = (stage_x, stage_y)
             logger.info("[detect_embryos] Stage position: %s", stage_position)
 
+            # Cache the frame so a follow-up use_last_frame call runs SAM on this
+            # exact image (also lets capture_only + detect be two calls).
+            self._last_bottom_frame = image
+            self._last_bottom_frame_xy = list(stage_position)
+
+            # capture_only: hand back the frame WITHOUT running SAM, so the
+            # Operate view can show the image first and detect as a second call
+            # (image → spinner → overlaid results, instead of all at the end).
+            if data.get("capture_only"):
+                frame = self._encode_frame_for_stream(image)
+                if frame is not None:
+                    frame["stage_position"] = list(stage_position)
+                logger.info("[detect_embryos] capture_only — returning frame, skipping SAM")
+                return web.json_response(
+                    {
+                        "success": True,
+                        "embryos": [],
+                        "stage_position": list(stage_position),
+                        "frame": frame,
+                    }
+                )
+
             # Run SAM detection in thread to avoid blocking event loop
             logger.info("[detect_embryos] Running SAM detection...")
             detector = self._get_sam_detector()

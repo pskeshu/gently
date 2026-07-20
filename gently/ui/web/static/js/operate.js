@@ -608,6 +608,10 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
 
+    function setBusyText(t) {
+        const el = document.querySelector('#op-busy-bottom .op-cam-busy-txt');
+        if (el) el.textContent = t;
+    }
     async function runDetect() {
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
@@ -615,14 +619,24 @@ const OperateManager = (function () {
         const note = $('op-detect-note');
         // Detect on the frame already on screen when there is one — the operator
         // is looking at it, and re-capturing would disturb the LED/room light.
-        // Only grab a fresh image when the viewport is empty.
         const shown = $('op-img-bottom');
-        const useLast = !!(shown && shown.classList.contains('has-frame'));
+        let hasFrame = !!(shown && shown.classList.contains('has-frame'));
         try {
-            const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: useLast });
-            // Show the frame SAM ran on so the operator sees the image the
-            // candidates came from — critical for a fresh capture, where the
-            // viewport was otherwise blank ("Camera off").
+            // Phase 1 — when the viewport is empty, capture and SHOW the image
+            // FIRST (no SAM yet), so the operator sees what detection will run on
+            // before it runs, rather than the image appearing only at the end.
+            if (!hasFrame) {
+                setBusyText('Capturing…');
+                const cap = await postJSON('/api/devices/detect_embryos', { capture_only: true });
+                if (cap.frame && cap.frame.jpeg_b64) {
+                    _lastBottom = cap.frame;
+                    setImg('op-img-bottom', 'op-ph-bottom', cap.frame);
+                    hasFrame = true;
+                }
+            }
+            // Phase 2 — run SAM on the frame now on screen, then overlay results.
+            setBusyText('Detecting…');
+            const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: hasFrame });
             if (d.frame && d.frame.jpeg_b64) {
                 _lastBottom = d.frame;
                 setImg('op-img-bottom', 'op-ph-bottom', d.frame);
