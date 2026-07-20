@@ -549,9 +549,15 @@
                   </div>
                   <div class="op-main">
                     <div class="op-cam" id="op-cam-bottom">
-                      <img class="op-cam-img" id="op-img-bottom" alt="Bottom camera view">
-                      <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
-                      <div class="op-cam-ph" id="op-ph-bottom">Camera off</div>
+                      <div class="op-cam-fit">
+                        <img class="op-cam-img" id="op-img-bottom" alt="Bottom camera view">
+                        <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
+                        <div class="op-cam-ph" id="op-ph-bottom">Camera off</div>
+                        <div class="op-cam-busy" id="op-busy-bottom" hidden>
+                          <span class="op-cam-spin" aria-hidden="true"></span>
+                          <span class="op-cam-busy-txt">Detecting…</span>
+                        </div>
+                      </div>
                     </div>
                     <!-- Marking actions sit under the image they act on, not in the
                          instrument column, which is for the hardware axes. -->
@@ -607,8 +613,10 @@
                   </div>
                   <div class="op-main">
                     <div class="op-cam" id="op-cam-spim">
-                      <img class="op-cam-img" id="op-img-spim" alt="Light-sheet view">
-                      <div class="op-cam-ph" id="op-ph-spim">View off</div>
+                      <div class="op-cam-fit">
+                        <img class="op-cam-img" id="op-img-spim" alt="Light-sheet view">
+                        <div class="op-cam-ph" id="op-ph-spim">View off</div>
+                      </div>
                     </div>
                     <div class="op-bar">
                       <span class="op-cap" id="op-spim-target">No embryo selected</span>

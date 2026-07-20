@@ -136,9 +136,28 @@
 .op-lock-txt i { font-style: normal; color: var(--op-ink-dim); }
 
 /* ── viewport ───────────────────────────────────────────────────────────── */
+/* The viewport is a centering box; the frame chrome (border, background,
+   placeholder) lives on .op-cam-fit, which is sized to the frame's own aspect
+   ratio (--cam-ar, set from the image once a frame arrives). That way the
+   border hugs the image instead of letterboxing it inside an oversized box. */
 .op-cam {
-    position: relative;
     flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.op-cam-fit {
+    position: relative;
+    aspect-ratio: var(--cam-ar, 1 / 1);
+    /* Height drives (the main column is landscape, the frame square/portrait),
+       so the box fills the available height and its width follows the aspect —
+       capped by the column width. The narrow layout flips this below. */
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
     min-height: 0;
     border: 1px solid var(--op-rule);
     border-radius: 6px;
@@ -173,6 +192,40 @@
     color: var(--op-ink-dim);
     letter-spacing: 0.06em;
     text-transform: uppercase;
+}
+
+/* Detection-in-progress overlay: sits over the frame so the wait is legible
+   on the image itself, not only in the button label. */
+.op-cam-busy {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--op-2);
+    background: color-mix(in srgb, var(--img-bg) 55%, transparent);
+    backdrop-filter: blur(1px);
+    z-index: 3;
+    pointer-events: none;
+}
+.op-cam-busy[hidden] { display: none; }
+.op-cam-busy-txt {
+    font-size: 0.72rem;
+    color: var(--op-ink);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.op-cam-spin {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--op-ink) 30%, transparent);
+    border-top-color: var(--accent, currentColor);
+    animation: op-cam-spin 0.8s linear infinite;
+}
+@keyframes op-cam-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .op-cam-spin { animation-duration: 2s; }
 }
 
 /* Action bar beneath a viewport: what you do TO the image lives next to it. */
@@ -506,6 +559,9 @@
     .op-main, .op-inst { grid-column: 1; }
     .op-inst { overflow-y: visible; }
     .op-cam { flex: 0 0 auto; min-height: 260px; }
+    /* Stacked/narrow: the box is width-limited, so width drives and height
+       follows the aspect (the parent's height is no longer definite here). */
+    .op-cam-fit { width: 100%; height: auto; }
     .op-col { overflow-y: visible; }
     .op-main-cols { grid-template-columns: minmax(0, 1fr); }
 }

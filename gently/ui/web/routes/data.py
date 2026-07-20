@@ -974,7 +974,9 @@ def create_router(server) -> APIRouter:
         clean (a marking step, not a blind auto-register).
 
         Body (all optional): {exposure_ms, min_confidence, brightness_percentile,
-        min_area, max_area, use_claude_review}. Claude review defaults OFF.
+        min_area, max_area, use_claude_review, use_last_frame}. Claude review
+        defaults OFF. use_last_frame detects on the last streamed frame (if any)
+        instead of capturing a fresh image.
 
         Returns: {success, count, stage_position: [x, y] | null,
                   embryos: [{embryo_id, pixel_x, pixel_y, stage_x_um, stage_y_um,
@@ -988,7 +990,10 @@ def create_router(server) -> APIRouter:
                 status_code=503, detail="SAM detection not available on device layer"
             )
 
-        kw: dict = {"use_claude_review": bool(payload.get("use_claude_review", False))}
+        kw: dict = {
+            "use_claude_review": bool(payload.get("use_claude_review", False)),
+            "use_last_frame": bool(payload.get("use_last_frame", False)),
+        }
         for key, cast in (
             ("exposure_ms", float),
             ("min_confidence", float),

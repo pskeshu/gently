@@ -398,11 +398,32 @@ const OperateManager = (function () {
             img.classList.add('has-frame');
             if (ph) ph.style.display = 'none';
         }
+        // Match the viewport box to the frame's aspect so the border hugs the
+        // image. naturalWidth is 0 until the data URL decodes, so fall back to a
+        // one-shot load listener.
+        if (img.naturalWidth && img.naturalHeight) setCamAspect(img);
+        else img.addEventListener('load', () => setCamAspect(img), { once: true });
+    }
+    function setCamAspect(img) {
+        const fit = img.closest('.op-cam-fit');
+        if (fit && img.naturalWidth && img.naturalHeight) {
+            fit.style.setProperty('--cam-ar', `${img.naturalWidth} / ${img.naturalHeight}`);
+        }
     }
     function clearImg(imgId, phId, text) {
         const img = $(imgId), ph = $(phId);
         if (img) img.classList.remove('has-frame');
         if (ph) { ph.style.display = ''; if (text) ph.textContent = text; }
+    }
+    // Stopping the stream freezes the last frame in place rather than clearing
+    // it: an operator wants to keep reading what is on the sample surface after
+    // ending live view. Only fall back to the placeholder when no frame was
+    // ever shown. The "LIVE" badge dropping (renderSubnavMeta) is the cue that
+    // the frame is now static.
+    function freezeImg(imgId, phId, text) {
+        const img = $(imgId);
+        if (img && img.classList.contains('has-frame')) return;
+        clearImg(imgId, phId, text);
     }
 
     // Letterbox geometry for an object-fit: contain image, in CSS pixels.
@@ -578,16 +599,22 @@ const OperateManager = (function () {
         _bottomOn = on;
         const b = $('op-cam-toggle');
         if (b) { b.textContent = on ? 'Stop camera' : 'Start camera'; b.classList.toggle('is-on', on); }
-        if (!on) clearImg('op-img-bottom', 'op-ph-bottom', 'Camera off');
+        if (!on) freezeImg('op-img-bottom', 'op-ph-bottom', 'Camera off');
         renderSubnavMeta();
     }
 
     async function runDetect() {
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
+        const busy = $('op-busy-bottom'); if (busy) busy.hidden = false;
         const note = $('op-detect-note');
+        // Detect on the frame already on screen when there is one — the operator
+        // is looking at it, and re-capturing would disturb the LED/room light.
+        // Only grab a fresh image when the viewport is empty.
+        const shown = $('op-img-bottom');
+        const useLast = !!(shown && shown.classList.contains('has-frame'));
         try {
-            const d = await postJSON('/api/devices/detect_embryos', {});
+            const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: useLast });
             const cands = Array.isArray(d.embryos) ? d.embryos : [];
             const f = frameOf(_lastBottom);
             const cap = d.stage_position || stageOf(_lastBottom);
@@ -611,7 +638,10 @@ const OperateManager = (function () {
             } else {
                 toast(`Detect failed (${e.status || e.message})`);
             }
-        } finally { if (b) { b.disabled = false; b.textContent = 'Detect automatically'; } }
+        } finally {
+            if (b) { b.disabled = false; b.textContent = 'Detect automatically'; }
+            if (busy) busy.hidden = true;
+        }
     }
 
     async function confirmMarks() {
@@ -663,7 +693,7 @@ const OperateManager = (function () {
         _spimOn = on;
         const b = $('op-spim-toggle');
         if (b) { b.textContent = on ? 'Stop view' : 'Start view'; b.classList.toggle('is-on', on); }
-        if (!on) clearImg('op-img-spim', 'op-ph-spim', 'View off');
+        if (!on) freezeImg('op-img-spim', 'op-ph-spim', 'View off');
         renderSubnavMeta();
     }
 

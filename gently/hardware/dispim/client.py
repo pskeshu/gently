@@ -1146,6 +1146,7 @@ class DiSPIMMicroscope(Microscope):
         brightness_percentile: float = 99.0,
         min_area: int = 5000,
         max_area: int = 150000,
+        use_last_frame: bool = False,
     ) -> dict:
         """
         Capture image and detect embryos using brightness detection + SAM.
@@ -1171,6 +1172,9 @@ class DiSPIMMicroscope(Microscope):
             Percentile threshold for brightness-based detection.
         min_area, max_area : int
             Embryo area bounds in pixels.
+        use_last_frame : bool
+            Detect on the last streamed bottom-camera frame instead of capturing
+            a fresh image. Falls back to a capture if no frame is cached.
 
         Returns
         -------
@@ -1194,6 +1198,7 @@ class DiSPIMMicroscope(Microscope):
                 "brightness_percentile": brightness_percentile,
                 "min_area": min_area,
                 "max_area": max_area,
+                "use_last_frame": use_last_frame,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms
@@ -1216,14 +1221,17 @@ class DiSPIMMicroscope(Microscope):
             return result
 
         except asyncio.TimeoutError:
+            logger.error("detect_embryos timed out (5 min limit)")
             return {"success": False, "error": "Detection timed out (5 min limit)"}
         except aiohttp.ClientError as e:
+            logger.exception("detect_embryos: device layer request failed")
             return {
                 "error": str(NetworkError(f"Device layer request failed: {e}")),
                 "traceback": traceback.format_exc(),
                 "success": False,
             }
         except Exception as e:
+            logger.exception("detect_embryos failed")
             return {
                 "error": str(e),
                 "traceback": traceback.format_exc(),

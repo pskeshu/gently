@@ -168,6 +168,12 @@ class DeviceLayerServer(Service):
         self._cam_interval_sec: float = 0.25  # 4 Hz
         self._cam_target_max_dim: int = 360  # ~360px thumbnail
         self._cam_jpeg_quality: int = 55
+        # Last full-res bottom-camera frame the streamer grabbed, kept so
+        # detect_embryos can run on the frame the operator is looking at instead
+        # of re-capturing (which would disturb the LED / room light). The stream
+        # ships a ~360px thumbnail; this is the full-res array behind it.
+        self._last_bottom_frame: np.ndarray | None = None
+        self._last_bottom_frame_xy: list[float] | None = None
 
         # Lightsheet (SPIM) live stream — continuous sequence acquisition.
         self._ls_subscribers: list[asyncio.Queue] = []
@@ -1026,6 +1032,11 @@ class DeviceLayerServer(Service):
                     continue
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._capture_bottom_frame_sync)
+                if img is not None:
+                    # Retain the full-res grab (and the stage XY it was taken at)
+                    # so detect_embryos can reuse it as "the last frame".
+                    self._last_bottom_frame = img
+                    self._last_bottom_frame_xy = self._current_stage_xy()
                 payload = self._encode_frame_for_stream(img) if img is not None else None
                 if payload is not None:
                     # Stamp the true stage XY so the operate-view marking canvas
@@ -2835,93 +2846,111 @@ class DeviceLayerServer(Service):
             min_area = data.get("min_area", 5000)
             max_area = data.get("max_area", 150000)
 
-            # Set exposure if specified
-            if exposure_ms is not None:
-                bottom_camera = self.devices.get("bottom_camera")
-                if bottom_camera:
-                    bottom_camera.configure_exposure(exposure_ms)
-
-            # Detection needs even illumination. Prefer the ROOM LIGHT
-            # (SwitchBot) and disable the camera LED. But the room light is an
-            # OPTIONAL BLE accessory — when it's absent or the command fails,
-            # forcing the LED off leaves the frame near-black and SAM finds
-            # nothing. So only disable the LED once the room light is actually
-            # on; otherwise fall back to the camera LED as the light source.
-            bottom_camera = self.devices.get("bottom_camera")
-            if await self._set_room_light("on"):
-                if bottom_camera is not None:
-                    bottom_camera.use_led = False
-                logger.info("[detect_embryos] Room light ON, camera LED disabled")
-            else:
-                if bottom_camera is not None:
-                    bottom_camera.use_led = True
-                logger.warning(
-                    "[detect_embryos] Room light unavailable (no SwitchBot "
-                    "configured or command failed) — falling back to camera LED"
-                )
-
-            # Capture image via plan
-            logger.info("[detect_embryos] Capturing bottom camera image...")
-            capture_result = await self.submit_plan(
-                "capture_bottom_image_plan", kwargs={"bottom_camera": "bottom_camera"}
-            )
-
-            if not capture_result.get("success"):
-                return web.json_response(
-                    {
-                        "success": False,
-                        "error": f"Image capture failed: {capture_result.get('error', 'Unknown')}",
-                    },
-                    status=500,
-                )
-
-            # Extract image from result
-            docs = capture_result.get("documents", {})
-            events = docs.get("events", [])
+            # When the operator already has a frame on screen, detect on that
+            # exact frame instead of re-capturing — re-capturing disturbs the
+            # LED / room light and wastes a light dose. The stream ships a
+            # thumbnail; self._last_bottom_frame is the full-res array behind it.
             image = None
-            if events:
-                event_data = events[0].get("data", {})
-                for key in ["bottom_camera", "bottom_camera_image", "Bottom PCO"]:
-                    if key in event_data:
-                        val = event_data[key]
-                        # Handle file ref
-                        if isinstance(val, dict) and val.get("__file_ref__"):
-                            import tifffile
-
-                            image = tifffile.imread(val["path"])
-                        else:
-                            image = np.array(val)
-                        break
+            stage_position = None
+            if data.get("use_last_frame") and self._last_bottom_frame is not None:
+                image = self._last_bottom_frame
+                xy = self._last_bottom_frame_xy
+                if xy is not None and len(xy) >= 2:
+                    stage_position = (float(xy[0]), float(xy[1]))
+                logger.info(
+                    "[detect_embryos] Reusing last streamed frame (shape %s), "
+                    "skipping capture",
+                    image.shape,
+                )
 
             if image is None:
-                return web.json_response(
-                    {"success": False, "error": "No image data in capture result"},
-                    status=500,
+                # Set exposure if specified
+                if exposure_ms is not None:
+                    bottom_camera = self.devices.get("bottom_camera")
+                    if bottom_camera:
+                        bottom_camera.configure_exposure(exposure_ms)
+
+                # Detection needs even illumination. Prefer the ROOM LIGHT
+                # (SwitchBot) and disable the camera LED. But the room light is an
+                # OPTIONAL BLE accessory — when it's absent or the command fails,
+                # forcing the LED off leaves the frame near-black and SAM finds
+                # nothing. So only disable the LED once the room light is actually
+                # on; otherwise fall back to the camera LED as the light source.
+                bottom_camera = self.devices.get("bottom_camera")
+                if await self._set_room_light("on"):
+                    if bottom_camera is not None:
+                        bottom_camera.use_led = False
+                    logger.info("[detect_embryos] Room light ON, camera LED disabled")
+                else:
+                    if bottom_camera is not None:
+                        bottom_camera.use_led = True
+                    logger.warning(
+                        "[detect_embryos] Room light unavailable (no SwitchBot "
+                        "configured or command failed) — falling back to camera LED"
+                    )
+
+                # Capture image via plan
+                logger.info("[detect_embryos] Capturing bottom camera image...")
+                capture_result = await self.submit_plan(
+                    "capture_bottom_image_plan", kwargs={"bottom_camera": "bottom_camera"}
                 )
+
+                if not capture_result.get("success"):
+                    return web.json_response(
+                        {
+                            "success": False,
+                            "error": f"Image capture failed: {capture_result.get('error', 'Unknown')}",
+                        },
+                        status=500,
+                    )
+
+                # Extract image from result
+                docs = capture_result.get("documents", {})
+                events = docs.get("events", [])
+                if events:
+                    event_data = events[0].get("data", {})
+                    for key in ["bottom_camera", "bottom_camera_image", "Bottom PCO"]:
+                        if key in event_data:
+                            val = event_data[key]
+                            # Handle file ref
+                            if isinstance(val, dict) and val.get("__file_ref__"):
+                                import tifffile
+
+                                image = tifffile.imread(val["path"])
+                            else:
+                                image = np.array(val)
+                            break
+
+                if image is None:
+                    return web.json_response(
+                        {"success": False, "error": "No image data in capture result"},
+                        status=500,
+                    )
 
             logger.info("[detect_embryos] Image shape: %s", image.shape)
 
-            # Read stage position
-            logger.info("[detect_embryos] Reading stage position...")
-            stage_result = await self.submit_plan(
-                "read_stage_plan", kwargs={"xy_stage": "xy_stage"}
-            )
+            # Read stage position (unless the reused frame already carried one).
+            if stage_position is None:
+                logger.info("[detect_embryos] Reading stage position...")
+                stage_result = await self.submit_plan(
+                    "read_stage_plan", kwargs={"xy_stage": "xy_stage"}
+                )
 
-            stage_x, stage_y = 0.0, 0.0
-            if stage_result.get("success"):
-                stage_docs = stage_result.get("documents", {})
-                stage_events = stage_docs.get("events", [])
-                if stage_events:
-                    stage_data = stage_events[0].get("data", {})
-                    # DiSPIMXYStage.read() returns {device_name: [x, y]}
-                    for key in ["xy_stage", "XYStage:XY:31", "xy_stage_position"]:
-                        if key in stage_data:
-                            val = stage_data[key]
-                            if isinstance(val, (list, tuple)) and len(val) >= 2:
-                                stage_x, stage_y = float(val[0]), float(val[1])
-                                break
+                stage_x, stage_y = 0.0, 0.0
+                if stage_result.get("success"):
+                    stage_docs = stage_result.get("documents", {})
+                    stage_events = stage_docs.get("events", [])
+                    if stage_events:
+                        stage_data = stage_events[0].get("data", {})
+                        # DiSPIMXYStage.read() returns {device_name: [x, y]}
+                        for key in ["xy_stage", "XYStage:XY:31", "xy_stage_position"]:
+                            if key in stage_data:
+                                val = stage_data[key]
+                                if isinstance(val, (list, tuple)) and len(val) >= 2:
+                                    stage_x, stage_y = float(val[0]), float(val[1])
+                                    break
 
-            stage_position = (stage_x, stage_y)
+                stage_position = (stage_x, stage_y)
             logger.info("[detect_embryos] Stage position: %s", stage_position)
 
             # Run SAM detection in thread to avoid blocking event loop
@@ -2976,6 +3005,10 @@ class DeviceLayerServer(Service):
         except Exception as e:
             import traceback
 
+            # Log it too — the traceback going only into the response body means
+            # capture/SAM failures (missing deps, checkpoint, CUDA) leave a clean
+            # log and are near-impossible to diagnose from the server side.
+            logger.exception("[detect_embryos] request failed")
             return web.json_response(
                 {
                     "success": False,
@@ -3039,6 +3072,11 @@ class DeviceLayerServer(Service):
         except Exception as e:
             import traceback
 
+            # This is the block that hid a bare ModuleNotFoundError for weeks:
+            # detect_embryos runs SAM in a worker thread and returned the error
+            # only in the payload. Log it so the traceback lands in the device
+            # log, not just the HTTP response.
+            logger.exception("[detect_embryos] SAM detection failed")
             return {
                 "success": False,
                 "error": str(e),
