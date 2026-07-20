@@ -1,5 +1,15 @@
 # Operate: navigable steps + real instruments
 
+> **SUPERSEDED (2026-07-20).** The premise below — that Operate is a guided
+> sequence the software owns, made navigable rather than removed — was dropped.
+> Operate is now three independent, always-live surfaces (Bottom cam / SPIM head
+> / Acquisition) with no steps, phases or run-mode chooser; gating comes only
+> from live hardware state. See `feat(operate): three instrument surfaces, no
+> workflow`. Kept as the record of why the step model was abandoned rather than
+> repaired: each round made disclosure more navigable without questioning the
+> sequence itself. The safety analysis here (F-drive floor, XY interlock, the
+> 15fps TDR cap, the half-frame bug) all still holds and carried over.
+
 **Date:** 2026-07-18
 **Context:** v1 release prep. Ryan is the first external user; he tests on the diSPIM with live samples tomorrow morning.
 **Status:** approved shape, scoped for one night.
