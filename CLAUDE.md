@@ -43,19 +43,22 @@ CONTRIBUTING.md is canonical for the toolchain. The trap it doesn't mention:
 bypass ruff and mypy. Run `pre-commit install` once per clone, then
 `pre-commit run --all-files` before opening a PR.
 
-Non-obvious CI behaviour, all in `.github/workflows/lint.yml`:
+`.github/workflows/lint.yml` is the source of truth for which checks gate a PR,
+and that changes — read it rather than trusting a list here. What stays true:
 
-- The `lint` job runs its steps **in order and stops at the first failure**, so a
-  ruff error hides whether mypy would have passed. A green run after fixing ruff
-  is not evidence that mypy ever ran.
-- `mypy-strict` (`uv run mypy .`, real deps) is a **separate non-blocking job**
-  (`continue-on-error: true`). Only the deps-less `mypy .` inside `lint` gates a
-  PR — a green `mypy-strict` proves nothing about the required check.
-- Lint runs on `pull_request` and on pushes to `main`/`development` only. A
-  feature branch with no PR open gets **no CI at all**; the first signal arrives
-  when the PR is opened, against the whole accumulated diff.
-- **JavaScript has no CI coverage.** If you touch `gently/ui/web/static/js/`,
-  run `node --test tests/js/` yourself — nothing else will.
+- **There are two mypy runs and they can disagree.** One runs `mypy .` with no
+  project deps, so third-party imports fall back to `Any`; the other runs
+  `uv run mypy .` with the real packages and resolves their actual types. A
+  green run of one says nothing about the other. `uv sync && uv run mypy .`
+  reproduces the deps-installed run locally; the pre-commit hook reproduces the
+  deps-less one.
+- **A job stops at its first failing step.** A ruff failure means the mypy step
+  in that job never ran, so a green re-run after fixing ruff is not evidence
+  that mypy passed.
+- **CI is Python-only.** Nothing runs the JS tests, so if you touch
+  `gently/ui/web/static/js/`, run `node --test tests/js/` yourself.
+- CI runs on pull requests and on pushes to `main`/`development`, so a feature
+  branch with no PR open gets no signal at all.
 
 ### Running the app off-Windows
 
