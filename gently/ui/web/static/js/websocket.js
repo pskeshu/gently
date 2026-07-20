@@ -36,11 +36,21 @@ function loadInitialData() {
         })
         .catch(e => console.warn('Failed to load calibration:', e));
 
-    fetch('/api/embryos')
+    // Bootstrap from the CURRENT (in-memory experiment) embryos, not the disk
+    // store: embryos registered this session live in memory until a volume is
+    // acquired, so /api/embryos (disk-backed) reads 0 and every "N embryos"
+    // count shows 0 on load. Map to id strings to keep state.embryos's shape
+    // (viewer.js does .includes()/.push() on it).
+    fetch('/api/embryos/current')
         .then(r => r.json())
         .then(data => {
-            state.embryos = data.embryos || [];
+            const list = data.embryos || [];
+            state.embryos = list.map(e => (e && e.id) ? e.id : e);
             if (typeof updateStatusbar === 'function') updateStatusbar();
+            // Fan out so every count-renderer (header strip, etc.) refreshes off
+            // the bootstrap, not just the footer statusbar. Shape matches the
+            // server-pushed EMBRYOS_UPDATE ({embryos: [...]}).
+            if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('EMBRYOS_UPDATE', { embryos: list });
         })
         .catch(e => console.warn('Failed to load embryos:', e));
 }

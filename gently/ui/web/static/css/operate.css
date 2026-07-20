@@ -77,6 +77,91 @@
     letter-spacing: 0.04em;
 }
 
+/* ── shared embryo rail + pane area ─────────────────────────────────────── */
+.op-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: var(--op-3);
+}
+.op-panearea {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+/* The rail is redundant on Acquisition, which carries its own richer roster. */
+.op-body[data-pane="acquire"] .op-embryos { display: none; }
+.op-embryos {
+    flex: 0 0 208px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--op-panel);
+    overflow: hidden;
+}
+.op-erail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--op-2) var(--op-3);
+    border-bottom: 1px solid var(--op-rule);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+    flex: 0 0 auto;
+}
+.op-erail-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--op-1);
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-1);
+}
+.op-erail-empty {
+    padding: var(--op-3);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--op-ink-dim);
+    text-align: center;
+}
+.op-erow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--op-2);
+    padding: var(--op-2);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.op-erow:hover { background: color-mix(in srgb, var(--op-ink) 6%, transparent); }
+.op-erow.is-sel {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.op-erow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.op-erow-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.op-erow-label { font-size: 0.78rem; color: var(--op-ink); font-weight: 600; }
+.op-erow-xy { font-family: var(--op-mono); font-size: 0.62rem; color: var(--op-ink-dim); }
+.op-erow-del {
+    border: none;
+    background: none;
+    color: var(--op-ink-dim);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+}
+.op-erow-del:hover { color: var(--op-emit); background: color-mix(in srgb, var(--op-emit) 14%, transparent); }
+
 /* ── pane shell ─────────────────────────────────────────────────────────── */
 .op-pane {
     flex: 1 1 auto;
@@ -562,6 +647,16 @@
     /* Stacked/narrow: the box is width-limited, so width drives and height
        follows the aspect (the parent's height is no longer definite here). */
     .op-cam-fit { width: 100%; height: auto; }
+    /* Keep the embryo rail beside the camera even here — just make it narrower.
+       It only stacks on top at the much smaller breakpoint below. */
+    .op-embryos { flex: 0 0 168px; }
     .op-col { overflow-y: visible; }
     .op-main-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Only when there is genuinely no room for two columns does the rail stack on
+   top of the pane, capped so the camera keeps most of the height. */
+@container operate (max-width: 560px) {
+    .op-body { flex-direction: column; }
+    .op-embryos { flex: 0 0 auto; max-height: 148px; }
 }

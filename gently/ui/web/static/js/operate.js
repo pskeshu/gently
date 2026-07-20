@@ -542,7 +542,9 @@ const OperateManager = (function () {
         for (let i = 0; i < _markers.length; i++) {
             const p = markerToCanvas(_markers[i], r);
             if (p && Math.hypot(cxv - p.cx, cyv - p.cy) <= MARK_HIT_PX) {
-                _markers.splice(i, 1); drawMarkers(); renderMarkCount(); return;
+                // Editing the set invalidates the "N candidates added" note — it
+                // was the detection-time count, not the current one.
+                _markers.splice(i, 1); drawMarkers(); renderMarkCount(); setDetectNote(''); return;
             }
         }
         // Click a registered embryo to select it and centre the stage on it.
@@ -582,6 +584,9 @@ const OperateManager = (function () {
         const ok = $('op-confirm'); if (ok) ok.disabled = n === 0;
         const cl = $('op-clear'); if (cl) cl.disabled = n === 0;
     }
+    function setDetectNote(text) {
+        const note = $('op-detect-note'); if (note) note.textContent = text || '';
+    }
 
     // ══ BOTTOM PANE ═════════════════════════════════════════════════════════
     async function toggleBottomCam() {
@@ -615,9 +620,20 @@ const OperateManager = (function () {
         const useLast = !!(shown && shown.classList.contains('has-frame'));
         try {
             const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: useLast });
+            // Show the frame SAM ran on so the operator sees the image the
+            // candidates came from — critical for a fresh capture, where the
+            // viewport was otherwise blank ("Camera off").
+            if (d.frame && d.frame.jpeg_b64) {
+                _lastBottom = d.frame;
+                setImg('op-img-bottom', 'op-ph-bottom', d.frame);
+            }
             const cands = Array.isArray(d.embryos) ? d.embryos : [];
             const f = frameOf(_lastBottom);
             const cap = d.stage_position || stageOf(_lastBottom);
+            // A fresh detection REPLACES the previous auto-detected set rather
+            // than piling onto it (re-running would otherwise double the marks).
+            // Manual marks are kept — only 'sam' ones are cleared.
+            _markers = _markers.filter(m => m.source !== 'sam');
             let added = 0;
             cands.forEach(c => {
                 let sx = c.stage_x_um, sy = c.stage_y_um;
@@ -671,6 +687,7 @@ const OperateManager = (function () {
             const n = (d.registered || []).length;
             _markers = [];
             drawMarkers(); renderMarkCount();
+            setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
             toast(`Register failed (${e.status || e.message})`);
@@ -765,7 +782,55 @@ const OperateManager = (function () {
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
     function selectEmbryo(id) {
         _selected = id;
-        renderRoster(); renderSpimTarget(); renderSingle();
+        renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
+    }
+
+    // Shared embryo list, left of every instrument surface. Reads the canonical
+    // _embryos (bootstrapped from /api/embryos/current, kept live by
+    // EMBRYOS_UPDATE), so it is the same set on Bottom / SPIM / Acquire and it
+    // survives a refresh.
+    function renderEmbryoRail() {
+        const host = $('op-erail-list');
+        const count = $('op-erail-count');
+        if (count) count.textContent = _embryos.length;
+        if (!host) return;
+        host.innerHTML = '';
+        if (!_embryos.length) {
+            const box = document.createElement('div');
+            box.className = 'op-erail-empty';
+            box.textContent = 'No embryos yet — detect on the bottom camera, then register.';
+            host.appendChild(box);
+            return;
+        }
+        _embryos.forEach(emb => {
+            const xy = resolveXY(emb);
+            const row = document.createElement('div');
+            row.className = 'op-erow' + (emb.id === _selected ? ' is-sel' : '');
+            row.tabIndex = 0;
+            row.dataset.embryo = emb.id;
+            row.innerHTML =
+                '<span class="op-erow-main">' +
+                `<span class="op-erow-label">Embryo ${escapeHtml(labelFor(emb))}</span>` +
+                `<span class="op-erow-xy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>` +
+                '</span>' +
+                `<button class="op-erow-del" type="button" title="Remove this embryo (false positive)" ` +
+                `data-del="${escapeHtml(emb.id)}">×</button>`;
+            host.appendChild(row);
+        });
+    }
+
+    async function deleteEmbryo(id) {
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            if (!res.ok) throw Object.assign(new Error('delete failed'), { status: res.status });
+            // EMBRYOS_UPDATE will reconcile every view; prune optimistically so
+            // the row disappears immediately even before the event lands.
+            _embryos = _embryos.filter(e => e.id !== id);
+            if (_selected === id) _selected = _embryos.length ? _embryos[0].id : null;
+            renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
+        } catch (e) {
+            toast(`Delete failed (${e.status || e.message})`);
+        }
     }
 
     function renderRoster() {
@@ -1015,9 +1080,13 @@ const OperateManager = (function () {
             const el = $(`op-pane-${p}`);
             if (el) el.hidden = p !== name;
         });
+        // Drives the CSS that hides the shared rail on Acquisition (its own
+        // roster is richer) while keeping it on Bottom / SPIM.
+        const body = $('op-body'); if (body) body.dataset.pane = name;
         if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', name);
         PANES[name].onEnter();
         PANES[name].render();
+        renderEmbryoRail();
         renderLock();
     }
 
@@ -1056,6 +1125,15 @@ const OperateManager = (function () {
     function onEmbryosUpdate(p) {
         _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
         if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
+        // The embryo list is shared across all three panes; keep a live
+        // selection whenever it is non-empty so SPIM/Acquire aren't a dead-end
+        // ("No embryo selected") right after registering. The operator can still
+        // switch by clicking a registered embryo (bottom) or a roster row.
+        if (!_selected && _embryos.length) _selected = _embryos[0].id;
+        // Render the shared rail even when the Operate view isn't the active tab,
+        // so switching to it (or refreshing) shows the list immediately rather
+        // than waiting for the next mutation event.
+        renderEmbryoRail();
         if (!_active) return;
         renderRoster(); renderSpimTarget(); renderSingle();
     }
@@ -1084,8 +1162,25 @@ const OperateManager = (function () {
         const det = $('op-detect'); if (det) det.addEventListener('click', runDetect);
         const ok = $('op-confirm'); if (ok) ok.addEventListener('click', confirmMarks);
         const cl = $('op-clear');
-        if (cl) cl.addEventListener('click', () => { _markers = []; drawMarkers(); renderMarkCount(); });
+        if (cl) cl.addEventListener('click', () => { _markers = []; drawMarkers(); renderMarkCount(); setDetectNote(''); });
         const canvas = $('op-mark-canvas'); if (canvas) canvas.addEventListener('click', onCanvasClick);
+
+        // Shared embryo rail: click a row to select (delete button is guarded
+        // first so removing a false positive doesn't also select it).
+        const erail = $('op-erail-list');
+        if (erail) {
+            erail.addEventListener('click', (e) => {
+                const del = e.target.closest('[data-del]');
+                if (del) { e.stopPropagation(); deleteEmbryo(del.dataset.del); return; }
+                const row = e.target.closest('[data-embryo]');
+                if (row) selectEmbryo(row.dataset.embryo);
+            });
+            erail.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const row = e.target.closest('[data-embryo]');
+                if (row) { e.preventDefault(); selectEmbryo(row.dataset.embryo); }
+            });
+        }
 
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const led = $('op-led'); if (led) led.addEventListener('click', toggleLed);

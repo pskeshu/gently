@@ -2994,6 +2994,15 @@ class DeviceLayerServer(Service):
                 "verification": sam_result.get("verification", {}),
             }
 
+            # Ship the frame SAM actually ran on (JPEG-encoded, same shape/
+            # downsample contract as the live stream) so the Operate view can
+            # show the operator the image the candidates were detected on —
+            # essential when detection captured fresh (no live frame on screen).
+            frame = self._encode_frame_for_stream(image)
+            if frame is not None:
+                frame["stage_position"] = list(stage_position)
+                response["frame"] = frame
+
             if image_path:
                 response["image_path"] = image_path
 

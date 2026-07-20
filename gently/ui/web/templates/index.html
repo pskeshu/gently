@@ -540,6 +540,20 @@
                   <span class="op-subnav-meta" id="op-subnav-meta"></span>
                 </nav>
 
+                <div class="op-body" id="op-body">
+                  <!-- Shared, persistent embryo list — the canonical set, left of
+                       every instrument surface so selection and edits carry across
+                       panes and survive a refresh (bootstrapped on load from
+                       /api/embryos/current, then kept live by EMBRYOS_UPDATE). -->
+                  <aside class="op-embryos" id="op-erail" aria-label="Embryos">
+                    <div class="op-erail-head">
+                      <span>Embryos</span><b class="op-num" id="op-erail-count">0</b>
+                    </div>
+                    <div class="op-erail-list" id="op-erail-list"></div>
+                  </aside>
+
+                  <div class="op-panearea">
+
                 <!-- ══ BOTTOM CAM ══ see the dish, focus the bottom objective, find embryos -->
                 <section class="op-pane" id="op-pane-bottom" data-pane="bottom">
                   <div class="op-lock" id="op-lock-bottom" hidden>
@@ -752,6 +766,9 @@
                     </div>
                   </div>
                 </section>
+
+                  </div><!-- .op-panearea -->
+                </div><!-- .op-body -->
 
               </div>
             </div>

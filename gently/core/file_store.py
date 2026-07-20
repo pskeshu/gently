@@ -699,6 +699,26 @@ class FileStore:
             return []
         return [e.name for e in sorted(embryos_dir.iterdir()) if e.is_dir()]
 
+    def delete_embryo(self, session_id: str, embryo_id: str) -> bool:
+        """Remove an embryo's folder from a session (e.g. an operator-deleted
+        false positive), so it does not reappear when the session is reloaded
+        from disk. Returns True if a folder was removed.
+
+        Removes the whole ``embryos/{embryo_id}/`` tree — for a marked-but-never-
+        imaged embryo that is just ``embryo.yaml``, but a later-imaged one may
+        also carry volumes/projections/traces, and all of it goes with it.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return False
+        ed = self._embryo_dir_for_session(sd, embryo_id)
+        if not ed.exists():
+            return False
+        import shutil
+
+        shutil.rmtree(ed, ignore_errors=True)
+        return True
+
     # ==================================================================
     # Volumes
     # ==================================================================

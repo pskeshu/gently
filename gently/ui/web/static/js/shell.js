@@ -43,6 +43,10 @@ const Shell = (() => {
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('TAB_CHANGED', (tabName) => setActive(tabName));
             ClientEventBus.on('CONNECTION_STATUS', (s) => renderStrip(s));
+            // Embryo count lives in state.embryos; re-render the strip whenever it
+            // changes (including the initial bootstrap) so the header doesn't sit
+            // at the pre-load 0.
+            ClientEventBus.on('EMBRYOS_UPDATE', () => renderStrip());
         }
 
         const chatBtn = document.getElementById('v2-rail-chat');
