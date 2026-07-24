@@ -4,9 +4,9 @@
 
 **README.md** covers environment setup and how to run things (`uv sync`,
 `uv run pytest`, `uv run python launch_gently.py` and its flags).
-**CONTRIBUTING.md** covers the lint/type toolchain and the incremental-typing
-policy. This section is only for what those two don't say — the things that are
-easy to get wrong here.
+**CONTRIBUTING.md** covers the lint/type toolchain — ruff, the two mypy runs,
+and pre-commit. This section is only for what those two don't say — the things
+that are easy to get wrong here.
 
 ### Where work lands
 
