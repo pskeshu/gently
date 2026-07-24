@@ -55,8 +55,8 @@ and that changes — read it rather than trusting a list here. What stays true:
 - **A job stops at its first failing step.** A ruff failure means the mypy step
   in that job never ran, so a green re-run after fixing ruff is not evidence
   that mypy passed.
-- **CI is Python-only.** Nothing runs the JS tests, so if you touch
-  `gently/ui/web/static/js/`, run `node --test tests/js/` yourself.
+- **CI runs no JavaScript.** A change under `gently/ui/web/static/js/` is not
+  covered by CI, so verify it by running the app and exercising the UI by hand.
 - CI runs on pull requests and on pushes to `main`/`development`, so a feature
   branch with no PR open gets no signal at all.
 
