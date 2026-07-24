@@ -79,8 +79,8 @@ The agent gets a `self.mode` attribute:
 
 ```python
 class AgentMode(str, Enum):
-    EXECUTION = "execution"    # Current behavior
-    PLAN = "plan"              # Experimental design mode
+    EXECUTION = "execution"  # Current behavior
+    PLAN = "plan"  # Experimental design mode
 ```
 
 The main message loop (`_call_claude_stream()`) selects prompt and tools based on mode:
@@ -323,23 +323,24 @@ The core tracking unit. Every task in the plan — imaging or not — is a PlanI
 @dataclass
 class PlanItem:
     """A single item in an experimental plan."""
+
     id: str
-    campaign_id: str                         # Which campaign/phase
-    type: str                                # imaging, bench, genetics, analysis, decision_point
-    title: str                               # "Pilot — rab-3p::GFP visibility test"
-    description: Optional[str] = None        # Detailed notes, protocols, what to watch for
-    status: str = "planned"                  # planned → in_progress → completed | skipped | blocked
+    campaign_id: str  # Which campaign/phase
+    type: str  # imaging, bench, genetics, analysis, decision_point
+    title: str  # "Pilot — rab-3p::GFP visibility test"
+    description: Optional[str] = None  # Detailed notes, protocols, what to watch for
+    status: str = "planned"  # planned → in_progress → completed | skipped | blocked
     depends_on: List[str] = field(default_factory=list)  # PlanItem IDs
-    outcome: Optional[str] = None            # What happened (filled after completion)
+    outcome: Optional[str] = None  # What happened (filled after completion)
 
     # Specifications (type-dependent)
-    imaging_spec: Optional[ImagingSpec] = None   # if type == "imaging"
-    bench_spec: Optional[BenchSpec] = None       # if type in (bench, genetics, analysis)
+    imaging_spec: Optional[ImagingSpec] = None  # if type == "imaging"
+    bench_spec: Optional[BenchSpec] = None  # if type in (bench, genetics, analysis)
 
     # Linking
-    planned_session_id: Optional[str] = None     # → PlannedSession (for imaging items)
-    session_id: Optional[str] = None             # → Actual session (once executed)
-    inherit_from: Optional[str] = None           # PlanItem ID to inherit spec from
+    planned_session_id: Optional[str] = None  # → PlannedSession (for imaging items)
+    session_id: Optional[str] = None  # → Actual session (once executed)
+    inherit_from: Optional[str] = None  # PlanItem ID to inherit spec from
 
     # Ordering
     phase_order: int = 0
@@ -358,34 +359,34 @@ class ImagingSpec:
     """Complete specification for a planned imaging session."""
 
     # ── Sample ──────────────────────────────────────────
-    strain: Optional[str] = None              # "OH904"
-    genotype: Optional[str] = None            # "otIs355[rab-3p::2xNLS::TagRFP]"
-    reporter: Optional[str] = None            # "rab-3p::GFP (pan-neuronal)"
-    sample_prep: Optional[str] = None         # "Standard egg prep, poly-lysine pads"
-    temperature_c: Optional[float] = None     # 20.0
-    num_embryos: Optional[int] = None         # 4
+    strain: Optional[str] = None  # "OH904"
+    genotype: Optional[str] = None  # "otIs355[rab-3p::2xNLS::TagRFP]"
+    reporter: Optional[str] = None  # "rab-3p::GFP (pan-neuronal)"
+    sample_prep: Optional[str] = None  # "Standard egg prep, poly-lysine pads"
+    temperature_c: Optional[float] = None  # 20.0
+    num_embryos: Optional[int] = None  # 4
 
     # ── Acquisition ─────────────────────────────────────
-    num_slices: Optional[int] = None          # 80
-    exposure_ms: Optional[float] = None       # 10.0
-    laser_wavelength_nm: Optional[int] = None # 488
-    laser_power_pct: Optional[float] = None   # 10.0
-    galvo_amplitude: Optional[float] = None   # 8.0
+    num_slices: Optional[int] = None  # 80
+    exposure_ms: Optional[float] = None  # 10.0
+    laser_wavelength_nm: Optional[int] = None  # 488
+    laser_power_pct: Optional[float] = None  # 10.0
+    galvo_amplitude: Optional[float] = None  # 8.0
     piezo_amplitude_um: Optional[float] = None  # 50.0
 
     # ── Timing ──────────────────────────────────────────
-    interval_s: Optional[int] = None          # 180
+    interval_s: Optional[int] = None  # 180
     adaptive_intervals: Optional[Dict[str, int]] = None
     # e.g. {"early_to_comma": 300, "comma_to_2fold": 60, "after_2fold": 180}
 
     # ── Developmental Window ────────────────────────────
-    target_window: Optional[str] = None       # "comma → pretzel"
-    start_stage: Optional[str] = None         # "comma"
-    stop_condition: Optional[str] = None      # "pretzel"
+    target_window: Optional[str] = None  # "comma → pretzel"
+    start_stage: Optional[str] = None  # "comma"
+    stop_condition: Optional[str] = None  # "pretzel"
     estimated_duration_h: Optional[float] = None  # 4.0
 
     # ── Detection ───────────────────────────────────────
-    detectors: Optional[List[str]] = None     # ["comma", "pretzel"]
+    detectors: Optional[List[str]] = None  # ["comma", "pretzel"]
     pre_terminal_speedup: Optional[bool] = None  # True
 
     # ── Validation ──────────────────────────────────────
@@ -403,12 +404,13 @@ Specification for non-imaging tasks (bench work, genetics, analysis).
 @dataclass
 class BenchSpec:
     """Specification for bench/genetics/analysis tasks."""
-    protocol: Optional[str] = None            # "Standard chemotaxis assay"
-    reagents: Optional[List[str]] = None      # ["anti-UNC-33", "secondary 568"]
-    strains: Optional[List[str]] = None       # ["OH904", "N2"]
-    target_genotype: Optional[str] = None     # "unc-6(ev400); otIs355"
-    estimated_days: Optional[int] = None      # 14
-    success_criteria: Optional[str] = None    # "Homozygous GFP+ line established"
+
+    protocol: Optional[str] = None  # "Standard chemotaxis assay"
+    reagents: Optional[List[str]] = None  # ["anti-UNC-33", "secondary 568"]
+    strains: Optional[List[str]] = None  # ["OH904", "N2"]
+    target_genotype: Optional[str] = None  # "unc-6(ev400); otIs355"
+    estimated_days: Optional[int] = None  # 14
+    success_criteria: Optional[str] = None  # "Homozygous GFP+ line established"
     notes: Optional[str] = None
 ```
 

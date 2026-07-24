@@ -500,6 +500,7 @@ def configure_piezo_for_scan(piezo_device, start_um, end_um, num_slices):
     core.waitForDevice(piezo_device)
     time.sleep(0.5)  # Allow settling
 
+
 # CALIBRATION (Lines 99-115)
 def piezo_to_galvo_y(piezo_pos_um, slope=100.306, offset=4.102):
     """Convert piezo position to galvo Y-axis angle."""
@@ -755,15 +756,15 @@ def configure_piezo_for_scan(piezo_device, start_um, end_um, num_slices):
     print(f"  ✓ Piezo configured and armed for SPIM scanning")
 
     return {
-        'start_um': start_um,
-        'end_um': end_um,
-        'center_um': piezo_center,
-        'amplitude_um': piezo_amplitude,
-        'step_size_um': step_size,
-        'galvo_y_start': galvo_y_start,
-        'galvo_y_end': galvo_y_end,
-        'galvo_y_center': galvo_y_center,
-        'galvo_y_amplitude': galvo_y_amplitude,
+        "start_um": start_um,
+        "end_um": end_um,
+        "center_um": piezo_center,
+        "amplitude_um": piezo_amplitude,
+        "step_size_um": step_size,
+        "galvo_y_start": galvo_y_start,
+        "galvo_y_end": galvo_y_end,
+        "galvo_y_center": galvo_y_center,
+        "galvo_y_amplitude": galvo_y_amplitude,
     }
 ```
 
@@ -773,16 +774,15 @@ Update the main acquisition function to use the calculated galvo values:
 
 ```python
 # Step 5: Configure piezo
-piezo_config = configure_piezo_for_scan(PIEZO_DEVICE, piezo_start_um,
-                                        piezo_end_um, num_slices)
+piezo_config = configure_piezo_for_scan(PIEZO_DEVICE, piezo_start_um, piezo_end_um, num_slices)
 
 # Step 6: Configure Tiger controller with synchronized galvo Y-axis
 configure_tiger_controller(
     GALVO_DEVICE,
     num_slices,
     timing,
-    galvo_y_amp=piezo_config['galvo_y_amplitude'],
-    galvo_y_offset=piezo_config['galvo_y_center']
+    galvo_y_amp=piezo_config["galvo_y_amplitude"],
+    galvo_y_offset=piezo_config["galvo_y_center"],
 )
 ```
 

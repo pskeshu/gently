@@ -112,6 +112,7 @@ Create `gently/mmcore_wrapper.py` using the template in the Java-MMCore Interfac
 ```python
 from gently.mmcore_wrapper import GentlyProperties, GentlyDevices, DeviceKeys, PropertyKeys
 
+
 def volume_scan_plan(core, num_slices=100, slice_step_um=0.5):
     # Initialize
     devices = GentlyDevices(core)

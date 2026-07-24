@@ -48,8 +48,16 @@ def _make_app(context_store):
 def _seed(cs):
     nb = cs.notebook
     nb.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="ring formed", strains=["N2"]))
-    nb.write_note(Note(id="f1", kind=NoteKind.FINDING, body="rings by comma",
-                       status=NoteStatus.PROPOSED, strains=["N2"], threads=["t1"]))
+    nb.write_note(
+        Note(
+            id="f1",
+            kind=NoteKind.FINDING,
+            body="rings by comma",
+            status=NoteStatus.PROPOSED,
+            strains=["N2"],
+            threads=["t1"],
+        )
+    )
     return cs
 
 
