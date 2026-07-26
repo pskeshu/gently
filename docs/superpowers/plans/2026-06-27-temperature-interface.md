@@ -39,19 +39,32 @@
 def _new_session(file_store):
     return file_store.create_session(name="temp-test")  # returns session_id
 
+
 def test_append_and_read_roundtrip(file_store):
     sid = _new_session(file_store)
-    file_store.append_temperature_sample(sid, {"t": "2026-06-27T10:00:00+00:00", "water_c": 28.0, "setpoint_c": 32.0, "state": "heating"})
-    file_store.append_temperature_sample(sid, {"t": "2026-06-27T10:00:01+00:00", "water_c": 28.3, "setpoint_c": 32.0, "state": "heating"})
+    file_store.append_temperature_sample(
+        sid,
+        {"t": "2026-06-27T10:00:00+00:00", "water_c": 28.0, "setpoint_c": 32.0, "state": "heating"},
+    )
+    file_store.append_temperature_sample(
+        sid,
+        {"t": "2026-06-27T10:00:01+00:00", "water_c": 28.3, "setpoint_c": 32.0, "state": "heating"},
+    )
     rows = file_store.read_temperature_log(sid)
     assert [r["water_c"] for r in rows] == [28.0, 28.3]
 
+
 def test_read_since_filters(file_store):
     sid = _new_session(file_store)
-    for i, t in enumerate(["2026-06-27T10:00:00+00:00", "2026-06-27T10:00:01+00:00", "2026-06-27T10:00:02+00:00"]):
-        file_store.append_temperature_sample(sid, {"t": t, "water_c": 28.0 + i, "setpoint_c": 32.0, "state": "heating"})
+    for i, t in enumerate(
+        ["2026-06-27T10:00:00+00:00", "2026-06-27T10:00:01+00:00", "2026-06-27T10:00:02+00:00"]
+    ):
+        file_store.append_temperature_sample(
+            sid, {"t": t, "water_c": 28.0 + i, "setpoint_c": 32.0, "state": "heating"}
+        )
     rows = file_store.read_temperature_log(sid, since="2026-06-27T10:00:01+00:00")
     assert [r["water_c"] for r in rows] == [29.0, 30.0]
+
 
 def test_read_unknown_session_is_empty(file_store):
     assert file_store.read_temperature_log("does-not-exist") == []
@@ -73,6 +86,7 @@ def append_temperature_sample(self, session_id: str, sample: dict) -> None:
     """Append one temperature reading to the session's temperature.jsonl."""
     sd = self._require_session_dir(session_id)
     _append_jsonl(sd / "temperature.jsonl", sample)
+
 
 def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
     """Return temperature samples for a session, optionally filtered to t >= since (ISO-UTC string)."""
@@ -114,8 +128,10 @@ git commit -m "feat(temperature): session-scoped temperature.jsonl store on File
 # tests/test_temperature_event.py
 from gently.core.event_bus import EventType, EventBus
 
+
 def test_temperature_update_event_exists():
     assert EventType.TEMPERATURE_UPDATE.value == "TEMPERATURE_UPDATE"
+
 
 def test_temperature_update_publishes_to_subscriber():
     bus = EventBus()
@@ -143,7 +159,7 @@ In `gently/core/event_bus.py`, add the member alongside the other `EventType` va
 And add it to the high-volume set so it is not retained in history (next to `DEVICE_STATE_UPDATE` in `_NO_HISTORY_TYPES` near `:187`):
 
 ```python
-    EventType.TEMPERATURE_UPDATE,
+(EventType.TEMPERATURE_UPDATE,)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -189,6 +205,7 @@ class FakeScope:
     def __init__(self, resp):
         self.resp = resp
         self.calls = 0
+
     async def get_temperature(self):
         self.calls += 1
         if isinstance(self.resp, Exception):
@@ -204,8 +221,11 @@ def _capture(bus):
 
 async def test_tick_appends_emits_and_sets_latest(file_store):
     sid = file_store.create_session(name="s")
-    scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
-    bus = EventBus(); seen = _capture(bus)
+    scope = FakeScope(
+        {"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    )
+    bus = EventBus()
+    seen = _capture(bus)
     s = TemperatureSampler(scope, file_store, lambda: sid)
     await s._tick(bus)
     rows = file_store.read_temperature_log(sid)
@@ -216,7 +236,8 @@ async def test_tick_appends_emits_and_sets_latest(file_store):
 
 async def test_tick_no_active_session_is_noop(file_store):
     scope = FakeScope({"success": True, "temperature_c": 1.0, "setpoint_c": 2.0, "state": "x"})
-    bus = EventBus(); seen = _capture(bus)
+    bus = EventBus()
+    seen = _capture(bus)
     s = TemperatureSampler(scope, file_store, lambda: None)
     await s._tick(bus)
     assert scope.calls == 0 and s.latest is None and seen == []
@@ -237,8 +258,13 @@ async def test_tick_poll_failure_is_a_gap_not_a_crash(file_store):
 
 def test_temperature_stamp_shapes():
     assert temperature_stamp(None) is None
-    assert temperature_stamp({"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}) == {
-        "water_c": 28.4, "setpoint_c": 32.0, "state": "heating", "sampled_at": "2026-06-27T10:00:00+00:00",
+    assert temperature_stamp(
+        {"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    ) == {
+        "water_c": 28.4,
+        "setpoint_c": 32.0,
+        "state": "heating",
+        "sampled_at": "2026-06-27T10:00:00+00:00",
     }
 ```
 
@@ -259,6 +285,7 @@ session's temperature.jsonl, holds the latest reading (for acquisition stamping)
 and publishes TEMPERATURE_UPDATE for the live graph. A failed poll is a gap, not a
 crash; with no active session the loop idles.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -379,10 +406,12 @@ git commit -m "feat(temperature): TemperatureSampler service (poll/persist/emit 
 # tests/test_temperature_sampler_wiring.py
 from gently.app.temperature_sampler import TemperatureSampler
 
+
 def test_agent_initializes_temperature_sampler_attribute():
     # The attribute must exist (None until start_viz_server runs with a microscope).
     import gently.app.agent as agent_mod
-    src = (agent_mod.__file__)
+
+    src = agent_mod.__file__
     text = open(src, encoding="utf-8").read()
     assert "temperature_sampler" in text
     assert "TemperatureSampler(" in text
@@ -406,12 +435,13 @@ Near `:212` (with the other monitor attrs, e.g. `self.device_state_monitor = Non
 Inside `start_viz_server`, right after the `DeviceStateMonitor` start block (`:818-827`):
 
 ```python
-            if self.microscope is not None and self.temperature_sampler is None:
-                from .temperature_sampler import TemperatureSampler
-                self.temperature_sampler = TemperatureSampler(
-                    self.microscope, self.store, lambda: self.session_id
-                )
-                await self.temperature_sampler.start()
+if self.microscope is not None and self.temperature_sampler is None:
+    from .temperature_sampler import TemperatureSampler
+
+    self.temperature_sampler = TemperatureSampler(
+        self.microscope, self.store, lambda: self.session_id
+    )
+    await self.temperature_sampler.start()
 ```
 
 In the symmetric shutdown path (`:850-855`, where `device_state_monitor.stop()` is awaited):
@@ -464,19 +494,32 @@ from gently.ui.web.routes.temperature import create_router
 def _server(samples, sessions=(("sess-1", True),)):
     store = MagicMock()
     store.list_sessions.return_value = [{"session_id": sid} for sid, _ in sessions]
-    store._session_dir.side_effect = lambda sid: Path("/x") if any(sid == s for s, _ in sessions) else None
+    store._session_dir.side_effect = lambda sid: (
+        Path("/x") if any(sid == s for s, _ in sessions) else None
+    )
     store.read_temperature_log.return_value = samples
-    srv = MagicMock(); srv.gently_store = store
+    srv = MagicMock()
+    srv.gently_store = store
     return srv, store
 
 
 def _client(server):
-    app = FastAPI(); app.include_router(create_router(server))
+    app = FastAPI()
+    app.include_router(create_router(server))
     return TestClient(app)
 
 
 def test_history_returns_samples():
-    srv, store = _server([{"t": "2026-06-27T10:00:00+00:00", "water_c": 28.0, "setpoint_c": 32.0, "state": "heating"}])
+    srv, store = _server(
+        [
+            {
+                "t": "2026-06-27T10:00:00+00:00",
+                "water_c": 28.0,
+                "setpoint_c": 32.0,
+                "state": "heating",
+            }
+        ]
+    )
     r = _client(srv).get("/api/temperature/sess-1/history")
     assert r.status_code == 200
     body = r.json()
@@ -519,6 +562,7 @@ Expected: FAIL — `ModuleNotFoundError: gently.ui.web.routes.temperature`
 Live updates ride the TEMPERATURE_UPDATE event channel; this route is backfill only.
 Mirrors routes/experiments.py session resolution.
 """
+
 from fastapi import APIRouter, HTTPException
 
 
@@ -586,10 +630,13 @@ from gently.app.temperature_sampler import temperature_stamp
 def test_stamp_none_when_no_reading():
     assert temperature_stamp(None) is None
 
+
 def test_volume_metadata_carries_temperature(file_store):
     sid = file_store.create_session(name="s")
     emb = file_store.create_embryo(sid, position={"x": 0, "y": 0, "z": 0})  # confirm signature
-    stamp = temperature_stamp({"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    stamp = temperature_stamp(
+        {"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    )
     vol = np.zeros((2, 4, 4), dtype="uint16")
     file_store.put_volume(sid, emb, timepoint=0, volume=vol, metadata={"temperature": stamp})
     meta = file_store.get_volume_meta(sid, emb, 0)  # confirm accessor name
@@ -609,6 +656,7 @@ Expected: FAIL — initially on import/accessor; fix the accessor name from the 
 
 ```python
 from gently.app.temperature_sampler import temperature_stamp
+
 # ... where `agent` (or self) holds the sampler and `metadata` is being built:
 stamp = temperature_stamp(getattr(getattr(agent, "temperature_sampler", None), "latest", None))
 if stamp is not None:
@@ -621,6 +669,7 @@ if stamp is not None:
 
 ```python
 from gently.app.temperature_sampler import temperature_stamp
+
 _temp = temperature_stamp(self._temperature_provider() if self._temperature_provider else None)
 ```
 

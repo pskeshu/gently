@@ -581,6 +581,7 @@ logger = logging.getLogger(__name__)
 # Property Keys Enum
 # ============================================================================
 
+
 class PropertyKeys(Enum):
     """
     Enum of all device adapter property names used in Gently.
@@ -666,6 +667,7 @@ class PropertyKeys(Enum):
 # Property Values Enum
 # ============================================================================
 
+
 class PropertyValues(Enum):
     """
     Enum of common property values.
@@ -703,6 +705,7 @@ class PropertyValues(Enum):
 # Device Keys Enum
 # ============================================================================
 
+
 class DeviceKeys(Enum):
     """
     Enum of device roles in the Gently system.
@@ -734,6 +737,7 @@ class DeviceKeys(Enum):
 # ============================================================================
 # Gently Devices Class
 # ============================================================================
+
 
 class GentlyDevices:
     """
@@ -838,6 +842,7 @@ class GentlyDevices:
 # Gently Properties Class
 # ============================================================================
 
+
 class GentlyProperties:
     """
     Type-safe wrapper for MMCore property access.
@@ -879,7 +884,7 @@ class GentlyProperties:
         device_key: DeviceKeys,
         property_key: PropertyKeys,
         value: Union[str, int, float, PropertyValues],
-        ignore_error: bool = False
+        ignore_error: bool = False,
     ):
         """
         Set a device property via MMCore.
@@ -915,7 +920,7 @@ class GentlyProperties:
             if not should_set:
                 try:
                     current_value = self.core.getProperty(mm_device, prop_name)
-                    should_set = (str(value) != str(current_value))
+                    should_set = str(value) != str(current_value)
                 except Exception:
                     # If we can't read current value, set it anyway
                     should_set = True
@@ -937,7 +942,7 @@ class GentlyProperties:
         device_keys: List[DeviceKeys],
         property_key: PropertyKeys,
         value: Union[str, int, float, PropertyValues],
-        ignore_error: bool = False
+        ignore_error: bool = False,
     ):
         """
         Set a property on multiple devices.
@@ -951,11 +956,7 @@ class GentlyProperties:
         for device_key in device_keys:
             self.set_property(device_key, property_key, value, ignore_error)
 
-    def get_property_string(
-        self,
-        device_key: DeviceKeys,
-        property_key: PropertyKeys
-    ) -> str:
+    def get_property_string(self, device_key: DeviceKeys, property_key: PropertyKeys) -> str:
         """
         Get a property value as a string.
 
@@ -978,11 +979,7 @@ class GentlyProperties:
             logger.warning(f"Error getting {device_key}.{property_key}: {e}")
             return ""
 
-    def get_property_int(
-        self,
-        device_key: DeviceKeys,
-        property_key: PropertyKeys
-    ) -> int:
+    def get_property_int(self, device_key: DeviceKeys, property_key: PropertyKeys) -> int:
         """
         Get a property value as an integer.
 
@@ -1002,11 +999,7 @@ class GentlyProperties:
             logger.warning(f"Error parsing int from {device_key}.{property_key}: {e}")
             return 0
 
-    def get_property_float(
-        self,
-        device_key: DeviceKeys,
-        property_key: PropertyKeys
-    ) -> float:
+    def get_property_float(self, device_key: DeviceKeys, property_key: PropertyKeys) -> float:
         """
         Get a property value as a float.
 
@@ -1041,8 +1034,11 @@ Example: Configure ASI diSPIM controller for volume acquisition using MMCore wra
 """
 
 from gently.mmcore_wrapper import (
-    GentlyDevices, GentlyProperties,
-    DeviceKeys, PropertyKeys, PropertyValues
+    GentlyDevices,
+    GentlyProperties,
+    DeviceKeys,
+    PropertyKeys,
+    PropertyValues,
 )
 
 
@@ -1093,10 +1089,7 @@ def configure_spim_volume_scan(
     # Step 1: Disable beam during configuration
     # ========================================================================
     props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.BEAM_ENABLED,
-        PropertyValues.NO,
-        ignore_error=True
+        DeviceKeys.GALVO_A, PropertyKeys.BEAM_ENABLED, PropertyValues.NO, ignore_error=True
     )
 
     # ========================================================================
@@ -1104,82 +1097,38 @@ def configure_spim_volume_scan(
     # ========================================================================
 
     # Number of slices
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_NUM_SLICES,
-        num_slices
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_NUM_SLICES, num_slices)
 
     # Scan amplitude (determines slice coverage)
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SA_AMPLITUDE_Y_DEG,
-        galvo_amplitude_deg
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SA_AMPLITUDE_Y_DEG, galvo_amplitude_deg)
 
     # Timing - scan
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DELAY_SCAN,
-        delay_before_scan
-    )
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DURATION_SCAN,
-        scan_duration_ms
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DELAY_SCAN, delay_before_scan)
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_SCAN, scan_duration_ms)
 
     # Timing - camera
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DELAY_CAMERA,
-        delay_before_camera
-    )
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DURATION_CAMERA,
-        camera_duration
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DELAY_CAMERA, delay_before_camera)
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_CAMERA, camera_duration)
 
     # Timing - laser
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DELAY_LASER,
-        delay_before_laser
-    )
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_DURATION_LASER,
-        laser_duration
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DELAY_LASER, delay_before_laser)
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_LASER, laser_duration)
 
     # ========================================================================
     # Step 3: Configure piezo SPIM properties
     # ========================================================================
 
     # Piezo amplitude (total range of travel)
-    props.set_property(
-        DeviceKeys.PIEZO_A,
-        PropertyKeys.SA_AMPLITUDE,
-        piezo_amplitude_um
-    )
+    props.set_property(DeviceKeys.PIEZO_A, PropertyKeys.SA_AMPLITUDE, piezo_amplitude_um)
 
     # Number of slices (shared with galvo)
-    props.set_property(
-        DeviceKeys.PIEZO_A,
-        PropertyKeys.SPIM_NUM_SLICES_PER_PIEZO,
-        num_slices
-    )
+    props.set_property(DeviceKeys.PIEZO_A, PropertyKeys.SPIM_NUM_SLICES_PER_PIEZO, num_slices)
 
     # ========================================================================
     # Step 4: Arm SPIM state machine
     # ========================================================================
 
-    props.set_property(
-        DeviceKeys.GALVO_A,
-        PropertyKeys.SPIM_STATE,
-        PropertyValues.SPIM_ARMED
-    )
+    props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE, PropertyValues.SPIM_ARMED)
 
     print(f"✓ Configured SPIM volume scan:")
     print(f"  - Slices: {num_slices}")
@@ -1214,16 +1163,13 @@ def read_spim_status(core):
     print(f"  - Amplitude: {amplitude}°")
     print(f"  - State: {state}")
 
-    return {
-        'num_slices': num_slices,
-        'amplitude': amplitude,
-        'state': state
-    }
+    return {"num_slices": num_slices, "amplitude": amplitude, "state": state}
 
 
 # ============================================================================
 # Integration with existing Gently device classes
 # ============================================================================
+
 
 def integrate_with_existing_devices():
     """
@@ -1252,12 +1198,18 @@ def integrate_with_existing_devices():
         def configure_spim(self, num_slices, amplitude_deg, scan_duration_ms):
             """Configure SPIM parameters using type-safe wrapper."""
             self.props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_NUM_SLICES, num_slices)
-            self.props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SA_AMPLITUDE_Y_DEG, amplitude_deg)
-            self.props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_SCAN, scan_duration_ms)
+            self.props.set_property(
+                DeviceKeys.GALVO_A, PropertyKeys.SA_AMPLITUDE_Y_DEG, amplitude_deg
+            )
+            self.props.set_property(
+                DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_SCAN, scan_duration_ms
+            )
 
         def arm_spim(self):
             """Arm SPIM state machine."""
-            self.props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE, PropertyValues.SPIM_ARMED)
+            self.props.set_property(
+                DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE, PropertyValues.SPIM_ARMED
+            )
 
         def get_spim_state(self) -> str:
             """Get current SPIM state."""
@@ -1279,7 +1231,7 @@ if __name__ == "__main__":
         slice_step_um=0.5,
         galvo_amplitude_deg=5.0,
         scan_duration_ms=10.0,
-        camera_exposure_ms=8.0
+        camera_exposure_ms=8.0,
     )
 
     # Read status

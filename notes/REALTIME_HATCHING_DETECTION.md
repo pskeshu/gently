@@ -52,14 +52,14 @@ Edit `HATCHING_DETECTION_CONFIG` in `run_multi_embryo_volumes_with_detection.py`
 
 ```python
 HATCHING_DETECTION_CONFIG = {
-    'enabled': True,                         # Enable/disable detection
-    'min_timepoints_before_detection': 50,   # Don't check before this (~100min at 2min/tp)
-    'confidence_threshold': 'HIGH',          # HIGH/MEDIUM/LOW
-    'image_history_window': 10,              # Recent images to send to Claude
-    'stop_when_all_hatched': True,           # End when all embryos hatched
-    'continue_after_hatching': 5,            # Confirmation timepoints after hatching
-    'save_processed_images': True,           # Save max projections for debugging
-    'detection_log_file': 'hatching_detection_log.json'
+    "enabled": True,  # Enable/disable detection
+    "min_timepoints_before_detection": 50,  # Don't check before this (~100min at 2min/tp)
+    "confidence_threshold": "HIGH",  # HIGH/MEDIUM/LOW
+    "image_history_window": 10,  # Recent images to send to Claude
+    "stop_when_all_hatched": True,  # End when all embryos hatched
+    "continue_after_hatching": 5,  # Confirmation timepoints after hatching
+    "save_processed_images": True,  # Save max projections for debugging
+    "detection_log_file": "hatching_detection_log.json",
 }
 ```
 
@@ -235,9 +235,9 @@ Reduce images sent to Claude as development progresses:
 if timepoint < 100:
     window_size = 10  # Early: more context
 elif timepoint < 200:
-    window_size = 6   # Mid: less context needed
+    window_size = 6  # Mid: less context needed
 else:
-    window_size = 4   # Late: minimal context
+    window_size = 4  # Late: minimal context
 ```
 
 ### Batch Processing (Advanced)
@@ -307,14 +307,16 @@ Edit `_create_detection_content` in `realtime_hatching_detector.py`:
 
 ```python
 # Add embryo-specific context
-content.append({
-    "type": "text",
-    "text": f"""
+content.append(
+    {
+        "type": "text",
+        "text": f"""
     This is embryo #{embryo_number} from position {position}.
     Previous detection showed pre-hatching signs.
     Focus on eggshell breach in upper-right quadrant.
-    """
-})
+    """,
+    }
+)
 ```
 
 ### Add Pre-hatching Detection
@@ -362,7 +364,7 @@ annotations = load_manual_annotations()
 
 # Compare with detector results
 for embryo_id in annotations:
-    manual_tp = annotations[embryo_id]['hatching_timepoint']
+    manual_tp = annotations[embryo_id]["hatching_timepoint"]
     detected_tp = detector.get_hatching_timepoint(embryo_id)
     diff = abs(manual_tp - detected_tp) if detected_tp else None
     print(f"{embryo_id}: Manual={manual_tp}, Detected={detected_tp}, Diff={diff}")

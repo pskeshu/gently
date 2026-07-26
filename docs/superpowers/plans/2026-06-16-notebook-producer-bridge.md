@@ -31,9 +31,14 @@ from gently.harness.memory.notebook import learning_to_note, observation_to_note
 class TestConverters:
     def test_observation_to_note(self):
         obs = Observation(
-            id="o1", timestamp=_dt(2026, 6, 16, 9, 0, 0), type="milestone",
-            content="nerve ring formed", embryo_id="e1", session_id="s1",
-            relates_to=["o0"], gently_refs={"kind": "projection", "t": 42},
+            id="o1",
+            timestamp=_dt(2026, 6, 16, 9, 0, 0),
+            type="milestone",
+            content="nerve ring formed",
+            embryo_id="e1",
+            session_id="s1",
+            relates_to=["o0"],
+            gently_refs={"kind": "projection", "t": 42},
         )
         n = observation_to_note(obs)
         assert n.id == "o1"
@@ -52,7 +57,7 @@ class TestConverters:
         assert n.id == "l1"
         assert n.kind == NoteKind.FINDING
         assert n.body == "rings form by comma"
-        assert n.status == NoteStatus.PROPOSED   # agent-drafted, awaits confirm
+        assert n.status == NoteStatus.PROPOSED  # agent-drafted, awaits confirm
         assert n.confidence == Confidence.HIGH
 ```
 
@@ -145,16 +150,16 @@ Expected: FAIL — `AttributeError: 'FileContextStore' object has no attribute '
 In `gently/harness/memory/file_store.py`, add this property immediately **before** `def apply_updates(self, updates: ContextUpdates):` (line ~2178):
 
 ```python
-    @property
-    def notebook(self):
-        """The shared lab notebook, rooted at agent_dir/notebook (lazy)."""
-        nb = getattr(self, "_notebook", None)
-        if nb is None:
-            from .notebook import NotebookStore
-            nb = NotebookStore(self.agent_dir / "notebook")
-            self._notebook = nb
-        return nb
+@property
+def notebook(self):
+    """The shared lab notebook, rooted at agent_dir/notebook (lazy)."""
+    nb = getattr(self, "_notebook", None)
+    if nb is None:
+        from .notebook import NotebookStore
 
+        nb = NotebookStore(self.agent_dir / "notebook")
+        self._notebook = nb
+    return nb
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -186,8 +191,13 @@ class TestApplyUpdatesMirror:
         from gently.harness.memory.model import ContextUpdates
 
         cs = file_context_store
-        obs = Observation(id="o1", timestamp=_dt(2026, 6, 16, 9, 0, 0),
-                          type="milestone", content="ring formed", embryo_id="e1")
+        obs = Observation(
+            id="o1",
+            timestamp=_dt(2026, 6, 16, 9, 0, 0),
+            type="milestone",
+            content="ring formed",
+            embryo_id="e1",
+        )
         lrn = Learning(id="l1", content="rings form by comma", confidence=Confidence.HIGH)
         cs.apply_updates(ContextUpdates(new_observations=[obs], new_learnings=[lrn]))
 

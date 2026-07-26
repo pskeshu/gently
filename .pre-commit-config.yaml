@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.17  # run `pre-commit autoupdate` to pin to latest
+    rev: v0.16.0  # keep in sync with the ruff pins in pyproject.toml + lint.yml; bump via `pre-commit autoupdate`
     hooks:
       - id: ruff
         args: [--fix]

@@ -42,8 +42,8 @@ class TestNoteModel:
         n = Note(id="abc123", kind=NoteKind.OBSERVATION, body="dim rings at 10 ms")
         d = note_to_dict(n)
         assert d["kind"] == "observation"
-        assert d["author"] == "agent"            # default
-        assert d["status"] == "confirmed"        # default
+        assert d["author"] == "agent"  # default
+        assert d["status"] == "confirmed"  # default
         back = note_from_dict(d)
         assert back == n
 
@@ -100,8 +100,8 @@ from .model import Confidence
 
 class NoteKind(str, Enum):
     OBSERVATION = "observation"  # immutable record of what was seen/done/read/noted
-    FINDING = "finding"          # revisable, supersedable believed claim
-    QUESTION = "question"        # open inquiry; large ones are the thread spine
+    FINDING = "finding"  # revisable, supersedable believed claim
+    QUESTION = "question"  # open inquiry; large ones are the thread spine
 
 
 class Author(str, Enum):
@@ -111,10 +111,10 @@ class Author(str, Enum):
 
 
 class NoteStatus(str, Enum):
-    OPEN = "open"              # questions not yet answered
-    PROPOSED = "proposed"      # agent-drafted finding awaiting human confirm
-    CONFIRMED = "confirmed"    # accepted observation/finding (default)
-    ANSWERED = "answered"      # question resolved
+    OPEN = "open"  # questions not yet answered
+    PROPOSED = "proposed"  # agent-drafted finding awaiting human confirm
+    CONFIRMED = "confirmed"  # accepted observation/finding (default)
+    ANSWERED = "answered"  # question resolved
     SUPERSEDED = "superseded"  # replaced by a newer note
 
 
@@ -131,9 +131,9 @@ class Note:
     embryos: list[str] = field(default_factory=list)
     sessions: list[str] = field(default_factory=list)
     threads: list[str] = field(default_factory=list)
-    basis: list[str] = field(default_factory=list)        # note ids this rests on
-    links: list[dict] = field(default_factory=list)        # [{"rel": ..., "to": ...}]
-    artifacts: list[dict] = field(default_factory=list)    # FileStore pointers
+    basis: list[str] = field(default_factory=list)  # note ids this rests on
+    links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
+    artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
     superseded_by: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -341,15 +341,18 @@ class TestNotebookIndex:
     def test_index_updated_on_write(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
         a = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="a", strains=["N2"]))
-        b = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="b", strains=["N2", "OH904"]))
+        b = store.write_note(
+            Note(id="", kind=NoteKind.OBSERVATION, body="b", strains=["N2", "OH904"])
+        )
         assert set(store.ids_for_strain("N2")) == {a, b}
         assert store.ids_for_strain("OH904") == [b]
         assert store.ids_for_strain("missing") == []
 
     def test_index_by_embryo_and_thread(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
-        a = store.write_note(Note(id="", kind=NoteKind.FINDING, body="a",
-                                  embryos=["e1"], threads=["t1"]))
+        a = store.write_note(
+            Note(id="", kind=NoteKind.FINDING, body="a", embryos=["e1"], threads=["t1"])
+        )
         assert store.ids_for_embryo("e1") == [a]
         assert store.ids_for_thread("t1") == [a]
 
@@ -371,46 +374,50 @@ Expected: FAIL — `AttributeError: 'NotebookStore' object has no attribute 'ids
 Modify `NotebookStore.__init__` to add index state + rebuild, extend `write_note` to update the index, and add the index methods. Replace the existing `__init__` and `write_note` with these versions and add the new methods:
 
 ```python
-    # --- replace __init__ ---
-    def __init__(self, notebook_dir: Path):
-        self.root = Path(notebook_dir)
-        self.notes_dir = self.root / "notes"
-        self.index_dir = self.root / "index"
-        self.notes_dir.mkdir(parents=True, exist_ok=True)
-        self.index_dir.mkdir(parents=True, exist_ok=True)
-        # reverse indexes: facet -> {value: [note_id, ...]}
-        self._index: dict[str, dict[str, list[str]]] = {
-            "strain": {}, "embryo": {}, "thread": {}
-        }
-        self.rebuild_index()
+# --- replace __init__ ---
+def __init__(self, notebook_dir: Path):
+    self.root = Path(notebook_dir)
+    self.notes_dir = self.root / "notes"
+    self.index_dir = self.root / "index"
+    self.notes_dir.mkdir(parents=True, exist_ok=True)
+    self.index_dir.mkdir(parents=True, exist_ok=True)
+    # reverse indexes: facet -> {value: [note_id, ...]}
+    self._index: dict[str, dict[str, list[str]]] = {"strain": {}, "embryo": {}, "thread": {}}
+    self.rebuild_index()
 
-    # --- add: facet extraction + index maintenance ---
-    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads"}
 
-    def _index_note(self, note: Note) -> None:
-        for facet, attr in self._FACETS.items():
-            for value in getattr(note, attr):
-                bucket = self._index[facet].setdefault(value, [])
-                if note.id not in bucket:
-                    bucket.append(note.id)
+# --- add: facet extraction + index maintenance ---
+_FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads"}
 
-    def rebuild_index(self) -> None:
-        """Rebuild reverse-indexes by scanning notes/ (the notes are authoritative;
-        indexes are disposable caches)."""
-        self._index = {"strain": {}, "embryo": {}, "thread": {}}
-        for f in sorted(self.notes_dir.glob("*.yaml")):
-            data = self._read_yaml(f)
-            if data:
-                self._index_note(note_from_dict(data))
 
-    def ids_for_strain(self, strain: str) -> list[str]:
-        return list(self._index["strain"].get(strain, []))
+def _index_note(self, note: Note) -> None:
+    for facet, attr in self._FACETS.items():
+        for value in getattr(note, attr):
+            bucket = self._index[facet].setdefault(value, [])
+            if note.id not in bucket:
+                bucket.append(note.id)
 
-    def ids_for_embryo(self, embryo: str) -> list[str]:
-        return list(self._index["embryo"].get(embryo, []))
 
-    def ids_for_thread(self, thread: str) -> list[str]:
-        return list(self._index["thread"].get(thread, []))
+def rebuild_index(self) -> None:
+    """Rebuild reverse-indexes by scanning notes/ (the notes are authoritative;
+    indexes are disposable caches)."""
+    self._index = {"strain": {}, "embryo": {}, "thread": {}}
+    for f in sorted(self.notes_dir.glob("*.yaml")):
+        data = self._read_yaml(f)
+        if data:
+            self._index_note(note_from_dict(data))
+
+
+def ids_for_strain(self, strain: str) -> list[str]:
+    return list(self._index["strain"].get(strain, []))
+
+
+def ids_for_embryo(self, embryo: str) -> list[str]:
+    return list(self._index["embryo"].get(embryo, []))
+
+
+def ids_for_thread(self, thread: str) -> list[str]:
+    return list(self._index["thread"].get(thread, []))
 ```
 
 Then add an index-update at the end of `write_note` (just before `return note.id`):
@@ -448,10 +455,19 @@ class TestNotebookQuery:
     def _seed(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
         store.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="o", strains=["N2"]))
-        store.write_note(Note(id="f1", kind=NoteKind.FINDING, body="f",
-                              status=NoteStatus.PROPOSED, strains=["N2"], threads=["t1"]))
-        store.write_note(Note(id="q1", kind=NoteKind.QUESTION, body="q",
-                              status=NoteStatus.OPEN, threads=["t1"]))
+        store.write_note(
+            Note(
+                id="f1",
+                kind=NoteKind.FINDING,
+                body="f",
+                status=NoteStatus.PROPOSED,
+                strains=["N2"],
+                threads=["t1"],
+            )
+        )
+        store.write_note(
+            Note(id="q1", kind=NoteKind.QUESTION, body="q", status=NoteStatus.OPEN, threads=["t1"])
+        )
         return store
 
     def test_query_by_kind(self, tmp_path):
