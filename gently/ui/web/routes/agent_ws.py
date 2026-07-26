@@ -982,7 +982,7 @@ def create_router(server) -> APIRouter:
                     pass  # response to our ping
 
         except WebSocketDisconnect:
-            logger.info("TUI client disconnected")
+            logger.info("Agent websocket client disconnected")
         except asyncio.CancelledError:
             pass
         except Exception as e:

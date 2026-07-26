@@ -480,10 +480,9 @@ class VisualizationServer(Service):
                 pass
             else:
                 # It's a volume (Z, H, W) - generate three-view projection
-                z_depth, height, width = array.shape
-                # Handle dual-view format (width > 2*height)
-                if width > height * 2:
-                    array = array[:, :, : width // 2]
+                # View selection already happened via the 4D branch above; a 3D
+                # array is one view. Do not split by aspect ratio (2048x512
+                # native frames would be halved).
                 # Auto-crop to embryo region
                 bounds = compute_crop_bounds(array)
                 array = apply_crop_bounds(array, bounds)

@@ -1,7 +1,7 @@
 # ruff: noqa: E501
-"""US-11 — Center on a marked embryo. As an operator, I pick a marked embryo and drive the stage to center it in the FOV."""
+"""US-11 — Center on a marked embryo. As an operator, I click a registered embryo and the stage drives it to the middle of the field."""
 
-from _harness import dom_count, goto, skip_landing, tab, view
+from _harness import dom_count, exists, goto, skip_landing, tab, view
 
 META = {
     "id": "US-11",
@@ -16,15 +16,25 @@ async def flow(page, url, rec):
     await goto(page, url)
     await skip_landing(page)
     await tab(page, "devices")
-    opened = await view(page, "operate")  # Devices → Operate spine
+    opened = await view(page, "operate")
+    on_pane = await view(page, "bottom")
     await rec.shot("operate-center-surface")
-    center_node = await dom_count(page, '[data-node="b1"]')  # "Center" step in the stepper
-    center_btn = await dom_count(
-        page, "#op-center"
-    )  # b1 group: "Center stage on embryo" (hidden until an embryo is selected)
-    if not (opened and center_node and center_btn):
-        rec.gap("no per-embryo Center control on the operate surface")
+
+    canvas = await exists(page, "#op-mark-canvas")  # registered embryos are click targets here
+    # Centering is offered whenever the sample is clear of the objective. The
+    # interlock is state, not a step: if this banner is up, XY is refused.
+    locked = await page.evaluate(
+        "() => { const b = document.getElementById('op-lock-bottom'); return !!b && !b.hidden; }"
+    )
+    roster_center = await view(page, "acquire") and await dom_count(page, "#op-roster")
+
+    if not (opened and on_pane and canvas):
+        rec.gap("no click-to-center target on the bottom-cam surface")
+        return
+    if locked:
+        rec.gap("XY interlock is engaged on a fresh load — centering would be refused")
         return
     rec.blocked(
-        "needs device: reaching B1/Center requires a marked embryo (bottom-cam) and #op-center posts /api/devices/stage/move — both 502 against the offline device layer"
+        f"needs device: the bottom-cam canvas offers click-to-center on registered embryos and the roster carries a per-row Centre action (roster={roster_center}); "
+        "both post /api/devices/stage/move, which 502s with the device layer offline"
     )

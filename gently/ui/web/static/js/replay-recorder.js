@@ -37,7 +37,7 @@
   // Live camera <img> gets base64 data-URI src swaps at frame rate — recording
   // it would add ~100KB+ per frame on the main thread. Blocked from capture;
   // the bus-summary action records that frames were flowing instead.
-  var BLOCK_SELECTOR = "#op-cam-img";
+  var BLOCK_SELECTOR = "#op-img-bottom, #op-img-spim";
   // Machine-driven, high-churn regions: the live map re-renders at stage-poll
   // rate, the 3D occupancy canvas animates, the temperature graph redraws on
   // every reading. In 'balanced' fidelity these are blocked from the DOM stream
@@ -352,6 +352,40 @@
     window.addEventListener("hashchange", emitRoute);
   }
 
+  // A blockSelector that matches nothing does not error — it silently stops
+  // blocking. The failure mode is severe and invisible: rename the camera <img>
+  // and rrweb starts capturing a base64 data-URI `src` swap at frame rate on the
+  // main thread. So check once at boot that every selector still binds.
+  //
+  // Self-calibrating, because this recorder also runs on launch/login/settings
+  // where none of these elements exist: only report when SOME selector in the
+  // list matched, which is what identifies the page as the one the list belongs
+  // to. Blind spot: every selector rotting simultaneously reads as "wrong page"
+  // and stays silent — they live in different subsystems, so that is far less
+  // likely than the false positives a page sentinel would produce.
+  function auditSelectors(selectorList) {
+    var sels = String(selectorList)
+      .split(",")
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    var missing = [];
+    var hit = 0;
+    sels.forEach(function (s) {
+      var found = false;
+      try {
+        found = !!document.querySelector(s);
+      } catch (e) {
+        // An invalid selector never matches, so rrweb would not block it either.
+        missing.push(s + " (invalid)");
+        return;
+      }
+      if (found) hit++;
+      else missing.push(s);
+    });
+    if (!hit || !missing.length) return null; // wrong page, or all good
+    return missing;
+  }
+
   /* ---- boot ---- */
 
   function start() {
@@ -383,6 +417,14 @@
       } catch (e) {
         return disable("rrweb.record failed: " + (e && e.message));
       }
+      STATE.blockMisses = auditSelectors(block);
+      if (STATE.blockMisses) {
+        console.warn(
+          "[gently-replay] blockSelector no longer matches — high-churn regions " +
+            "may now be recorded at frame rate: " +
+            STATE.blockMisses.join(", ")
+        );
+      }
     }
     document.addEventListener("click", onClick, true);
     document.addEventListener("submit", onSubmit, true);
@@ -392,6 +434,9 @@
       url: String(location.href),
       viewport: window.innerWidth + "x" + window.innerHeight,
       fidelity: fidelity,
+      // Present only when a block selector has rotted, so a postmortem explains
+      // an unexpectedly huge or janky recording instead of leaving it a mystery.
+      blockSelectorMisses: STATE.blockMisses || undefined,
     });
     window.addEventListener("pagehide", finalFlush);
     document.addEventListener("visibilitychange", function () {

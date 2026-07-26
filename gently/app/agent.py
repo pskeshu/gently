@@ -1616,9 +1616,8 @@ class MicroscopyAgent:
                 view_a = volume[0] if volume.ndim == 4 else volume
 
                 if view_a.ndim == 3:
-                    z_depth, height, width = view_a.shape
-                    if width > height * 2:
-                        view_a = view_a[:, :, : width // 2]
+                    # view_a is already one view (4D handled on the line above).
+                    # No aspect-ratio splitting: native frames are 4:1.
                     bounds = compute_crop_bounds(view_a)
                     cropped = apply_crop_bounds(view_a, bounds)
                     three_view_img, _ = projection_three_view(cropped)

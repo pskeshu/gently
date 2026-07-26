@@ -171,6 +171,17 @@ def create_router(server) -> APIRouter:
         if not agent.experiment.remove_embryo(embryo_id):
             raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
 
+        # Also drop it from the session files, or a false positive deleted here
+        # would reappear on the next restart (embryos are reloaded from disk on
+        # resume). Best-effort — the in-memory removal already succeeded.
+        store = getattr(agent, "store", None)
+        sid = getattr(agent, "session_id", None)
+        if store is not None and sid and hasattr(store, "delete_embryo"):
+            try:
+                store.delete_embryo(sid, embryo_id)
+            except Exception:
+                logger.exception("Failed to delete embryo %s from session files", embryo_id)
+
         bus = getattr(agent, "_event_bus", None)
         if bus is not None:
             from gently.core.event_bus import EventType
@@ -974,7 +985,9 @@ def create_router(server) -> APIRouter:
         clean (a marking step, not a blind auto-register).
 
         Body (all optional): {exposure_ms, min_confidence, brightness_percentile,
-        min_area, max_area, use_claude_review}. Claude review defaults OFF.
+        min_area, max_area, use_claude_review, use_last_frame}. Claude review
+        defaults OFF. use_last_frame detects on the last streamed frame (if any)
+        instead of capturing a fresh image.
 
         Returns: {success, count, stage_position: [x, y] | null,
                   embryos: [{embryo_id, pixel_x, pixel_y, stage_x_um, stage_y_um,
@@ -988,7 +1001,11 @@ def create_router(server) -> APIRouter:
                 status_code=503, detail="SAM detection not available on device layer"
             )
 
-        kw: dict = {"use_claude_review": bool(payload.get("use_claude_review", False))}
+        kw: dict = {
+            "use_claude_review": bool(payload.get("use_claude_review", False)),
+            "use_last_frame": bool(payload.get("use_last_frame", False)),
+            "capture_only": bool(payload.get("capture_only", False)),
+        }
         for key, cast in (
             ("exposure_ms", float),
             ("min_confidence", float),
@@ -1030,6 +1047,9 @@ def create_router(server) -> APIRouter:
             "count": len(embryos),
             "stage_position": list(pos) if pos is not None else None,
             "embryos": embryos,
+            # The JPEG-encoded frame SAM ran on, so the Operate view can display
+            # the image the candidates came from (esp. a fresh capture).
+            "frame": result.get("frame"),
         }
 
     @router.post("/api/devices/embryos/confirm", dependencies=[Depends(require_control)])
@@ -1060,6 +1080,9 @@ def create_router(server) -> APIRouter:
 
         import uuid
 
+        store = getattr(agent, "store", None)
+        sid = getattr(agent, "session_id", None)
+
         registered: list[str] = []
         taken: set = set()
         for m in markers:
@@ -1068,13 +1091,28 @@ def create_router(server) -> APIRouter:
                 continue
             emb_id = _next_embryo_id(taken)
             taken.add(emb_id)
+            emb_uid = str(uuid.uuid4())
             agent.experiment.add_embryo(
                 embryo_id=emb_id,
                 position={"x": sx, "y": sy},
                 confidence=_num(m.get("confidence")) or 0.0,
-                uid=str(uuid.uuid4()),
+                uid=emb_uid,
                 role="unassigned",
             )
+            # Persist to the session files so embryos survive a restart — the
+            # experiment is otherwise memory-only until a volume is acquired.
+            # Best-effort: a storage hiccup must never fail the registration.
+            if store is not None and sid:
+                try:
+                    store.register_embryo(
+                        session_id=sid,
+                        embryo_id=emb_id,
+                        embryo_uid=emb_uid,
+                        position_coarse={"x": sx, "y": sy},
+                        role="unassigned",
+                    )
+                except Exception:
+                    logger.exception("Failed to persist embryo %s to session files", emb_id)
             registered.append(emb_id)
 
         labelled = _persist_detection_labels(agent, payload, markers)

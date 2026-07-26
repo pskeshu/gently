@@ -1,11 +1,11 @@
 # ruff: noqa: E501
-"""US-12 — Lower SPIM → focus → acquire. As an operator, I lower the SPIM head, focus the light-sheet objective, then acquire the volume for a centered embryo."""
+"""US-12 — Lower SPIM → focus → acquire. As an operator, I bring the objectives down onto the sample, tune the sheet, then acquire a volume."""
 
 from _harness import dom_count, goto, skip_landing, tab, view
 
 META = {
     "id": "US-12",
-    "title": "Lower SPIM → focus → acquire",
+    "title": "Lower SPIM head, focus, acquire",
     "cluster": "6 Operate (acquire)",
     "mode": "rig",
     "needs_account": False,
@@ -17,21 +17,27 @@ async def flow(page, url, rec):
     await skip_landing(page)
     await tab(page, "devices")
     await view(page, "operate")
-    rail = await dom_count(page, "#op-rail")  # operate surface loaded
-    lower = await dom_count(page, "#op-fd-nudge [data-fd]")  # b2 Lower: SPIM head F-drive nudges
-    tofocus = await dom_count(page, "#op-tofocus")  # b2 → Focus SPIM
-    infocus = await dom_count(page, "#op-infocus")  # b3 mark-in-focus
-    acquire = await dom_count(page, "#op-acquire")  # b4 Acquire volume
-    # reveal the Acquire step group so the audit shot shows the culminating control
-    await page.evaluate(
-        "() => { const r=document.getElementById('op-rail'); if (r) r.dataset.active='b4'; }"
+
+    # Height and sheet tuning live on the SPIM head surface.
+    on_spim = await view(page, "spim")
+    await rec.shot("operate-spim-head")
+    fdrive = await dom_count(page, "#op-fd-nudge [data-nudge]")  # position-banded F-drive ladder
+    spim_view = await dom_count(page, "#op-spim-toggle")
+    led = await dom_count(page, "#op-led")
+    galvo = await dom_count(page, "[data-gv]")
+    calibrate = await dom_count(page, "#op-calibrate")
+
+    # Acquisition is its own surface, not the end of a sequence.
+    on_acq = await view(page, "acquire")
+    await rec.shot("operate-acquisition")
+    single = await dom_count(page, '[data-mode="single"]')
+    slices = await dom_count(page, "#op-vol-slices")
+    start = await dom_count(page, "#op-run-start")
+
+    if not (on_spim and fdrive and spim_view and on_acq and single and start):
+        rec.gap("SPIM height/sheet controls or the single-volume acquisition control are missing")
+        return
+    rec.blocked(
+        f"needs device: F-drive ladder ({fdrive} steps), light-sheet view + LED ({led}), sheet alignment ({galvo}), calibrate ({calibrate}) "
+        f"and single-volume acquire (slices={slices}) are all present and live; motion and acquisition 502 with the device layer offline"
     )
-    await rec.shot("acquire-step")
-    if rail and lower and tofocus and infocus and acquire:
-        rec.blocked(
-            "needs rig: Lower (F-drive nudges) + Focus SPIM (→) + mark-in-focus + Acquire volume controls are all wired, but driving lower→focus→acquire needs the SPIM device and a centered embryo"
-        )
-    else:
-        rec.gap(
-            f"operate acquire-step controls missing (rail={rail}, lower={lower}, tofocus={tofocus}, infocus={infocus}, acquire={acquire})"
-        )

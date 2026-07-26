@@ -146,7 +146,7 @@ const DevicesManager = (function () {
     let _filterText = '';
     let _lastPropertyMap = {};
     let _lastXY = null;             // {X, Y} in stage µm, last seen
-    let _currentView = 'map';
+    let _currentView = 'operate';
 
     // Map geometry
     //   _optimalBox: { x: [min, max], y: [min, max] } in stage µm, derived

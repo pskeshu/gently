@@ -28,6 +28,20 @@
         {# Agent lives in the docked right sidebar (collapses to a spark rail) —
            no header toggle. Ctrl/Cmd+J still opens it. #}
         {% endif %}
+        <!-- Process console. The desktop shell spawns the backend with no
+             console window, so this is the only way to read what the agent and
+             device layer are saying while a session is running. -->
+        <button class="header-nav-link logc-open" id="logc-open" type="button"
+                title="Process console (agent + device layer)" aria-label="Open process console"
+                aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <polyline points="6 9 9 12 6 15"></polyline>
+                <line x1="12" y1="15" x2="17" y2="15"></line>
+            </svg>
+            <span class="logc-dot" id="logc-dot" hidden aria-hidden="true"></span>
+        </button>
         <!-- Settings link -->
         <a href="/settings" class="header-nav-link" title="Dashboard settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -76,6 +90,36 @@
         {% endif %}
     </div>
 </div>
+
+<!-- PROCESS CONSOLE — a drawer over the page, not a route, so it can be opened
+     at the moment something fails without navigating away from it. -->
+<div class="logc" id="logc" hidden>
+    <div class="logc-scrim" id="logc-scrim"></div>
+    <section class="logc-panel" role="dialog" aria-modal="false" aria-label="Process console">
+        <header class="logc-head">
+            <div class="logc-tabs" role="tablist">
+                <button class="logc-tab is-active" role="tab" data-src="agent" type="button">Agent</button>
+                <button class="logc-tab" role="tab" data-src="device" type="button">Device layer</button>
+            </div>
+            <div class="logc-tools">
+                <select class="logc-level" id="logc-level" aria-label="Minimum level">
+                    <option value="">All</option>
+                    <option value="INFO">Info</option>
+                    <option value="WARNING">Warnings</option>
+                    <option value="ERROR">Errors</option>
+                </select>
+                <button class="logc-btn" id="logc-follow" type="button" aria-pressed="true"
+                        title="Follow new output">Follow</button>
+                <button class="logc-btn" id="logc-copy" type="button" title="Copy visible lines">Copy</button>
+                <button class="logc-btn logc-close" id="logc-close" type="button"
+                        title="Close (Esc)" aria-label="Close console">✕</button>
+            </div>
+        </header>
+        <div class="logc-meta"><span id="logc-file">—</span><span id="logc-status"></span></div>
+        <pre class="logc-body" id="logc-body" tabindex="0"></pre>
+    </section>
+</div>
+
 <script>
     // Single authoritative theme toggle — all pages use this via _header.html
     (function() {
