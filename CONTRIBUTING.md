@@ -48,25 +48,22 @@ pre-commit autoupdate
 
 ### Type checking
 
-Run mypy the same way pre-commit and CI do:
+mypy runs two ways, and they can disagree:
 
-```bash
-mypy .
-```
+- `mypy .` — no project dependencies installed. `[tool.mypy]` sets
+  `ignore_missing_imports = true`, so third-party imports fall back to `Any`.
+  This is the form the pre-commit hook runs.
+- `uv run mypy .` — after `uv sync`, with the real packages present, so mypy
+  checks their actual types and can surface mismatches the deps-less run cannot.
 
-The codebase is being typed incrementally (see issue #46). Modules with
-pre-existing errors are listed in the `[[tool.mypy.overrides]]` block in
-`pyproject.toml` with `ignore_errors = true`, so `mypy .` passes today even
-though not every module is fully typed yet.
-
-Policy for working with this list:
-
-- **New modules** must pass `mypy .` cleanly — do not add them to the
-  overrides list.
-- **PRs that substantively touch a module on the overrides list** should fix
-  that module's type errors and remove it from the list as part of the
-  change.
+A green run of one says nothing about the other, so run `uv run mypy .` before
+pushing if you touched code that uses a typed third-party library. New code must
+type-clean under both.
 
 ### CI
 
-Every pull request runs the lint job (`.github/workflows/lint.yml`), which checks ruff lint and formatting and runs mypy across the entire project. Fix any failures locally with `pre-commit run --all-files` before pushing.
+`.github/workflows/lint.yml` is the source of truth for what gates a pull
+request, and it changes — read it rather than trusting a summary here.
+`pre-commit run --all-files` reproduces the ruff checks and the deps-less
+`mypy .` locally, but **not** the deps-installed run; reproduce that with
+`uv run mypy .` after `uv sync`.

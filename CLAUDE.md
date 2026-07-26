@@ -1,13 +1,89 @@
 # Gently — Microscopy Agent
 
+## Working on this repo
+
+**README.md** covers environment setup and how to run things (`uv sync`,
+`uv run pytest`, `uv run python launch_gently.py` and its flags).
+**CONTRIBUTING.md** covers the lint/type toolchain — ruff, the two mypy runs,
+and pre-commit. This section is only for what those two don't say — the things
+that are easy to get wrong here.
+
+### Where work lands
+
+Branch off `development`; open the PR against `development` in
+**`gently-project/gently`**. Only the push differs by access level:
+
+```bash
+# With write access — branches go straight to the org repo
+git clone git@github.com:gently-project/gently.git && cd gently
+git checkout -b feature/<thing> origin/development
+git push -u origin feature/<thing>
+
+# Without write access — fork on GitHub, then keep the org repo as `upstream`
+git clone git@github.com:<your-user>/gently.git && cd gently
+git remote add upstream git@github.com:gently-project/gently.git
+git fetch upstream
+git checkout -b feature/<thing> upstream/development
+git push -u origin feature/<thing>          # your fork
+
+# Either way
+gh pr create --repo gently-project/gently --base development
+```
+
+Check `git remote -v` before pushing: in a direct clone `origin` *is* the org
+repo; in a fork-based clone `origin` is your fork and `upstream` is the org repo.
+Two `gh` defaults will misfile a PR — the repo's default branch is `main` while
+PRs target `development`, and with no `gh` default repo set it resolves from
+whichever remote it finds. Pass `--base development --repo gently-project/gently`.
+
+### Before committing
+
+CONTRIBUTING.md is canonical for the toolchain. The trap it doesn't mention:
+**the pre-commit hook is not installed in a fresh clone**, so commits silently
+bypass ruff and mypy. Run `pre-commit install` once per clone, then
+`pre-commit run --all-files` before opening a PR.
+
+`.github/workflows/lint.yml` is the source of truth for which checks gate a PR,
+and that changes — read it rather than trusting a list here. What stays true:
+
+- **There are two mypy runs and they can disagree.** One runs `mypy .` with no
+  project deps, so third-party imports fall back to `Any`; the other runs
+  `uv run mypy .` with the real packages and resolves their actual types. A
+  green run of one says nothing about the other. `uv sync && uv run mypy .`
+  reproduces the deps-installed run locally; the pre-commit hook reproduces the
+  deps-less one.
+- **A job stops at its first failing step.** A ruff failure means the mypy step
+  in that job never ran, so a green re-run after fixing ruff is not evidence
+  that mypy passed.
+- **CI runs no JavaScript.** A change under `gently/ui/web/static/js/` is not
+  covered by CI, so verify it by running the app and exercising the UI by hand.
+- CI runs on pull requests and on pushes to `main`/`development`, so a feature
+  branch with no PR open gets no signal at all.
+
+### Running the app off-Windows
+
+The storage paths throughout this file (`D:\Gently3\...`) are the Windows
+microscope PCs, where `D:` is the dedicated data drive. Off-Windows that default
+is **not an absolute path**: it resolves against the cwd and silently creates a
+junk directory literally named `D:` with session data inside it
+(`gently/settings.py`). Always set an explicit path when running on Linux or
+macOS:
+
+```bash
+GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser
+```
+
+Those three flags are the usual agent/dev combination: no Anthropic key needed,
+no login gate, and no browser window. The UI is then on `http://localhost:8080`.
+
 ## Storage Architecture (Gently3 — File-Based)
 
 All data lives under `D:\Gently3\` (env: `GENTLY_STORAGE_PATH`). **No SQLite databases.** Everything is human-browsable files.
 
 ### Key store classes
-- **`FileStore`** (`gently/core/file_store.py`) — replaces `GentlyStore`. Manages sessions, embryos, volumes, projections, predictions, traces. Drop-in API replacement.
-- **`FileContextStore`** (`gently/harness/memory/file_store.py`) — replaces `ContextStore` / `agent_mind.db`. Manages campaigns, plans, learnings, observations, agent state. Drop-in API replacement.
-- **Root manifest**: `D:\Gently3\gently.yaml` — documents the structure for humans and agents.
+- **`FileStore`** (`gently/core/file_store.py`) — sessions, embryos, volumes, projections, predictions, traces.
+- **`FileContextStore`** (`gently/harness/memory/file_store.py`) — campaigns, plans, learnings, observations, agent state.
+- **Root manifest**: `gently.yaml` at the storage root — documents the structure for humans and agents.
 
 ### Directory layout
 ```
@@ -63,34 +139,46 @@ D:/Gently3/
   incoming/{uuid}.tif                      # transient device staging
 ```
 
-### Legacy stores (D:\Gently2\ — read-only reference)
-The old SQLite-based stores are preserved but no longer written to:
-- `gently.db` (GentlyStore) — replaced by FileStore
-- `context/agent_mind.db` (ContextStore) — replaced by FileContextStore
-- `D:\gently\dataset.db` — legacy benchmarking DB
+### Superseded stores — do not wire new code to these
+
+The SQLite-era classes are **still in the package and still have passing tests**,
+so they look live. They have no production callers; only `tests/` instantiate
+them. Use the file stores above instead.
+
+- `GentlyStore` (`gently/core/store.py`) → use `FileStore`
+- `ContextStore` (`gently/harness/memory/store.py`, `agent_mind.db`) → use `FileContextStore`
+- `gently/dataset/` still defaults to `D:/gently/dataset.db` (legacy benchmarking DB)
+
+Their data lives under the old `D:\Gently2\` root, read-only reference only.
 
 ## Logging
 
-Both the agent and device layer write logs to `D:\Gently3\logs\`:
+Both the agent and device layer write logs to `<storage root>/logs/`:
 
 - **Agent**: `gently_YYYYMMDD_HHMMSS.log` — INFO+ to file, console level configurable via `-v` flag
 - **Device layer**: `device_layer_YYYYMMDD_HHMMSS.log` — INFO level
 
-To check logs during a session:
+To check logs during a session (the expansion keeps these working off-Windows,
+where the `D:/Gently3` default does not apply — see above):
+
 ```bash
-# Latest agent log
-tail -f D:/Gently3/logs/$(ls -t D:/Gently3/logs/gently_*.log | head -1)
+LOGS="${GENTLY_STORAGE_PATH:-D:/Gently3}/logs"
+
+# Latest agent log  (ls prints the full path — do not prefix $LOGS again)
+tail -f "$(ls -t "$LOGS"/gently_*.log | head -1)"
 
 # Latest device layer log
-tail -f D:/Gently3/logs/$(ls -t D:/Gently3/logs/device_layer_*.log | head -1)
+tail -f "$(ls -t "$LOGS"/device_layer_*.log | head -1)"
 
 # Filter for errors
-grep -E "ERROR|Traceback" D:/Gently3/logs/gently_*.log
+grep -E "ERROR|Traceback" "$LOGS"/gently_*.log
 ```
 
 ## Perception
 
-Perception is handled by `gently-perception` (separate repo: `pskeshu/gently-perception`), installed as a pip dependency. The timelapse orchestrator uses `Perceiver()` from `gently_perception` — a self-contained system that loads its own examples and accumulates per-embryo context through sequential calls.
+Perception is handled by `gently-perception` (separate repo:
+`gently-project/gently-perception` — this is what CI clones and what
+`pyproject.toml` expects beside this repo), installed as a pip dependency. The timelapse orchestrator uses `Perceiver()` from `gently_perception` — a self-contained system that loads its own examples and accumulates per-embryo context through sequential calls.
 
 ## Device Layer
 
@@ -140,14 +228,3 @@ the Desktop shortcut points at; rebuild with `npm run build` to refresh it.
 ### Deferred
 Bundling the Python env (torch/anthropic/perception) for a redistributable
 installer — today's build launches the repo's `.venv`, so it's single-machine.
-
-## Debugging Data Sources
-
-- **Agent logs**: `D:\Gently3\logs\gently_*.log`
-- **Device layer logs**: `D:\Gently3\logs\device_layer_*.log`
-- **Perception traces**: `D:\Gently3\sessions\{session}\embryos\{embryo}\traces\` — per-timepoint JSON
-- **Predictions**: `D:\Gently3\sessions\{session}\embryos\{embryo}\predictions.jsonl`
-- **Volume staging**: `D:\Gently3\incoming\`
-- **Agent memory**: `D:\Gently3\agent\` — campaigns, learnings, observations (all YAML)
-- **Session state**: `D:\Gently3\sessions\{session}\session.yaml`
-- **Timelapse state**: `D:\Gently3\sessions\{session}\timelapse.yaml`
