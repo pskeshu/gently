@@ -200,8 +200,11 @@ props_.setPropValue(galvoDevice, Properties.Keys.SPIM_STATE,
 
 ```python
 from gently.mmcore_wrapper import (
-    GentlyProperties, GentlyDevices,
-    DeviceKeys, PropertyKeys, PropertyValues
+    GentlyProperties,
+    GentlyDevices,
+    DeviceKeys,
+    PropertyKeys,
+    PropertyValues,
 )
 
 # Initialize
@@ -224,11 +227,9 @@ props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DELAY_CAMERA, 0.5)
 props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_DURATION_CAMERA, 9.0)
 
 # Arm and trigger
-props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE,
-                   PropertyValues.SPIM_ARMED)
+props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE, PropertyValues.SPIM_ARMED)
 # ... then trigger via TTL or:
-props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE,
-                   PropertyValues.SPIM_RUNNING)
+props.set_property(DeviceKeys.GALVO_A, PropertyKeys.SPIM_STATE, PropertyValues.SPIM_RUNNING)
 ```
 
 ---

@@ -129,6 +129,7 @@ for i in range(num_slices):
     img = core.popNextImage()
     try:
         import rpyc
+
         img = rpyc.classic.obtain(img)
     except:
         pass
@@ -252,19 +253,20 @@ core.setProperty(galvo_device, "SingleAxisYMode", "3 - Enabled with axes synced"
 ```python
 # TRIGGER_SOURCE property
 "INTERNAL"  # For live/snap mode
+
 "EXTERNAL"  # For hardware-triggered acquisition
 
 # SENSOR_MODE property
-"AREA"         # Standard split readout (top/bottom simultaneous)
+"AREA"  # Standard split readout (top/bottom simultaneous)
 "PROGRESSIVE"  # Rolling shutter for light sheet (slower but better for SPIM)
 
 # TRIGGER_ACTIVE property
-"EDGE"        # Edge trigger - single pulse starts exposure
-"LEVEL"       # Level trigger - TTL high duration = exposure time
-"SYNCREADOUT" # Overlap mode - synchronous readout
+"EDGE"  # Edge trigger - single pulse starts exposure
+"LEVEL"  # Level trigger - TTL high duration = exposure time
+"SYNCREADOUT"  # Overlap mode - synchronous readout
 
 # TriggerPolarity property
-"POSITIVE"    # Trigger on rising edge (required)
+"POSITIVE"  # Trigger on rising edge (required)
 ```
 
 **Configuration Sequence (from Cameras.java:231-260):**
@@ -299,9 +301,10 @@ core.setExposure(camera_name, 10.0)  # milliseconds
 
 ```python
 # Triggermode property
-"Internal"          # For live/snap mode
-"External"          # Edge trigger mode
-"External Exp. Ctrl." # Level trigger mode
+"Internal"  # For live/snap mode
+
+"External"  # Edge trigger mode
+"External Exp. Ctrl."  # Level trigger mode
 
 # PixelRate property
 "slow scan"  # Slower pixel readout, higher quality
@@ -327,17 +330,18 @@ core.setProperty(camera_name, "Triggermode", "External Exp. Ctrl.")
 ```python
 # TriggerMode property
 "Internal (Recommended for fast acquisitions)"  # Live mode
-"External"                                       # Edge trigger
-"External Exposure"                             # Level trigger
+
+"External"  # Edge trigger
+"External Exposure"  # Level trigger
 
 # Overlap property
-"On"   # Overlap mode enabled
+"On"  # Overlap mode enabled
 "Off"  # Standard mode
 
 # LightScanPlus-SensorReadoutMode property
 "Centre Out Simultaneous"  # Standard split readout
-"Bottom Up Sequential"     # Rolling shutter for light sheet
-"Bottom Up Simultaneous"   # Split readout from bottom
+"Bottom Up Sequential"  # Rolling shutter for light sheet
+"Bottom Up Simultaneous"  # Split readout from bottom
 ```
 
 **Configuration Sequence (from Cameras.java:284-331):**
@@ -362,10 +366,11 @@ core.setProperty(camera_name, "Overlap", "Off")
 ```python
 # TriggerMode property
 "Internal Trigger"  # Live mode
-"Edge Trigger"      # Hardware triggered
+
+"Edge Trigger"  # Hardware triggered
 
 # ClearMode property
-"Never"         # No clearing between frames
+"Never"  # No clearing between frames
 "Pre-Exposure"  # Clear before each exposure
 "Pre-Sequence"  # Clear once before sequence
 ```
@@ -389,43 +394,43 @@ All properties are set on the **Micro-mirror (Galvo) card device**:
 galvo_device = "Scanner:AB:33"  # Your device name
 
 # SPIM State Machine Control
-"SPIMState"           # Values: "Idle", "Armed", "Running"
-"SPIMNumSlices"       # Number of slices per side (e.g., 100)
-"SPIMNumSides"        # 1 = single side, 2 = dual view
-"SPIMFirstSide"       # "A" or "B" - which side starts
+"SPIMState"  # Values: "Idle", "Armed", "Running"
+"SPIMNumSlices"  # Number of slices per side (e.g., 100)
+"SPIMNumSides"  # 1 = single side, 2 = dual view
+"SPIMFirstSide"  # "A" or "B" - which side starts
 
 # SPIM Timing Properties (ALL IN MILLISECONDS, 0.25ms resolution)
-"SPIMDelayBeforeScan(ms)"      # Delay before scan mirror starts
-"SPIMScanDuration(ms)"         # Scan mirror sweep duration
-"SPIMDelayBeforeLaser(ms)"     # Delay before laser trigger
-"SPIMLaserDuration(ms)"        # Laser TTL pulse width
-"SPIMDelayBeforeCamera(ms)"    # Delay before camera trigger
-"SPIMCameraDuration(ms)"       # Camera TTL pulse width ← CRITICAL!
+"SPIMDelayBeforeScan(ms)"  # Delay before scan mirror starts
+"SPIMScanDuration(ms)"  # Scan mirror sweep duration
+"SPIMDelayBeforeLaser(ms)"  # Delay before laser trigger
+"SPIMLaserDuration(ms)"  # Laser TTL pulse width
+"SPIMDelayBeforeCamera(ms)"  # Delay before camera trigger
+"SPIMCameraDuration(ms)"  # Camera TTL pulse width ← CRITICAL!
 
 # SPIM Multi-Acquisition Properties
-"SPIMNumRepeats"               # Volumes per trigger (for hardware timepoints)
-"SPIMDelayBeforeRepeat(ms)"    # Delay between volumes
-"SPIMDelayBeforeSide(ms)"      # Delay between sides (for dual view)
-"SPIMNumScansPerSlice"         # Usually 1
-"SPIMNumSlicesPerPiezo"        # For multichannel slice-by-slice
-"SPIMAlternateDirectionsEnable" # "Yes" or "No"
-"SPIMInterleaveSidesEnable"    # For interleaved stage scan
-"SPIMPiezoHomeDisable"         # For stage scan mode
+"SPIMNumRepeats"  # Volumes per trigger (for hardware timepoints)
+"SPIMDelayBeforeRepeat(ms)"  # Delay between volumes
+"SPIMDelayBeforeSide(ms)"  # Delay between sides (for dual view)
+"SPIMNumScansPerSlice"  # Usually 1
+"SPIMNumSlicesPerPiezo"  # For multichannel slice-by-slice
+"SPIMAlternateDirectionsEnable"  # "Yes" or "No"
+"SPIMInterleaveSidesEnable"  # For interleaved stage scan
+"SPIMPiezoHomeDisable"  # For stage scan mode
 
 # Scan Mirror Properties
-"SingleAxisXAmplitude(deg)"    # Light sheet width (X-axis)
-"SingleAxisXOffset(deg)"       # Light sheet position offset
-"SingleAxisXPattern"           # "0 - Ramp", "1 - Triangle"
-"SingleAxisXMode"              # "0 - Disabled", "1 - Enabled", "3 - Enabled with axes synced"
+"SingleAxisXAmplitude(deg)"  # Light sheet width (X-axis)
+"SingleAxisXOffset(deg)"  # Light sheet position offset
+"SingleAxisXPattern"  # "0 - Ramp", "1 - Triangle"
+"SingleAxisXMode"  # "0 - Disabled", "1 - Enabled", "3 - Enabled with axes synced"
 
-"SingleAxisYAmplitude(deg)"    # Slice stepping amplitude (Y-axis)
-"SingleAxisYOffset(deg)"       # Slice position offset
-"SingleAxisYPattern"           # "0 - Ramp", "1 - Triangle"
-"SingleAxisYMode"              # "0 - Disabled", "3 - Enabled with axes synced"
+"SingleAxisYAmplitude(deg)"  # Slice stepping amplitude (Y-axis)
+"SingleAxisYOffset(deg)"  # Slice position offset
+"SingleAxisYPattern"  # "0 - Ramp", "1 - Triangle"
+"SingleAxisYMode"  # "0 - Disabled", "3 - Enabled with axes synced"
 
 # Critical Output Configuration
-"LaserOutputMode"              # "shutter + side" ← MUST BE SET FOR TRIGGERS!
-"BeamEnabled"                  # "Yes" or "No" - disable during SPIM acquisition
+"LaserOutputMode"  # "shutter + side" ← MUST BE SET FOR TRIGGERS!
+"BeamEnabled"  # "Yes" or "No" - disable during SPIM acquisition
 ```
 
 ### Piezo (Z-drive) Properties
@@ -435,12 +440,12 @@ galvo_device = "Scanner:AB:33"  # Your device name
 piezo_device = "Piezo:A:37"  # Your device name
 
 # Piezo Sweep Properties
-"SPIMState"                    # "Idle", "Armed" ← Must arm before galvo trigger
-"SPIMNumSlices"                # Number of Z positions
-"SA_AMPLITUDE"                 # Sweep amplitude in micrometers
-"SA_OFFSET"                    # Center position in micrometers
-"SA_PATTERN"                   # "0 - Ramp", "1 - Triangle"
-"SA_MODE_Z"                    # "0 - Disabled", "1 - Enabled", "3 - Enabled with axes synced"
+"SPIMState"  # "Idle", "Armed" ← Must arm before galvo trigger
+"SPIMNumSlices"  # Number of Z positions
+"SA_AMPLITUDE"  # Sweep amplitude in micrometers
+"SA_OFFSET"  # Center position in micrometers
+"SA_PATTERN"  # "0 - Ramp", "1 - Triangle"
+"SA_MODE_Z"  # "0 - Disabled", "1 - Enabled", "3 - Enabled with axes synced"
 ```
 
 ### PLogic Card Properties (Optional)
@@ -450,9 +455,9 @@ piezo_device = "Piezo:A:37"  # Your device name
 plogic_device = "PLogic:E:36"  # Your device name
 
 # PLogic Control
-"PLogicMode"                   # "Disp. Seq. positions"
-"PLogicOutputChannel"          # "6,7" for lasers on BNC6 & BNC7
-"PoLogicPreset"                # "3 - cell 1 high" during acquisition
+"PLogicMode"  # "Disp. Seq. positions"
+"PLogicOutputChannel"  # "6,7" for lasers on BNC6 & BNC7
+"PoLogicPreset"  # "3 - cell 1 high" during acquisition
 
 # Note: PLogic adds 0.25ms delay to all TTL outputs
 ```
@@ -510,9 +515,14 @@ def configure_camera_for_hardware_trigger(core, camera_name, camera_mode="EDGE",
 ### Phase 2: Timing Calculation
 
 ```python
-def calculate_spim_timing(camera_exposure_ms, camera_reset_ms, camera_readout_ms,
-                          scan_laser_buffer_ms=0.25, scan_filter_freq_khz=0.2,
-                          has_plogic=False):
+def calculate_spim_timing(
+    camera_exposure_ms,
+    camera_reset_ms,
+    camera_readout_ms,
+    scan_laser_buffer_ms=0.25,
+    scan_filter_freq_khz=0.2,
+    has_plogic=False,
+):
     """
     Calculate SPIM timing parameters following ASI diSPIM plugin logic.
 
@@ -527,6 +537,7 @@ def calculate_spim_timing(camera_exposure_ms, camera_reset_ms, camera_readout_ms
     Returns:
         Dictionary of timing parameters
     """
+
     # Round to 0.25ms (Tiger controller resolution)
     def round_quarter_ms(val):
         return round(val * 4) / 4.0
@@ -547,14 +558,16 @@ def calculate_spim_timing(camera_exposure_ms, camera_reset_ms, camera_readout_ms
         scan_delay_filter -= 0.25  # PLogic adds 0.25ms delay
 
     timing = {
-        'scanDelay': global_exposure_delay_max - scan_laser_buffer_ms - scan_delay_filter,
-        'scanPeriod': scan_duration,
-        'laserDelay': global_exposure_delay_max,
-        'laserDuration': laser_duration,
-        'cameraDelay': camera_readout_max,
-        'cameraDuration': 1.0,  # Short pulse for EDGE mode
-        'cameraExposure': camera_exposure_ms + 0.1,  # Add safety margin
-        'sliceDuration': max(scan_duration, laser_duration, camera_readout_max + camera_exposure_ms)
+        "scanDelay": global_exposure_delay_max - scan_laser_buffer_ms - scan_delay_filter,
+        "scanPeriod": scan_duration,
+        "laserDelay": global_exposure_delay_max,
+        "laserDuration": laser_duration,
+        "cameraDelay": camera_readout_max,
+        "cameraDuration": 1.0,  # Short pulse for EDGE mode
+        "cameraExposure": camera_exposure_ms + 0.1,  # Add safety margin
+        "sliceDuration": max(
+            scan_duration, laser_duration, camera_readout_max + camera_exposure_ms
+        ),
     }
 
     # Round all values to 0.25ms
@@ -567,9 +580,9 @@ def calculate_spim_timing(camera_exposure_ms, camera_reset_ms, camera_readout_ms
 ### Phase 3: Tiger Controller Configuration
 
 ```python
-def configure_tiger_controller_for_spim(core, galvo_device, piezo_device,
-                                        num_slices=100, num_sides=1, first_side_a=True,
-                                        timing=None):
+def configure_tiger_controller_for_spim(
+    core, galvo_device, piezo_device, num_slices=100, num_sides=1, first_side_a=True, timing=None
+):
     """
     Configure Tiger controller SPIM state machine.
 
@@ -626,12 +639,12 @@ def configure_tiger_controller_for_spim(core, galvo_device, piezo_device,
 
     # ⚠️ CRITICAL: Set ALL timing properties explicitly
     if timing:
-        core.setProperty(galvo_device, "SPIMDelayBeforeScan(ms)", timing['scanDelay'])
-        core.setProperty(galvo_device, "SPIMScanDuration(ms)", timing['scanPeriod'])
-        core.setProperty(galvo_device, "SPIMDelayBeforeLaser(ms)", timing['laserDelay'])
-        core.setProperty(galvo_device, "SPIMLaserDuration(ms)", timing['laserDuration'])
-        core.setProperty(galvo_device, "SPIMDelayBeforeCamera(ms)", timing['cameraDelay'])
-        core.setProperty(galvo_device, "SPIMCameraDuration(ms)", timing['cameraDuration'])
+        core.setProperty(galvo_device, "SPIMDelayBeforeScan(ms)", timing["scanDelay"])
+        core.setProperty(galvo_device, "SPIMScanDuration(ms)", timing["scanPeriod"])
+        core.setProperty(galvo_device, "SPIMDelayBeforeLaser(ms)", timing["laserDelay"])
+        core.setProperty(galvo_device, "SPIMLaserDuration(ms)", timing["laserDuration"])
+        core.setProperty(galvo_device, "SPIMDelayBeforeCamera(ms)", timing["cameraDelay"])
+        core.setProperty(galvo_device, "SPIMCameraDuration(ms)", timing["cameraDuration"])
     else:
         # Use safe defaults
         core.setProperty(galvo_device, "SPIMDelayBeforeScan(ms)", 0.0)
@@ -749,7 +762,7 @@ def wait_for_images(core, camera_name, num_expected, timeout_sec=30.0):
         img = core.popNextImage()
         img = rpyc.classic.obtain(img)  # For rpyc remote objects
         images.append(img)
-        print(f"  Image {i+1}/{count}: shape={img.shape}, range=[{img.min()}, {img.max()}]")
+        print(f"  Image {i + 1}/{count}: shape={img.shape}, range=[{img.min()}, {img.max()}]")
 
     return images
 ```
@@ -757,8 +770,9 @@ def wait_for_images(core, camera_name, num_expected, timeout_sec=30.0):
 ### Complete Acquisition Function
 
 ```python
-def acquire_spim_volume(core, camera_name, galvo_device, piezo_device,
-                       num_slices=100, camera_exposure_ms=5.0):
+def acquire_spim_volume(
+    core, camera_name, galvo_device, piezo_device, num_slices=100, camera_exposure_ms=5.0
+):
     """
     Complete hardware-triggered SPIM volume acquisition.
 
@@ -775,16 +789,16 @@ def acquire_spim_volume(core, camera_name, galvo_device, piezo_device,
     """
     try:
         # Phase 1: Configure camera
-        configure_camera_for_hardware_trigger(core, camera_name,
-                                              camera_mode="EDGE",
-                                              exposure_ms=camera_exposure_ms)
+        configure_camera_for_hardware_trigger(
+            core, camera_name, camera_mode="EDGE", exposure_ms=camera_exposure_ms
+        )
 
         # Phase 2: Calculate timing
         timing = calculate_spim_timing(
             camera_exposure_ms=camera_exposure_ms,
-            camera_reset_ms=3.0,      # Hamamatsu Flash4 typical
-            camera_readout_ms=10.0,   # Depends on ROI and scan mode
-            has_plogic=True
+            camera_reset_ms=3.0,  # Hamamatsu Flash4 typical
+            camera_readout_ms=10.0,  # Depends on ROI and scan mode
+            has_plogic=True,
         )
 
         print("\nCalculated timing:")
@@ -792,11 +806,15 @@ def acquire_spim_volume(core, camera_name, galvo_device, piezo_device,
             print(f"  {key}: {val} ms")
 
         # Phase 3: Configure Tiger controller
-        configure_tiger_controller_for_spim(core, galvo_device, piezo_device,
-                                           num_slices=num_slices,
-                                           num_sides=1,
-                                           first_side_a=True,
-                                           timing=timing)
+        configure_tiger_controller_for_spim(
+            core,
+            galvo_device,
+            piezo_device,
+            num_slices=num_slices,
+            num_sides=1,
+            first_side_a=True,
+            timing=timing,
+        )
 
         # Phase 4: Start camera sequence
         start_camera_sequence(core, camera_name, num_slices)
@@ -805,7 +823,7 @@ def acquire_spim_volume(core, camera_name, galvo_device, piezo_device,
         trigger_spim_acquisition(core, galvo_device)
 
         # Phase 6: Wait for images
-        expected_time = num_slices * timing['sliceDuration'] / 1000.0
+        expected_time = num_slices * timing["sliceDuration"] / 1000.0
         timeout = expected_time * 2 + 10.0
         images = wait_for_images(core, camera_name, num_slices, timeout)
 
@@ -1143,7 +1161,7 @@ print(f"  SPIMDelayBeforeCamera(ms): {core.getProperty(galvo_device, 'SPIMDelayB
 print(f"  SPIMCameraDuration(ms): {core.getProperty(galvo_device, 'SPIMCameraDuration(ms)')}")
 
 # CRITICAL CHECK
-camera_duration = float(core.getProperty(galvo_device, 'SPIMCameraDuration(ms)'))
+camera_duration = float(core.getProperty(galvo_device, "SPIMCameraDuration(ms)"))
 if camera_duration <= 0:
     print("\n⚠️  WARNING: SPIMCameraDuration is 0 - NO TRIGGERS WILL BE GENERATED!")
     print("   You must set this property to > 0 (typically 1.0 ms)")
@@ -1187,7 +1205,7 @@ print(f"  SA_AMPLITUDE: {core.getProperty(piezo_device, 'SA_AMPLITUDE')} µm")
 print(f"  SA_OFFSET: {core.getProperty(piezo_device, 'SA_OFFSET')} µm")
 
 # Piezo should be Armed before galvo is set to Running
-piezo_state = core.getProperty(piezo_device, 'SPIMState')
+piezo_state = core.getProperty(piezo_device, "SPIMState")
 assert piezo_state == "Armed", f"Piezo should be Armed, not {piezo_state}"
 ```
 
@@ -1369,7 +1387,7 @@ piezo_device = "Piezo:A:37"
 
 num_slices = 100
 camera_exposure_ms = 5.0  # Light exposure time
-camera_reset_ms = 3.0     # Hamamatsu Flash4 typical
+camera_reset_ms = 3.0  # Hamamatsu Flash4 typical
 camera_readout_ms = 10.0  # Depends on ROI
 
 print("=" * 70)
@@ -1412,6 +1430,7 @@ try:
 
     def ceil_quarter_ms(val):
         import math
+
         return math.ceil(val * 4) / 4.0
 
     camera_readout_max = ceil_quarter_ms(camera_readout_ms)
@@ -1496,9 +1515,11 @@ try:
     core.setProperty(galvo_device, "SPIMDelayBeforeRepeat(ms)", 0.0)
 
     # Verify timing properties are set
-    print(f"    SPIMCameraDuration(ms): {core.getProperty(galvo_device, 'SPIMCameraDuration(ms)')} ← MUST BE > 0!")
+    print(
+        f"    SPIMCameraDuration(ms): {core.getProperty(galvo_device, 'SPIMCameraDuration(ms)')} ← MUST BE > 0!"
+    )
 
-    camera_duration_check = float(core.getProperty(galvo_device, 'SPIMCameraDuration(ms)'))
+    camera_duration_check = float(core.getProperty(galvo_device, "SPIMCameraDuration(ms)"))
     if camera_duration_check <= 0:
         raise Exception("SPIMCameraDuration is 0 - triggers will not be generated!")
 
@@ -1547,13 +1568,14 @@ try:
 
     # Step 9: Retrieve images
     count = core.getRemainingImageCount()
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
 
     if count >= num_slices:
         print(f"✓ SUCCESS! Acquired {count} images")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         import rpyc
+
         images = []
         print(f"\nRetrieving {count} images...")
         for i in range(count):
@@ -1561,26 +1583,29 @@ try:
             img = rpyc.classic.obtain(img)
             images.append(img)
             if i < 5 or i >= count - 5:  # Print first and last 5
-                print(f"  Image {i+1}: shape={img.shape}, range=[{img.min()}, {img.max()}]")
+                print(f"  Image {i + 1}: shape={img.shape}, range=[{img.min()}, {img.max()}]")
 
         volume = np.array(images)
         print(f"\nVolume shape: {volume.shape}")
 
         # Save as TIFF
         from PIL import Image
+
         img_list = [Image.fromarray(img.astype(np.uint16)) for img in images]
-        img_list[0].save('spim_volume_fixed.tif', save_all=True, append_images=img_list[1:])
+        img_list[0].save("spim_volume_fixed.tif", save_all=True, append_images=img_list[1:])
         print(f"Saved to: spim_volume_fixed.tif")
 
     else:
         print(f"✗ FAILED - Got {count}/{num_slices} images")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         # Diagnostic output
         print("\nDiagnostics:")
         print(f"  SPIMState: {core.getProperty(galvo_device, 'SPIMState')}")
         print(f"  LaserOutputMode: {core.getProperty(galvo_device, 'LaserOutputMode')}")
-        print(f"  SPIMCameraDuration(ms): {core.getProperty(galvo_device, 'SPIMCameraDuration(ms)')}")
+        print(
+            f"  SPIMCameraDuration(ms): {core.getProperty(galvo_device, 'SPIMCameraDuration(ms)')}"
+        )
         print(f"  Camera trigger: {core.getProperty(camera_name, 'TRIGGER SOURCE')}")
         print("\nPossible issues:")
         print("  - Check physical BNC cable connection to camera")
@@ -1589,9 +1614,9 @@ try:
 
 finally:
     # Cleanup
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("CLEANUP")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     try:
         if core.isSequenceRunning(camera_name):

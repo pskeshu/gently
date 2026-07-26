@@ -64,6 +64,7 @@ def stage(self):
 
     return super().stage()
 
+
 def unstage(self):
     """Cleanup after acquisition series."""
     try:
@@ -87,6 +88,7 @@ def trigger(self):
 
     Duration: ~2.7s (1s config + 1.7s acquisition)
     """
+
     def acquisition_thread():
         try:
             start_time = time.time()
@@ -104,7 +106,7 @@ def trigger(self):
                 self.camera_name,
                 self._num_slices,
                 0,  # intervalMs
-                True  # stopOnOverflow
+                True,  # stopOnOverflow
             )
 
             # 4. Trigger SPIM state machine (~1.7s for 100 slices @ 59fps)
@@ -139,9 +141,7 @@ def trigger(self):
     self._last_volume = None
 
     thread = threading.Thread(
-        target=acquisition_thread,
-        daemon=True,
-        name=f"SPIM-Trigger-{self.name}"
+        target=acquisition_thread, daemon=True, name=f"SPIM-Trigger-{self.name}"
     )
     thread.start()
 
@@ -180,12 +180,7 @@ def read(self):
 
     timestamp = time.time()
 
-    return {
-        self.name: {
-            'value': volume,
-            'timestamp': timestamp
-        }
-    }
+    return {self.name: {"value": volume, "timestamp": timestamp}}
 ```
 
 ### 4. Add Helper Methods
@@ -205,9 +200,7 @@ def _wait_for_buffer_fill(self, expected_count, timeout):
     while self.core.isSequenceRunning(self.camera_name):
         if time.time() - start_time > timeout:
             self.core.stopSequenceAcquisition(self.camera_name)
-            raise TimeoutError(
-                f"Sequence acquisition timeout after {timeout:.1f}s"
-            )
+            raise TimeoutError(f"Sequence acquisition timeout after {timeout:.1f}s")
         time.sleep(0.01)
 
     # Verify buffer has all images
@@ -223,6 +216,7 @@ def _wait_for_buffer_fill(self, expected_count, timeout):
     if actual_count > expected_count:
         print(f"Warning: Buffer has {actual_count} images, expected {expected_count}")
 
+
 def _retrieve_volume_from_buffer(self):
     """
     Retrieve all images from MM circular buffer.
@@ -234,20 +228,19 @@ def _retrieve_volume_from_buffer(self):
 
     for i in range(self._num_slices):
         if self.core.getRemainingImageCount() == 0:
-            raise RuntimeError(
-                f"Buffer underrun at slice {i}/{self._num_slices}"
-            )
+            raise RuntimeError(f"Buffer underrun at slice {i}/{self._num_slices}")
 
         # Pop and transfer over rpyc (SLOW: ~220ms per image)
         img = self.core.popNextImage()
         import rpyc
+
         img = rpyc.classic.obtain(img)
 
         images.append(img)
 
         # Progress logging
         if (i + 1) % 10 == 0:
-            print(f"Retrieved {i+1}/{self._num_slices} slices")
+            print(f"Retrieved {i + 1}/{self._num_slices} slices")
 
     return np.array(images)
 ```

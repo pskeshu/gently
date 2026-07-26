@@ -106,27 +106,27 @@ class ContextScope:
     scope_id: str
     parent_id: Optional[str]
     scope_type: Literal["root", "focus", "timelapse", "embryo_perception", "ad_hoc"]
-    purpose: str                    # one-line task description
-    instructions: str               # full brief, like a prompt to a colleague
+    purpose: str  # one-line task description
+    instructions: str  # full brief, like a prompt to a colleague
     conversation_history: List[Dict]
     allowed_tools: Set[str]
-    model: str                      # "opus" | "sonnet" | "haiku"
+    model: str  # "opus" | "sonnet" | "haiku"
     status: Literal["active", "completed", "yielded", "cancelled", "failed"]
-    summary: Optional[str]          # produced by Summarizer at end
-    key_findings: Dict[str, Any]    # structured return value
-    children: List[str]             # child scope_ids
+    summary: Optional[str]  # produced by Summarizer at end
+    key_findings: Dict[str, Any]  # structured return value
+    children: List[str]  # child scope_ids
     created_at: datetime
     completed_at: Optional[datetime]
-    persist: bool                   # write to SQLite if True
+    persist: bool  # write to SQLite if True
 
     # Runtime
-    inbox: asyncio.Queue            # incoming messages from other scopes
-    wakeup: asyncio.Event           # signaled when there is work
+    inbox: asyncio.Queue  # incoming messages from other scopes
+    wakeup: asyncio.Event  # signaled when there is work
     cancel_token: asyncio.Event
     cancel_reason: Optional[str]
     pending_queries: Dict[str, asyncio.Future]
-    peer_events: List[str]          # event types this scope subscribes to
-    parent_snapshot_cache: Dict     # parent's last known summary + findings
+    peer_events: List[str]  # event types this scope subscribes to
+    parent_snapshot_cache: Dict  # parent's last known summary + findings
 ```
 
 A `ScopeManager` (lives on `MicroscopyCopilot`) owns the scope tree, dispatches the inner agent loop, and exposes the orchestrator-facing tools.
@@ -198,22 +198,26 @@ async def run_scope(scope: ContextScope) -> SummaryResult:
         while not scope.inbox.empty():
             items.append(scope.inbox.get_nowait())
         if not items and not scope.cancel_token.is_set():
-            continue   # nothing to do, back to sleep, no API call
+            continue  # nothing to do, back to sleep, no API call
 
         # CHECK CANCELLATION — give child one final turn to summarize
         if scope.cancel_token.is_set() and scope.status != "cancelling":
             scope.status = "cancelling"
-            scope.conversation_history.append({
-                "role": "user",
-                "content": f"[CANCELLATION] {scope.cancel_reason}. "
-                           f"Emit a final summary using `complete` and stop.",
-            })
+            scope.conversation_history.append(
+                {
+                    "role": "user",
+                    "content": f"[CANCELLATION] {scope.cancel_reason}. "
+                    f"Emit a final summary using `complete` and stop.",
+                }
+            )
 
         # APPEND injected messages to history
-        scope.conversation_history.append({
-            "role": "user",
-            "content": format_inbox_items(items),
-        })
+        scope.conversation_history.append(
+            {
+                "role": "user",
+                "content": format_inbox_items(items),
+            }
+        )
 
         # ONE LLM TURN
         response = await call_claude(
@@ -222,23 +226,32 @@ async def run_scope(scope: ContextScope) -> SummaryResult:
             messages=scope.conversation_history,
             tools=tool_registry.filter(scope.allowed_tools),
         )
-        scope.conversation_history.append({"role":"assistant","content":response})
+        scope.conversation_history.append({"role": "assistant", "content": response})
 
         # HANDLE TOOL CALLS
         if response.stop_reason == "tool_use":
             tool_results = []
             for tool_call in response.tool_uses:
                 match tool_call.name:
-                    case "delegate":           result = await spawn_and_run(scope, **tool_call.input)
-                    case "yield_checkpoint":   result = await emit_checkpoint(scope, **tool_call.input)
-                    case "escalate":           result = await escalate_to_root(scope, **tool_call.input)
-                    case "query_parent":       result = await ask_parent(scope, **tool_call.input, timeout=30)
-                    case "read_parent_state":  result = scope.parent_snapshot_cache
-                    case "respond_to_query":   result = await deliver_answer(**tool_call.input)
-                    case "complete":           scope.status = "completed"; scope.key_findings = tool_call.input
-                    case _:                    result = await execute_tool(tool_call, scope)
+                    case "delegate":
+                        result = await spawn_and_run(scope, **tool_call.input)
+                    case "yield_checkpoint":
+                        result = await emit_checkpoint(scope, **tool_call.input)
+                    case "escalate":
+                        result = await escalate_to_root(scope, **tool_call.input)
+                    case "query_parent":
+                        result = await ask_parent(scope, **tool_call.input, timeout=30)
+                    case "read_parent_state":
+                        result = scope.parent_snapshot_cache
+                    case "respond_to_query":
+                        result = await deliver_answer(**tool_call.input)
+                    case "complete":
+                        scope.status = "completed"
+                        scope.key_findings = tool_call.input
+                    case _:
+                        result = await execute_tool(tool_call, scope)
                 tool_results.append(result)
-            scope.conversation_history.append({"role":"user","content":tool_results})
+            scope.conversation_history.append({"role": "user", "content": tool_results})
 
         if response.stop_reason == "end_turn":
             scope.status = "completed"
