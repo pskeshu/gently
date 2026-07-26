@@ -221,8 +221,13 @@ class DiSPIMScanner:
     # ... existing code ...
 
     # SPIM Hardware Mode Methods
-    def configure_spim(self, num_slices: int, scan_duration_ms: float,
-                       camera_duration_ms: float, delay_ms: float = 0.2):
+    def configure_spim(
+        self,
+        num_slices: int,
+        scan_duration_ms: float,
+        camera_duration_ms: float,
+        delay_ms: float = 0.2,
+    ):
         """Configure hardware SPIM parameters"""
         self.core.setProperty(self.device_name, "SPIMNumSlices", num_slices)
         self.core.setProperty(self.device_name, "SPIMScanDuration(ms)", scan_duration_ms)
@@ -246,13 +251,22 @@ class DiSPIMScanner:
         return self.core.getProperty(self.device_name, "SPIMState")
 
     # Single Axis Mode Methods
-    def configure_sam(self, axis: str, mode: int, pattern: int,
-                      amplitude_deg: float, offset_deg: float, period_ms: float):
+    def configure_sam(
+        self,
+        axis: str,
+        mode: int,
+        pattern: int,
+        amplitude_deg: float,
+        offset_deg: float,
+        period_ms: float,
+    ):
         """Configure Single Axis Mode for continuous scanning"""
         axis_prop = "X" if axis.upper() in ["X", "A"] else "Y"
         self.core.setProperty(self.device_name, f"SingleAxis{axis_prop}Mode", str(mode))
         self.core.setProperty(self.device_name, f"SingleAxis{axis_prop}Pattern", str(pattern))
-        self.core.setProperty(self.device_name, f"SingleAxis{axis_prop}Amplitude(deg)", amplitude_deg)
+        self.core.setProperty(
+            self.device_name, f"SingleAxis{axis_prop}Amplitude(deg)", amplitude_deg
+        )
         self.core.setProperty(self.device_name, f"SingleAxis{axis_prop}Offset(deg)", offset_deg)
         self.core.setProperty(self.device_name, f"SingleAxis{axis_prop}Period(ms)", period_ms)
 
@@ -305,10 +319,15 @@ class DiSPIMPiezo:
 #### 1. Sequential Volume Scan
 
 ```python
-def volume_scan_sequential(piezo, scanner, camera, z_positions: List[float],
-                           calibration: ReferenceMap,
-                           galvo_axis: str = 'A',
-                           metadata: Optional[Dict] = None):
+def volume_scan_sequential(
+    piezo,
+    scanner,
+    camera,
+    z_positions: List[float],
+    calibration: ReferenceMap,
+    galvo_axis: str = "A",
+    metadata: Optional[Dict] = None,
+):
     """
     Device-agnostic sequential volume scan
 
@@ -339,14 +358,14 @@ def volume_scan_sequential(piezo, scanner, camera, z_positions: List[float],
     from .coordinates import piezo_to_galvo
 
     md = {
-        'plan_name': 'volume_scan_sequential',
-        'piezo': piezo.name,
-        'scanner': scanner.name,
-        'camera': camera.name,
-        'num_slices': len(z_positions),
-        'z_range': (min(z_positions), max(z_positions)),
-        'calibration_slope': calibration.piezo_galvo_slope,
-        'calibration_offset': calibration.piezo_galvo_offset,
+        "plan_name": "volume_scan_sequential",
+        "piezo": piezo.name,
+        "scanner": scanner.name,
+        "camera": camera.name,
+        "num_slices": len(z_positions),
+        "z_range": (min(z_positions), max(z_positions)),
+        "calibration_slope": calibration.piezo_galvo_slope,
+        "calibration_offset": calibration.piezo_galvo_offset,
     }
     if metadata:
         md.update(metadata)
@@ -354,34 +373,38 @@ def volume_scan_sequential(piezo, scanner, camera, z_positions: List[float],
     @bpp.run_decorator(md=md)
     def inner():
         for i, z_pos in enumerate(z_positions):
-            print(f"Volume scan: slice {i+1}/{len(z_positions)}, z={z_pos:.2f} µm")
+            print(f"Volume scan: slice {i + 1}/{len(z_positions)}, z={z_pos:.2f} µm")
 
             # Move piezo to z position
             yield from bps.mv(piezo, z_pos)
 
             # Calculate synchronized galvo position
             galvo_pos = piezo_to_galvo(
-                z_pos,
-                calibration.piezo_galvo_slope,
-                calibration.piezo_galvo_offset
+                z_pos, calibration.piezo_galvo_slope, calibration.piezo_galvo_offset
             )
 
             # Move galvo (maintain other axis at 0)
-            if galvo_axis.upper() == 'A':
+            if galvo_axis.upper() == "A":
                 yield from bps.mv(scanner, [galvo_pos, 0.0])
             else:
                 yield from bps.mv(scanner, [0.0, galvo_pos])
 
             # Acquire image
-            yield from bps.trigger_and_read([camera, piezo, scanner],
-                                          name=f'volume_slice_{i:04d}')
+            yield from bps.trigger_and_read([camera, piezo, scanner], name=f"volume_slice_{i:04d}")
 
     yield from inner()
 
 
-def volume_scan_bidirectional(piezo, scanner, camera, z_start: float, z_end: float,
-                               num_slices: int, calibration: ReferenceMap,
-                               metadata: Optional[Dict] = None):
+def volume_scan_bidirectional(
+    piezo,
+    scanner,
+    camera,
+    z_start: float,
+    z_end: float,
+    num_slices: int,
+    calibration: ReferenceMap,
+    metadata: Optional[Dict] = None,
+):
     """
     Bidirectional volume scan (forward then reverse)
 
@@ -392,20 +415,34 @@ def volume_scan_bidirectional(piezo, scanner, camera, z_start: float, z_end: flo
 
     # Forward scan
     yield from volume_scan_sequential(
-        piezo, scanner, camera, z_forward, calibration,
-        metadata={**(metadata or {}), 'scan_direction': 'forward'}
+        piezo,
+        scanner,
+        camera,
+        z_forward,
+        calibration,
+        metadata={**(metadata or {}), "scan_direction": "forward"},
     )
 
     # Reverse scan
     z_reverse = z_forward[::-1]
     yield from volume_scan_sequential(
-        piezo, scanner, camera, z_reverse, calibration,
-        metadata={**(metadata or {}), 'scan_direction': 'reverse'}
+        piezo,
+        scanner,
+        camera,
+        z_reverse,
+        calibration,
+        metadata={**(metadata or {}), "scan_direction": "reverse"},
     )
 
 
-def volume_scan_continuous_sam(piezo, scanner, camera, z_positions: List[float],
-                                sam_config: Dict, metadata: Optional[Dict] = None):
+def volume_scan_continuous_sam(
+    piezo,
+    scanner,
+    camera,
+    z_positions: List[float],
+    sam_config: Dict,
+    metadata: Optional[Dict] = None,
+):
     """
     Volume scan with continuous Single Axis Mode galvo scanning
 
@@ -415,8 +452,8 @@ def volume_scan_continuous_sam(piezo, scanner, camera, z_positions: List[float],
         SAM configuration: {'pattern': 3, 'amplitude': 0.5, 'period': 10, ...}
     """
     md = {
-        'plan_name': 'volume_scan_continuous_sam',
-        'sam_config': sam_config,
+        "plan_name": "volume_scan_continuous_sam",
+        "sam_config": sam_config,
     }
     if metadata:
         md.update(metadata)
@@ -425,17 +462,17 @@ def volume_scan_continuous_sam(piezo, scanner, camera, z_positions: List[float],
     def inner():
         # Configure SAM
         scanner.configure_sam(
-            axis='A',
+            axis="A",
             mode=1,  # Enabled
-            pattern=sam_config['pattern'],
-            amplitude_deg=sam_config['amplitude'],
-            offset_deg=sam_config.get('offset', 0.0),
-            period_ms=sam_config['period']
+            pattern=sam_config["pattern"],
+            amplitude_deg=sam_config["amplitude"],
+            offset_deg=sam_config.get("offset", 0.0),
+            period_ms=sam_config["period"],
         )
 
         try:
             # Enable SAM
-            scanner.enable_sam('A', True)
+            scanner.enable_sam("A", True)
 
             # Scan through z positions
             for i, z_pos in enumerate(z_positions):
@@ -447,7 +484,7 @@ def volume_scan_continuous_sam(piezo, scanner, camera, z_positions: List[float],
 
         finally:
             # Always disable SAM when done
-            scanner.enable_sam('A', False)
+            scanner.enable_sam("A", False)
 
     yield from inner()
 ```
@@ -455,11 +492,15 @@ def volume_scan_continuous_sam(piezo, scanner, camera, z_positions: List[float],
 #### 2. Hardware SPIM Volume Scan
 
 ```python
-def volume_scan_hardware_spim(scanner, piezo, camera,
-                               num_slices: int,
-                               scan_duration_ms: float,
-                               camera_duration_ms: float,
-                               metadata: Optional[Dict] = None):
+def volume_scan_hardware_spim(
+    scanner,
+    piezo,
+    camera,
+    num_slices: int,
+    scan_duration_ms: float,
+    camera_duration_ms: float,
+    metadata: Optional[Dict] = None,
+):
     """
     Hardware-timed SPIM volume scan using ASI controller state machine
 
@@ -481,10 +522,10 @@ def volume_scan_hardware_spim(scanner, piezo, camera,
         Camera exposure time
     """
     md = {
-        'plan_name': 'volume_scan_hardware_spim',
-        'num_slices': num_slices,
-        'scan_duration_ms': scan_duration_ms,
-        'camera_duration_ms': camera_duration_ms,
+        "plan_name": "volume_scan_hardware_spim",
+        "num_slices": num_slices,
+        "scan_duration_ms": scan_duration_ms,
+        "camera_duration_ms": camera_duration_ms,
     }
     if metadata:
         md.update(metadata)
@@ -496,7 +537,7 @@ def volume_scan_hardware_spim(scanner, piezo, camera,
             num_slices=num_slices,
             scan_duration_ms=scan_duration_ms,
             camera_duration_ms=camera_duration_ms,
-            delay_ms=0.2
+            delay_ms=0.2,
         )
 
         # Arm SPIM
@@ -525,11 +566,7 @@ def volume_scan_hardware_spim(scanner, piezo, camera,
 **Existing Infrastructure:** `gently/coordinates.py:78-168`
 
 ```python
-from gently.coordinates import (
-    piezo_to_galvo,
-    galvo_to_piezo,
-    calculate_piezo_galvo_calibration
-)
+from gently.coordinates import piezo_to_galvo, galvo_to_piezo, calculate_piezo_galvo_calibration
 
 # Use calibration in volume scan
 galvo_pos = piezo_to_galvo(piezo_pos, slope, offset)
@@ -543,20 +580,21 @@ galvo_pos = piezo_to_galvo(piezo_pos, slope, offset)
 @dataclass
 class VolumeScanTiming:
     """Timing configuration for volume scans"""
+
     # Sequential scan timing
-    piezo_settle_time_ms: float = 50.0      # Time for piezo to settle
-    galvo_settle_time_ms: float = 5.0       # Time for galvo to settle
-    camera_exposure_ms: float = 10.0        # Camera exposure
+    piezo_settle_time_ms: float = 50.0  # Time for piezo to settle
+    galvo_settle_time_ms: float = 5.0  # Time for galvo to settle
+    camera_exposure_ms: float = 10.0  # Camera exposure
 
     # Hardware SPIM timing
-    spim_scan_duration_ms: float = 10.0     # Total scan time per slice
-    spim_camera_duration_ms: float = 9.5    # Camera exposure
+    spim_scan_duration_ms: float = 10.0  # Total scan time per slice
+    spim_camera_duration_ms: float = 9.5  # Camera exposure
     spim_delay_before_camera_ms: float = 0.2  # Settling before trigger
-    spim_delay_before_laser_ms: float = 0.0   # Laser trigger delay
+    spim_delay_before_laser_ms: float = 0.0  # Laser trigger delay
 
     # SAM continuous scan timing
-    sam_period_ms: float = 10.0             # Scan period
-    sam_camera_phase: float = 0.25          # Trigger at 25% of cycle
+    sam_period_ms: float = 10.0  # Scan period
+    sam_camera_phase: float = 0.25  # Trigger at 25% of cycle
 ```
 
 ### Multi-Device Coordination
@@ -577,10 +615,10 @@ def create_volume_scan_devices(core: pymmcore.CMMCore) -> Dict:
 
     # Create devices
     devices = {
-        'scanner': DiSPIMScanner("Scanner:AB:33", core, name='lightsheet_scanner'),
-        'piezo': DiSPIMPiezo("PiezoStage:P:34", core, name='objective_piezo'),
-        'camera': DiSPIMCamera("HamCam1", core, name='spim_camera'),
-        'calibration': calib
+        "scanner": DiSPIMScanner("Scanner:AB:33", core, name="lightsheet_scanner"),
+        "piezo": DiSPIMPiezo("PiezoStage:P:34", core, name="objective_piezo"),
+        "camera": DiSPIMCamera("HamCam1", core, name="spim_camera"),
+        "calibration": calib,
     }
 
     return devices
@@ -601,11 +639,13 @@ def test_volume_scan_sequential():
     # Execute plan
     # Verify positions, images acquired
 
+
 def test_piezo_galvo_sync():
     """Test piezo-galvo synchronization"""
     # Given calibration
     # Test position calculations
     # Verify accuracy
+
 
 def test_spim_configuration():
     """Test SPIM property setting"""

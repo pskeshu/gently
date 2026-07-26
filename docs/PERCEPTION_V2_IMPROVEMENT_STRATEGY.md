@@ -77,7 +77,7 @@ MISSING: hatching/ folder - NO HATCHING EXAMPLES!
 ```python
 def at_least_stage(self, stage: str) -> bool:
     """Check if embryo has reached at least the given stage."""
-    order = ['early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'hatching', 'hatched']
+    order = ["early", "bean", "comma", "1.5fold", "2fold", "3fold", "hatching", "hatched"]
     # ... simple linear comparison
 ```
 
@@ -155,28 +155,38 @@ Create a single source of truth:
 from enum import Enum
 from typing import List, Dict, Tuple
 
+
 class DevelopmentalStage(str, Enum):
     """Unified C. elegans developmental stages."""
-    EARLY = "early"           # Gastrulation, ~100+ cells, oval shape
-    BEAN = "bean"             # Early morphogenesis, slight asymmetry
-    COMMA = "comma"           # Clear C-shape, head/tail distinguishable
-    FOLD_1_5 = "1.5fold"      # Elongation, ~1.5x eggshell
-    FOLD_2 = "2fold"          # Further elongation, folding back
-    FOLD_3 = "3fold"          # Tight coil, maximum compaction (pretzel)
-    HATCHING = "hatching"     # Active emergence, shell breach visible
-    HATCHED = "hatched"       # Fully emerged L1 larva
+
+    EARLY = "early"  # Gastrulation, ~100+ cells, oval shape
+    BEAN = "bean"  # Early morphogenesis, slight asymmetry
+    COMMA = "comma"  # Clear C-shape, head/tail distinguishable
+    FOLD_1_5 = "1.5fold"  # Elongation, ~1.5x eggshell
+    FOLD_2 = "2fold"  # Further elongation, folding back
+    FOLD_3 = "3fold"  # Tight coil, maximum compaction (pretzel)
+    HATCHING = "hatching"  # Active emergence, shell breach visible
+    HATCHED = "hatched"  # Fully emerged L1 larva
 
     @classmethod
-    def ordered_list(cls) -> List['DevelopmentalStage']:
-        return [cls.EARLY, cls.BEAN, cls.COMMA, cls.FOLD_1_5,
-                cls.FOLD_2, cls.FOLD_3, cls.HATCHING, cls.HATCHED]
+    def ordered_list(cls) -> List["DevelopmentalStage"]:
+        return [
+            cls.EARLY,
+            cls.BEAN,
+            cls.COMMA,
+            cls.FOLD_1_5,
+            cls.FOLD_2,
+            cls.FOLD_3,
+            cls.HATCHING,
+            cls.HATCHED,
+        ]
 
     @classmethod
-    def get_order(cls, stage: 'DevelopmentalStage') -> int:
+    def get_order(cls, stage: "DevelopmentalStage") -> int:
         return cls.ordered_list().index(stage)
 
     @classmethod
-    def is_terminal(cls, stage: 'DevelopmentalStage') -> bool:
+    def is_terminal(cls, stage: "DevelopmentalStage") -> bool:
         return stage == cls.HATCHED
 
 
@@ -339,14 +349,17 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from .stages import DevelopmentalStage
 
+
 @dataclass
 class TransitionState:
     """Represents the current transition state."""
+
     current_stage: DevelopmentalStage
     confidence: float
     is_transitioning: bool
     next_stage: Optional[DevelopmentalStage]
     transition_progress: float  # 0.0 to 1.0
+
 
 class TransitionDetector:
     """
@@ -481,12 +494,14 @@ from dataclasses import dataclass
 from typing import Dict
 from .stages import DevelopmentalStage
 
+
 @dataclass
 class CalibratedConfidence:
     """Calibrated confidence with interpretable thresholds."""
-    raw_score: float          # 0.0 to 1.0 from VLM
-    calibrated_score: float   # Adjusted based on stage difficulty
-    interpretation: str       # "high", "medium", "low"
+
+    raw_score: float  # 0.0 to 1.0 from VLM
+    calibrated_score: float  # Adjusted based on stage difficulty
+    interpretation: str  # "high", "medium", "low"
 
     @property
     def is_reliable(self) -> bool:
@@ -496,14 +511,14 @@ class CalibratedConfidence:
 # Stage-specific confidence calibration
 # Some stages are harder to classify, adjust thresholds accordingly
 STAGE_DIFFICULTY = {
-    DevelopmentalStage.EARLY: 0.0,      # Easy - distinct morphology
-    DevelopmentalStage.BEAN: 0.3,       # Hard - brief, subtle
-    DevelopmentalStage.COMMA: 0.2,      # Medium - can overlap with bean
-    DevelopmentalStage.FOLD_1_5: 0.2,   # Medium
-    DevelopmentalStage.FOLD_2: 0.2,     # Medium
-    DevelopmentalStage.FOLD_3: 0.1,     # Easy - distinct pretzel
+    DevelopmentalStage.EARLY: 0.0,  # Easy - distinct morphology
+    DevelopmentalStage.BEAN: 0.3,  # Hard - brief, subtle
+    DevelopmentalStage.COMMA: 0.2,  # Medium - can overlap with bean
+    DevelopmentalStage.FOLD_1_5: 0.2,  # Medium
+    DevelopmentalStage.FOLD_2: 0.2,  # Medium
+    DevelopmentalStage.FOLD_3: 0.1,  # Easy - distinct pretzel
     DevelopmentalStage.HATCHING: 0.25,  # Medium-hard - brief window
-    DevelopmentalStage.HATCHED: 0.0,    # Easy - distinct
+    DevelopmentalStage.HATCHED: 0.0,  # Easy - distinct
 }
 
 
@@ -587,7 +602,7 @@ Return JSON:
 class HatchingDetector:
     """Specialized detector for hatching stages."""
 
-    def __init__(self, engine: 'PerceptionEngine'):
+    def __init__(self, engine: "PerceptionEngine"):
         self.engine = engine
         self.consecutive_hatching = 0
         self.consecutive_hatched = 0
@@ -604,16 +619,16 @@ class HatchingDetector:
         )
 
         # Track consecutive detections for confirmation
-        if result.get('classification') == 'hatching':
+        if result.get("classification") == "hatching":
             self.consecutive_hatching += 1
             self.consecutive_hatched = 0
-        elif result.get('classification') == 'hatched':
+        elif result.get("classification") == "hatched":
             self.consecutive_hatched += 1
             # Require 2+ consecutive "hatched" to confirm
             # (hatching can look like hatched momentarily)
             if self.consecutive_hatched < 2:
-                result['classification'] = 'hatching'
-                result['note'] = 'Awaiting confirmation of hatched status'
+                result["classification"] = "hatching"
+                result["note"] = "Awaiting confirmation of hatched status"
         else:
             self.consecutive_hatching = 0
             self.consecutive_hatched = 0

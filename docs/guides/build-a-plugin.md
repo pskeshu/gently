@@ -25,14 +25,14 @@ Three protocols define the plugin contracts. All are in `gently/harness/protocol
 ```python
 @runtime_checkable
 class OrganismProtocol(Protocol):
-    ORGANISM_NAME: str              # e.g. "drosophila"
-    ORGANISM_DISPLAY_NAME: str      # e.g. "Drosophila melanogaster"
-    SAMPLE_TERM: str                # e.g. "embryo", "cell", "organoid"
-    SAMPLE_TERM_PLURAL: str         # e.g. "embryos"
-    STAGES: list                    # Developmental stages (ordered)
-    TERMINAL_STAGES: set            # e.g. {"hatched"}
-    BIOLOGY_KNOWLEDGE: str          # Markdown for LLM context
-    PERCEPTION_SYSTEM_PROMPT: str   # VLM classification prompt
+    ORGANISM_NAME: str  # e.g. "drosophila"
+    ORGANISM_DISPLAY_NAME: str  # e.g. "Drosophila melanogaster"
+    SAMPLE_TERM: str  # e.g. "embryo", "cell", "organoid"
+    SAMPLE_TERM_PLURAL: str  # e.g. "embryos"
+    STAGES: list  # Developmental stages (ordered)
+    TERMINAL_STAGES: set  # e.g. {"hatched"}
+    BIOLOGY_KNOWLEDGE: str  # Markdown for LLM context
+    PERCEPTION_SYSTEM_PROMPT: str  # VLM classification prompt
 ```
 
 ### HardwareProtocol
@@ -40,10 +40,10 @@ class OrganismProtocol(Protocol):
 ```python
 @runtime_checkable
 class HardwareProtocol(Protocol):
-    HARDWARE_NAME: str              # e.g. "twophoton"
-    HARDWARE_DISPLAY_NAME: str      # e.g. "Two-Photon Microscope"
-    HARDWARE_DESCRIPTION: str       # Markdown capabilities text
-    CAPABILITIES: set               # e.g. {"xy_stage", "z_stack", "fluorescence"}
+    HARDWARE_NAME: str  # e.g. "twophoton"
+    HARDWARE_DISPLAY_NAME: str  # e.g. "Two-Photon Microscope"
+    HARDWARE_DESCRIPTION: str  # Markdown capabilities text
+    CAPABILITIES: set  # e.g. {"xy_stage", "z_stack", "fluorescence"}
 ```
 
 Standard capability names: `xy_stage`, `z_control`, `volume`, `snap`, `z_stack`, `dual_view`, `autofocus`, `detection`, `fluorescence`, `transmitted`.
@@ -80,6 +80,7 @@ def create_device_layer(config: dict):
     """Create the hardware control server. Returns a server with .run(port=N)."""
     ...
 
+
 def create_client(http_url: str):
     """Create an HTTP client for the device layer. Returns a client with .connect()."""
     ...
@@ -105,8 +106,10 @@ gently/organisms/drosophila/
 # gently/organisms/drosophila/stages.py
 from enum import Enum
 
+
 class DevelopmentalStage(str, Enum):
     """Drosophila embryo developmental stages."""
+
     SYNCYTIAL = "syncytial"
     CELLULARIZATION = "cellularization"
     GASTRULATION = "gastrulation"
@@ -118,6 +121,7 @@ class DevelopmentalStage(str, Enum):
     # Special states
     ARRESTED = "arrested"
     NO_OBJECT = "no_object"
+
 
 # Ordered list for the perception engine
 STAGES = list(DevelopmentalStage)
@@ -298,14 +302,16 @@ CAPABILITIES = {
 def create_device_layer(config: dict):
     """Create the 2P device layer server."""
     from .device_layer import TwoPhotonDeviceLayer
+
     return TwoPhotonDeviceLayer(
-        config_path=config.get('config_path', 'config/config.yml'),
+        config_path=config.get("config_path", "config/config.yml"),
     )
 
 
 def create_client(http_url: str):
     """Create an HTTP client for the 2P device layer."""
     from .client import TwoPhotonClient
+
     return TwoPhotonClient(http_url=http_url)
 ```
 
@@ -318,24 +324,26 @@ Each hardware type has its own calibration model. For 2P, it's simpler than diSP
 from dataclasses import dataclass
 from typing import Optional
 
+
 @dataclass
 class TwoPhotonCalibration:
     """Z-axis calibration for a two-photon microscope."""
-    z_top: float = 0.0        # Top of sample (µm)
-    z_bottom: float = 100.0   # Bottom of sample (µm)
-    optimal_z: float = 50.0   # Best focal plane (µm)
+
+    z_top: float = 0.0  # Top of sample (µm)
+    z_bottom: float = 100.0  # Bottom of sample (µm)
+    optimal_z: float = 50.0  # Best focal plane (µm)
     optimal_power: float = 10.0  # Laser power (mW)
 
     def to_dict(self) -> dict:
         return {
-            'z_top': self.z_top,
-            'z_bottom': self.z_bottom,
-            'optimal_z': self.optimal_z,
-            'optimal_power': self.optimal_power,
+            "z_top": self.z_top,
+            "z_bottom": self.z_bottom,
+            "optimal_z": self.optimal_z,
+            "optimal_power": self.optimal_power,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'TwoPhotonCalibration':
+    def from_dict(cls, data: dict) -> "TwoPhotonCalibration":
         return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data})
 ```
 
@@ -370,16 +378,14 @@ Tools are registered with the `@tool` decorator from `gently/harness/tools/regis
 ```python
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 
+
 @tool(
     name="measure_wing_disc",
     description="Measure the size of a wing imaginal disc in the current image",
     category=ToolCategory.ANALYSIS,
     requires_microscope=False,
     examples=[
-        ToolExample(
-            "Measure the wing disc in embryo 3",
-            {"embryo_id": "embryo_3"}
-        ),
+        ToolExample("Measure the wing disc in embryo 3", {"embryo_id": "embryo_3"}),
     ],
 )
 async def measure_wing_disc(
@@ -404,13 +410,12 @@ Hardware-specific tools (acquisition, calibration, focus) should live alongside 
 
 ```python
 @tool(name="acquire_zstack", requires_microscope=True)
-async def acquire_zstack(embryo_id: str, num_planes: int = 50,
-                         z_step_um: float = 1.0, context: dict = None) -> str:
+async def acquire_zstack(
+    embryo_id: str, num_planes: int = 50, z_step_um: float = 1.0, context: dict = None
+) -> str:
     client = context.get("client")
     # This tool only works with a 2P client
-    result = await client.acquire_zstack(
-        num_planes=num_planes, z_step_um=z_step_um
-    )
+    result = await client.acquire_zstack(num_planes=num_planes, z_step_um=z_step_um)
     ...
 ```
 
@@ -452,13 +457,13 @@ The harness provides a generic `FocusDataPoint` for tracking focus measurements:
 ```python
 @dataclass
 class FocusDataPoint:
-    z: float               # Primary focus axis (µm)
+    z: float  # Primary focus axis (µm)
     secondary_axis: float  # Second axis (galvo for diSPIM, 0.0 for single-axis)
-    score: float           # Focus quality
-    r_squared: float       # Fit quality (0-1)
+    score: float  # Focus quality
+    r_squared: float  # Fit quality (0-1)
     timestamp: datetime
-    method: str            # 'calibration', 'fine_focus', 'manual'
-    algorithm: str         # 'fft_bandpass', 'gradient', etc.
+    method: str  # 'calibration', 'fine_focus', 'manual'
+    algorithm: str  # 'fft_bandpass', 'gradient', etc.
 ```
 
 For single-axis systems (2P, confocal), set `secondary_axis=0.0`. The harness tracks focus history per-embryo and provides drift analysis and interpolation.
