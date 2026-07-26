@@ -2858,8 +2858,7 @@ class DeviceLayerServer(Service):
                 if xy is not None and len(xy) >= 2:
                     stage_position = (float(xy[0]), float(xy[1]))
                 logger.info(
-                    "[detect_embryos] Reusing last streamed frame (shape %s), "
-                    "skipping capture",
+                    "[detect_embryos] Reusing last streamed frame (shape %s), skipping capture",
                     image.shape,
                 )
 
@@ -2896,10 +2895,11 @@ class DeviceLayerServer(Service):
                 )
 
                 if not capture_result.get("success"):
+                    capture_error = capture_result.get("error", "Unknown")
                     return web.json_response(
                         {
                             "success": False,
-                            "error": f"Image capture failed: {capture_result.get('error', 'Unknown')}",
+                            "error": f"Image capture failed: {capture_error}",
                         },
                         status=500,
                     )
