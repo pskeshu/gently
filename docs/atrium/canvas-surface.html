@@ -185,6 +185,8 @@ body.focused .slot .panel{opacity:1;filter:none}   /* pinned never recedes */
 #lay .btn.here{border-color:var(--accent);color:#cfe6ff}
 #hud .btn{background:#161b22ee;backdrop-filter:blur(6px)}
 #hud .btn.here{border-color:var(--accent);color:#cfe6ff}
+#hud .btn:disabled{opacity:.35;cursor:default}
+#hud .btn:disabled:hover{border-color:var(--border)}
 #zoom{grid-area:br;align-self:end;justify-self:end;color:var(--muted);font-size:.7rem;
   background:#161b22ee;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);
   font-variant-numeric:tabular-nums}
@@ -207,6 +209,7 @@ kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:
   </div>
 </template>
 <div id="hud">
+  <button class="btn" id="back" title="back" disabled>&larr;</button>
   <button class="btn" data-go="home">0 home</button>
   <button class="btn" data-go="detect">1 detect</button>
   <button class="btn" data-go="position">2 position</button>
@@ -344,13 +347,41 @@ function home(anim){
   document.body.classList.remove('focused');
   allPanels().forEach(p=>p.classList.remove('attend','calling'));
   document.querySelectorAll('#hud .btn').forEach(b=>b.classList.toggle('here',b.dataset.go==='home'));
+  remember('home');
   if(anim){ glide(tx,ty,HOME.scale); } else { stopGlide(); vx=tx; vy=ty; scale=HOME.scale; apply(); }
 }
 
 const STEPS={bench:null, design:['p-design'], releases:['p-releases'], vitals:['p-embryos'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
   calibrate:['p-cal'], acquire:['p-acq'], curate:['p-curator'], watch:['p-view']};
+/* ── attention history ──────────────────────────────────────────
+   travel is navigation, so it needs a back. without one you land somewhere,
+   lose where you were, and rebuild it from the geography. */
+const TRAIL=[]; const TRAIL_MAX=40;
+let travelling=false;                       // suppress recording during a pop
+function remember(dest){
+  if(travelling || TRAIL[TRAIL.length-1]===dest) return;
+  TRAIL.push(dest);
+  if(TRAIL.length>TRAIL_MAX) TRAIL.shift();
+  paintTrail();
+}
+function back(){
+  if(TRAIL.length<2) return false;
+  TRAIL.pop();                              // the place we are standing
+  const dest=TRAIL[TRAIL.length-1];
+  travelling=true; attend(dest); travelling=false;
+  paintTrail();
+  return true;
+}
+function paintTrail(){
+  const b=document.getElementById('back');
+  if(!b) return;
+  b.disabled=TRAIL.length<2;
+  b.title=TRAIL.length<2?'nowhere to go back to':`back to ${TRAIL[TRAIL.length-2]}`;
+}
+
 const ORDER=['home','detect','position','calibrate','acquire','curate'];
 function attend(k, explicit){
+  if(typeof k==='string') remember(k);
   if(k==='home') return home(true);
   if(typeof k==='string' && k.includes(':')){          // a subwindow is a destination
     const [pid,kid]=k.split(':');
@@ -391,8 +422,31 @@ addEventListener('keydown',e=>{
   if(e.metaKey||e.ctrlKey||e.altKey) return;
   const t=e.target;
   if(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)) return;
-  if(/^[0-5]$/.test(e.key)) attend(ORDER[+e.key]);
+  if(/^[0-5]$/.test(e.key)) return attend(ORDER[+e.key]);
+  if(e.key==='Backspace'){ e.preventDefault(); return back(); }
+  /* travel to the nearest window in a direction — the bench is a map, so
+     arrow keys should move across it, not scroll it. */
+  const dir={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+  if(dir){ e.preventDefault(); step(dir); }
 });
+
+/* nearest window whose centre lies in the given direction, preferring
+   small lateral offset so a row reads as a row. */
+function step([dx,dy]){
+  const cur=board.querySelector('.panel.attend') || onCanvas()[0];
+  if(!cur) return;
+  const cx=cur.offsetLeft+cur.offsetWidth/2, cy=cur.offsetTop+cur.offsetHeight/2;
+  let best=null, bestCost=Infinity;
+  for(const el of onCanvas()){
+    if(el===cur) continue;
+    const x=el.offsetLeft+el.offsetWidth/2, y=el.offsetTop+el.offsetHeight/2;
+    const along=(x-cx)*dx+(y-cy)*dy, lateral=Math.abs((x-cx)*dy-(y-cy)*dx);
+    if(along<=8) continue;                                   // must be that way
+    const cost=along+lateral*2;                              // punish drifting off-axis
+    if(cost<bestCost){ bestCost=cost; best=el; }
+  }
+  if(best) attend(null,[best]);
+}
 
 /* ── rule 3: a panel is a frame, a state, and clipped content ─── */
 const FOLDED_H=34;
@@ -420,7 +474,9 @@ function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5
     const move=m=>{el.style.left=px+(m.clientX-ox)/scale+'px';   // /scale: tracks the cursor at any zoom
                    el.style.top =py+(m.clientY-oy)/scale+'px';};
     ph.addEventListener('pointermove',move);
-    ph.addEventListener('pointerup',()=>ph.removeEventListener('pointermove',move),{once:true});
+    ph.addEventListener('pointerup',()=>{
+      ph.removeEventListener('pointermove',move); saveLayout();
+    },{once:true});
   });
   board.appendChild(el);
   if(children){ children.forEach(k=>{ k.since=0; k.rung=0; }); paintKids(el); }
@@ -576,6 +632,7 @@ function seatHud(c){
     document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>attend(b.dataset.go));
   document.getElementById('density').oninput=e2=>setDensity(+e2.target.value);
   document.getElementById('speed').onchange=e2=>CONFIG.clock.speed=+e2.target.value;
+  const bk=document.getElementById('back'); if(bk){ bk.onclick=back; paintTrail(); }
 }
 seatHud(CONFIG.courtyard);
 
@@ -621,7 +678,7 @@ function setLayout(name){
   setDensity(L.density);
   document.querySelectorAll('#lay .btn').forEach(b=>b.classList.toggle('here',b.dataset.lay===name));
   attend(L.look);
-  requestAnimationFrame(relieve);
+  requestAnimationFrame(()=>{ relieve(); saveLayout(); });
 }
 document.querySelectorAll('[data-lay]').forEach(b=>b.onclick=()=>setLayout(b.dataset.lay));
 
@@ -743,6 +800,31 @@ function paintReleases(){
       <span class="mono" style="float:right;color:var(--accent)">${r.p}</span></div>`).join('')}</div>`
     : `<div class="hollow">nothing released yet</div>`;
 }
+
+/* ── persistence ────────────────────────────────────────────────
+   the bench is arranged, not generated, so an arrangement must survive a
+   reload or the operator re-does it every session. */
+const SAVE_KEY='gently.atrium.v1';
+function saveLayout(){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify({
+    courtyard: CONFIG.courtyard, layout, density:+document.getElementById('density').value,
+    pos: Object.fromEntries(allPanels().map(el=>[el.id,
+      {x:+el.dataset.ox||el.offsetLeft, y:+el.dataset.oy||el.offsetTop}])),
+  })); }catch(_){}
+}
+function restoreLayout(){
+  let d; try{ d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null'); }catch(_){ }
+  if(!d) return false;
+  if(d.courtyard){ CONFIG.courtyard=d.courtyard; buildCourtyard(d.courtyard); seatHud(d.courtyard); }
+  for(const [id,p] of Object.entries(d.pos||{})){
+    const el=document.getElementById(id);
+    if(el && !el.dataset.slot){ el.style.left=p.x+'px'; el.style.top=p.y+'px'; }
+  }
+  if(d.layout && LAYOUTS[d.layout]) setLayout(d.layout);
+  if(d.density){ document.getElementById('density').value=d.density; setDensity(d.density); }
+  return true;
+}
+function forgetLayout(){ try{ localStorage.removeItem(SAVE_KEY); }catch(_){} }
 
 /* ── the courtyard designer ─────────────────────────────────────
    a meta window: it edits the shape of the cloister that surrounds it.
@@ -953,7 +1035,7 @@ let t=0;
 })();
 
 render();
-setLayout(CONFIG.default);
+if(!restoreLayout()) setLayout(CONFIG.default);
 home(false);     // and a still landing at a known viewpoint
 
 /* ── self-check: the two bits of maths that silently break ───── */
@@ -979,7 +1061,7 @@ if(location.search.includes('selftest')){
   });
   setDensity(5);
   render();
-setLayout(CONFIG.default);
+if(!restoreLayout()) setLayout(CONFIG.default);
 home(false);     // and a still landing at a known viewpoint console.log('selftest done — check for assertion failures above');
 }
 </script>
