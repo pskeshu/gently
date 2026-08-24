@@ -118,6 +118,17 @@ body.focused .panel.attend{opacity:1;filter:none;border-color:var(--accent)}
 .edge label{flex:1;color:var(--muted);text-transform:capitalize}
 .edge input[type=text]{width:56px;background:#0d1117;border:1px solid var(--border);
   color:var(--text);border-radius:4px;padding:.1rem .25rem;font:inherit;font-size:.7rem}
+/* ── subwindows: addressable children, detachable to the bench ── */
+.kids{display:flex;gap:3px;padding:.3rem .45rem;border-bottom:1px solid var(--border);
+  background:#141a22;flex:0 0 auto;flex-wrap:wrap}
+.kid{font-size:.66rem;padding:.14rem .4rem;border-radius:4px;cursor:pointer;
+  border:1px solid transparent;color:var(--muted);white-space:nowrap}
+.kid:hover{background:#212a35;color:var(--text)}
+.kid.on{background:#1d3550;color:#cfe6ff;border-color:#2d4f74}
+.kid .u{color:var(--stale);margin-left:.2rem;font-variant-numeric:tabular-nums}
+.kid .pop{opacity:.45;margin-left:.25rem}
+.kid .pop:hover{opacity:1;color:var(--accent)}
+.panel.folded .kids{display:none}
 .hollow{display:flex;align-items:center;justify-content:center;height:100%;
   color:#4d5867;font-size:.72rem;border:1px dashed #263040;border-radius:6px;margin:.1rem}
 
@@ -310,11 +321,30 @@ function home(anim){
   if(anim){ glide(tx,ty,HOME.scale); } else { stopGlide(); vx=tx; vy=ty; scale=HOME.scale; apply(); }
 }
 
-const STEPS={bench:null, design:['p-design'], releases:['p-releases'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
+const STEPS={bench:null, design:['p-design'], releases:['p-releases'], vitals:['p-embryos'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
   calibrate:['p-cal'], acquire:['p-acq'], curate:['p-curator'], watch:['p-view']};
 const ORDER=['home','detect','position','calibrate','acquire','curate'];
-function attend(k){
+function attend(k, explicit){
   if(k==='home') return home(true);
+  if(typeof k==='string' && k.includes(':')){          // a subwindow is a destination
+    const [pid,kid]=k.split(':');
+    const parent=document.getElementById(pid);
+    const detached=document.getElementById(pid+'-'+kid);
+    if(detached) return attend(null,[detached]);
+    if(parent && parent._kids?.some(c=>c.key===kid)){
+      parent._active=kid; paintKids(parent); fold(parent,false);
+      return attend(null,[parent]);
+    }
+    return;
+  }
+  if(explicit){                                        // travel to given elements
+    document.body.classList.add('focused');
+    allPanels().forEach(p=>{const on=explicit.includes(p);
+      p.classList.toggle('attend',on); p.classList.remove('calling');
+      if(on&&!p.dataset.slot) fold(p,false);});
+    document.querySelectorAll('#hud .btn').forEach(b=>b.classList.remove('here'));
+    return frame(explicit.filter(e=>!e.dataset.slot),110);
+  }
   if(!(k in STEPS)) return;
   const ids=STEPS[k];
   document.body.classList.toggle('focused',!!ids);
@@ -340,17 +370,22 @@ addEventListener('keydown',e=>{
 
 /* ── rule 3: a panel is a frame, a state, and clipped content ─── */
 const FOLDED_H=34;
-function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5,tol=0}){
+/* a window may hold addressable children. a child is a full destination —
+   attend('p-embryos:vitals') — and can be detached into a window of its own. */
+function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5,tol=0,children}){
   const el=document.createElement('div');
   el.className='panel'; el.id=id;
   el.dataset.h=h; el.dataset.crit=crit; el.dataset.tol=tol;
   el.dataset.freq=freq; el.dataset.since=0; el.dataset.rung=0;
   el.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
   el._peek = typeof peek==='function' ? ()=>peek(el) : ()=>peek;
+  el._kids = children || null;
+  if(children) el._active = children[0].key;
   el.innerHTML=`<div class="ph"><button class="fold" title="fold / open">▼</button>
       <b>${title}</b><span class="peek">${el._peek()}</span>
       <i class="idx">${pressure(el).toFixed(2)}</i><i class="st ${state}">${state}</i></div>
-    <div class="pb${flush?' flush':''}">${body}</div>`;
+    ${children?'<div class="kids"></div>':''}
+    <div class="pb${flush?' flush':''}">${children?'':body}</div>`;
   el.querySelector('.fold').onclick = e => { e.stopPropagation(); fold(el, !el.classList.contains('folded')); };
   const ph=el.querySelector('.ph');
   ph.addEventListener('pointerdown',e=>{
@@ -361,7 +396,49 @@ function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5
     ph.addEventListener('pointermove',move);
     ph.addEventListener('pointerup',()=>ph.removeEventListener('pointermove',move),{once:true});
   });
-  board.appendChild(el); return el;
+  board.appendChild(el);
+  if(children){ children.forEach(k=>{ k.since=0; k.rung=0; }); paintKids(el); }
+  return el;
+}
+
+/* ── subwindow rendering, addressing and detachment ─────────────── */
+function kidUrgency(k){
+  if(!k.tol || k.resolved) return 0;
+  return +((k.crit||0)*Math.max(0,Math.min((CLOCK-(k.since||0))/k.tol,
+    CONFIG.release.overdueCap))).toFixed(3);
+}
+function paintKids(el){
+  if(!el._kids) return;
+  const strip=el.querySelector('.kids'), pb=el.querySelector('.pb');
+  strip.innerHTML=el._kids.map(k=>{
+    const u=kidUrgency(k);
+    return `<span class="kid ${k.key===el._active?'on':''}" data-kid="${k.key}">${k.title}
+      ${u>=CONFIG.release.ladder[1].at?`<i class="u">${u.toFixed(1)}</i>`:''}
+      <i class="pop" data-pop="${k.key}" title="detach onto the bench">⇱</i></span>`;}).join('');
+  strip.querySelectorAll('[data-kid]').forEach(n=>n.onclick=e=>{
+    if(e.target.dataset.pop) return;
+    el._active=n.dataset.kid; paintKids(el);});
+  strip.querySelectorAll('[data-pop]').forEach(n=>n.onclick=e=>{
+    e.stopPropagation(); detach(el, n.dataset.pop);});
+  const k=el._kids.find(k=>k.key===el._active);
+  if(k) pb.innerHTML=k.body;
+}
+/* a child becomes a window of its own, on the bench, next to its parent */
+function detach(parent, key){
+  const i=parent._kids.findIndex(k=>k.key===key); if(i<0) return;
+  const k=parent._kids.splice(i,1)[0];
+  if(parent._active===key) parent._active=parent._kids[0]?.key;
+  const id=parent.id+'-'+key;
+  const el=panel({id, title:k.title.toUpperCase(), w:parent.offsetWidth, h:parent.offsetHeight,
+    x:parent.offsetLeft+40, y:parent.offsetTop+parent.offsetHeight+24,
+    state:'ready', body:k.body, peek:()=>k.gauge||'—',
+    crit:k.crit||.4, tol:k.tol||0});
+  el.dataset.since=k.since||0; el.dataset.rung=k.rung||0;
+  el.dataset.detachedFrom=parent.id;
+  if(!parent._kids.length){ parent._kids=null; parent.querySelector('.kids')?.remove(); }
+  else paintKids(parent);
+  attend(null, [el]);
+  return el;
 }
 
 /* ── live state ─────────────────────────────────────────────────
@@ -536,7 +613,10 @@ function urgency(el){
   const overdue=Math.min((CLOCK-(+el.dataset.since||0))/tol, CONFIG.release.overdueCap);
   return +(crit*Math.max(0,overdue)).toFixed(3);
 }
-function salience(el){ return +((+el.dataset.crit||0)+urgency(el)).toFixed(3); }
+function salience(el){
+  const kid=el._kids?Math.max(0,...el._kids.map(kidUrgency)):0;
+  return +((+el.dataset.crit||0)+Math.max(urgency(el),kid)).toFixed(3);
+}
 const pressure = salience;                     // what the gauges display
 function channelFor(p){
   const L=CONFIG.release.ladder;
@@ -590,8 +670,10 @@ const RELEASES=[];
 function releasePass(){
   let deckDirty=false;
   allPanels().forEach(el=>{
-    if(!+el.dataset.tol) return;
-    const p=urgency(el), rung=channelFor(p), was=+el.dataset.rung;   // urgency, not importance
+    /* a child pressing makes its parent press — the parent is how you get to it */
+    const kidMax=el._kids?Math.max(0,...el._kids.map(kidUrgency)):0;
+    if(!+el.dataset.tol && !kidMax) return;
+    const p=Math.max(urgency(el),kidMax), rung=channelFor(p), was=+el.dataset.rung;
     if(rung<=was) return;                       // only escalate
     el.dataset.rung=rung;
     const L=CONFIG.release.ladder[rung];
@@ -607,6 +689,7 @@ function releasePass(){
       case 'email':  break;
     }
   });
+  allPanels().filter(e=>e._kids).forEach(paintKids);
   if(deckDirty) setDensity(+document.getElementById('density').value);
   if(RELEASES.length) paintReleases();
 }
@@ -704,10 +787,22 @@ const rows=['e01  1420, 880','e02  1610, 905','e03  1755, 1120','e04  2010, 860'
   .map((t,i)=>`<div class="${i===1?'sel':''}">${t}</div>`).join('');
 const sl=(l,v,u)=>`<div class="row"><span>${l}</span><input type="range" value="${v}"><span class="mono">${v}${u}</span></div>`;
 
-panel({id:'p-embryos',title:'EMBRYOS · <span id="v-found">4</span>',x:80,y:80,w:290,h:230,state:'live',
+panel({id:'p-embryos',title:'EMBRYOS · <span id="v-found">4</span>',x:80,y:80,w:330,h:250,state:'live',
   peek:()=>`${S.found} · e02 sel`, freq:.2, crit:.7, tol:0,
-  body:`<div class="list">${rows}</div><div class="row" style="margin-top:.4rem">
-    <button class="btn">remap region</button><span class="mono">µm</span></div>`});
+  /* the three views embryos.js hand-rolls today, as addressable children */
+  children:[
+    {key:'board', title:'board', crit:.6, tol:0, gauge:'4 rows',
+     body:`<div class="list">${rows}</div><div class="row" style="margin-top:.4rem">
+       <button class="btn">remap region</button><span class="mono">µm</span></div>`},
+    {key:'filmstrip', title:'filmstrip', crit:.4, tol:0, gauge:'t0-t42',
+     body:`<div class="row"><span>timepoints</span><span class="mono">42</span></div>
+       <div class="hollow" style="height:92px">frames t0 … t42</div>`},
+    {key:'vitals', title:'vitals', crit:.9, tol:30, gauge:'e02 drifting',
+     body:`<div class="row"><span>e02 z-drift</span><span class="mono">8.2 µm / 4tp</span></div>
+       <div class="row"><span>e01</span><span class="mono">stable</span></div>
+       <div class="row"><span>e03</span><span class="mono">stable</span></div>
+       <div class="row" style="margin-top:.4rem"><button class="btn">refocus e02</button></div>`},
+  ]});
 
 panel({id:'p-view',title:'BOTTOM CAMERA',x:410,y:80,w:470,h:380,state:'live',flush:true,
   peek:()=>`${S.fps.toFixed(0)} fps · ${S.found} found`, freq:30, crit:.9, tol:0,
