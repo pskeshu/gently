@@ -402,6 +402,7 @@ const ThemeManager = {
 
     setTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
+        document.body.setAttribute('data-theme', theme);
         localStorage.setItem(this.storageKey, theme);
     },
 
@@ -425,7 +426,6 @@ const KeyboardShortcuts = {
     shortcuts: {
         '1': () => switchTab(TABS.EMBRYOS),     // Embryos
         '2': () => switchTab(TABS.EVENTS),      // System
-        '3': () => switchTab('main'),            // Live View
         '4': () => switchTab(TABS.CALIBRATION),  // Calibration
         '5': () => switchTab(TABS.DEVICES),      // Devices
         '6': () => switchTab(TABS.EXPERIMENT),   // Experiment
@@ -484,7 +484,6 @@ const KeyboardShortcuts = {
                             <h4>Navigation</h4>
                             <div class="shortcut"><kbd>1</kbd> Embryos tab</div>
                             <div class="shortcut"><kbd>2</kbd> System tab</div>
-                            <div class="shortcut"><kbd>3</kbd> Live View tab</div>
                             <div class="shortcut"><kbd>4</kbd> Calibration tab</div>
                             <div class="shortcut"><kbd>5</kbd> Devices tab</div>
                         </div>

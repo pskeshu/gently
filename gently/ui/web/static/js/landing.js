@@ -113,7 +113,7 @@ const V2Landing = (() => {
     function resetSummary() {
         const list = $('v2-plan-summary');
         if (list) list.innerHTML = '<div class="v2-plan-side-empty">The plan will take shape here as Gently designs it.</div>';
-        planPage = 0; planPages = []; planTitleText = '';
+        planPage = 0; planPages = []; planTitleText = ''; picks = [];
     }
 
     // ── activity feed: paginated, ONE agent step (turn) per page ───────
@@ -546,6 +546,21 @@ const V2Landing = (() => {
     let planPage = 0;
     let planPages = [];     // [{ name, items }]
     let planTitleText = '';
+    // The answers the user has already given live in JS, not only in the DOM:
+    // drawPlanPage wipes the panel on every plan-writing tool (600ms debounce),
+    // which would otherwise delete the choices seconds after they're made.
+    let picks = [];         // [{ q, v, matched }]
+
+    function drawPicks(list) {
+        picks.forEach(p => {
+            const row = document.createElement('div');
+            row.className = 'v2-plan-row' + (p.matched ? '' : ' v2-plan-row-freetext');
+            row.innerHTML = '<span class="k"></span><span class="v"></span>';
+            row.querySelector('.k').textContent = p.q;
+            row.querySelector('.v').textContent = p.v;
+            list.appendChild(row);
+        });
+    }
 
     function renderPlanTree(tree) {
         if (!tree) return;
@@ -654,6 +669,8 @@ const V2Landing = (() => {
             }
             list.appendChild(dots);
         }
+
+        drawPicks(list);
     }
 
     // ── ask rendering (the active question) ────────────────────────────
@@ -668,15 +685,15 @@ const V2Landing = (() => {
     function recordPick(data, sel) {
         const list = $('v2-plan-summary');
         if (!list) return;
+        picks.push({
+            q: (data && data.question) || 'Choice',
+            v: labelFor(data, sel),
+            matched: (data && data.options || []).some(o => o && (o.id === sel || o.value === sel || o.label === sel)),
+        });
         const empty = list.querySelector('.v2-plan-side-empty');
         if (empty) empty.remove();
-        const matched = (data && data.options || []).some(o => o && (o.id === sel || o.value === sel || o.label === sel));
-        const row = document.createElement('div');
-        row.className = 'v2-plan-row' + (matched ? '' : ' v2-plan-row-freetext');
-        row.innerHTML = '<span class="k"></span><span class="v"></span>';
-        row.querySelector('.k').textContent = (data && data.question) || 'Choice';
-        row.querySelector('.v').textContent = labelFor(data, sel);
-        list.appendChild(row);
+        list.querySelectorAll('.v2-plan-row').forEach(n => n.remove());
+        drawPicks(list);
     }
     function renderAsk() {
         const mount = $('v2-plan-ask');

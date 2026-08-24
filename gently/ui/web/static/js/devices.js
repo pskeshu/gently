@@ -561,29 +561,22 @@ const DevicesManager = (function () {
         updateScalebar();
     }
 
-    async function loadEmbryos() {
-        try {
-            const res = await fetch('/api/embryos/positions');
-            if (!res.ok) return;
-            const data = await res.json();
-            _embryos = Array.isArray(data.embryos) ? data.embryos : [];
-            renderEmbryos();
-        } catch (err) {
-            console.debug('embryo positions fetch failed:', err);
-        }
-    }
-
+    // EMBRYO_DETECTED / STATUS_CHANGED carry the flat legacy record
+    // ({embryo_id, x, y, role}); _embryos holds the EmbryoState.to_dict()
+    // shape (id, position_coarse, ...) the renderer reads. Normalise here,
+    // at the boundary, so both feeds land in one shape.
     function _upsertEmbryo(payload) {
         const eid = payload && payload.embryo_id;
         if (!eid) return false;
-        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        const idx = _embryos.findIndex(e => e.id === eid);
         const existing = idx >= 0 ? _embryos[idx] : null;
         const merged = Object.assign({}, existing || {}, {
-            embryo_id: eid,
+            id: eid,
             role: payload.role || (existing && existing.role) || 'test',
         });
-        if (payload.x != null) merged.x = payload.x;
-        if (payload.y != null) merged.y = payload.y;
+        if (payload.x != null && payload.y != null) {
+            merged.position_coarse = { x: payload.x, y: payload.y };
+        }
         if (payload.user_label !== undefined) merged.user_label = payload.user_label;
         if (payload.confidence !== undefined) merged.confidence = payload.confidence;
         if (payload.cadence_phase !== undefined) merged.cadence_phase = payload.cadence_phase;
@@ -605,13 +598,13 @@ const DevicesManager = (function () {
         const eid = payload.embryo_id;
         const newRole = payload.new_role;
         if (!eid || !newRole) return;
-        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        const idx = _embryos.findIndex(e => e.id === eid);
         if (idx >= 0) {
             _embryos[idx] = Object.assign({}, _embryos[idx], { role: newRole });
             renderEmbryos();
         } else {
             // Embryo we haven't seen yet — refetch to be safe.
-            loadEmbryos();
+            loadEmbryosSnapshot();
         }
     }
 

@@ -848,13 +848,7 @@ const TimepointPlayer = {
 
     showDetectionPanel() {
         // Jump to detection frame
-        if (this.detectionPoint !== null) {
-            const firstTp = this.sequence[0]?.timepoint || 0;
-            const frameIndex = this.detectionPoint - firstTp;
-            if (frameIndex >= 0 && frameIndex < this.sequence.length) {
-                this.showFrame(frameIndex);
-            }
-        }
+        this.jumpToDetection();
 
         // Pause playback
         this.pause();

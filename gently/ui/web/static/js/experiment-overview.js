@@ -144,6 +144,9 @@ const ExperimentOverview = {
             this.activePlan = plan;
             this._rosterEmbryos = rosterEmbryos;
             this.isLive = plan !== null;
+            // Don't blow away an open plan picker (and the operator's pending
+            // selection) mid-edit — the next tactic event renders fresh data.
+            if (this._planPickerOpen) return;
             this.render(this.activeStrategy);
         }, 500);
     },

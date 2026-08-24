@@ -119,7 +119,7 @@ const MarkingManager = {
         }
 
         // Re-enable action buttons in case a previous session disabled them.
-        document.querySelectorAll('.marking-action-btn').forEach(btn => btn.disabled = false);
+        document.querySelectorAll('.marking-actions .marking-action-btn').forEach(btn => btn.disabled = false);
 
         this._renderList();
     },
@@ -377,7 +377,7 @@ const MarkingManager = {
             instructions.textContent = `Marking complete — ${this.markers.length} embryo(s)${summary ? ': ' + summary : ''}.`;
         }
 
-        document.querySelectorAll('.marking-action-btn').forEach(btn => btn.disabled = true);
+        document.querySelectorAll('.marking-actions .marking-action-btn').forEach(btn => btn.disabled = true);
 
         // Auto-switch back to monitoring after the user sees the
         // "marking complete" confirmation. Without this the marker

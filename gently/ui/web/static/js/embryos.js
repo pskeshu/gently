@@ -595,6 +595,7 @@ const EmbryosManager = {
         const latest = sorted[0];
         this.currentDetailItem = latest;
         container.innerHTML = `<div class="board-detail-content">${this.renderDetailPanel(latest)}</div>`;
+        this.initChatPanel(container, embryoId, latest.timepoint);
     },
 
     // ==========================================
@@ -709,7 +710,7 @@ const EmbryosManager = {
                     const detail = document.getElementById('filmstrip-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
-                        this.initChatPanel(eid, tp);
+                        this.initChatPanel(detail, eid, tp);
                     }
                 }
             });
@@ -751,7 +752,7 @@ const EmbryosManager = {
             const detail = document.getElementById('filmstrip-detail');
             if (detail) {
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, tp);
+                this.initChatPanel(detail, this.selectedEmbryoId, tp);
             }
         }
 
@@ -807,7 +808,7 @@ const EmbryosManager = {
                     const detail = document.getElementById('vitals-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
-                        this.initChatPanel(eid, tp);
+                        this.initChatPanel(detail, eid, tp);
                     }
                 }
             });
@@ -824,7 +825,7 @@ const EmbryosManager = {
             const detail = document.getElementById('vitals-detail');
             if (detail) {
                 detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, tp);
+                this.initChatPanel(detail, this.selectedEmbryoId, tp);
             }
         }
     },
@@ -2004,7 +2005,7 @@ const EmbryosManager = {
             activeDot.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         }
 
-        this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+        this.initChatPanel(container, this.selectedEmbryoId, item.timepoint);
     },
 
     // Render the detail panel content
@@ -2068,7 +2069,7 @@ const EmbryosManager = {
             ? `<img src="/api/images/${imageUid}/png"
                     alt="T${item.timepoint}"
                     onclick="EmbryosManager.openTimepointInLightbox('${this.selectedEmbryoId}', ${item.timepoint})" />`
-            : `<div class="detail-image-loading" id="detail-image-placeholder"
+            : `<div class="detail-image-loading"
                     data-embryo="${this.selectedEmbryoId}"
                     data-timepoint="${item.timepoint}">Loading image...</div>`;
 
@@ -2311,9 +2312,9 @@ const EmbryosManager = {
                          data-embryo-id="${this.selectedEmbryoId}"
                          data-timepoint="${item.timepoint}">
                         <div class="chat-panel-label">Follow-up</div>
-                        <div class="chat-thread" id="chat-thread"></div>
+                        <div class="chat-thread"></div>
                         <form class="chat-input-row" onsubmit="return EmbryosManager.sendChat(event)">
-                            <textarea class="chat-input" id="chat-input"
+                            <textarea class="chat-input"
                                       placeholder="Ask a follow-up about this timepoint…"
                                       rows="2"
                                       onkeydown="EmbryosManager.handleChatKeydown(event)"></textarea>
@@ -2333,11 +2334,15 @@ const EmbryosManager = {
     // Chat — per-timepoint VLM follow-up
     // ==========================================
 
-    async initChatPanel(embryoId, timepoint) {
+    // ``root`` is the element the detail panel was just rendered into.
+    // Several views can hold a detail panel at once (hidden views keep
+    // theirs in the DOM), so the thread must be resolved inside the panel
+    // we are initialising, not at document root.
+    async initChatPanel(root, embryoId, timepoint) {
         const sessionId = this.currentSessionId;
         if (!sessionId) return;
 
-        const thread = document.getElementById('chat-thread');
+        const thread = root && root.querySelector('.chat-thread');
         if (!thread) return;
         thread.innerHTML = '';
 
@@ -2348,15 +2353,14 @@ const EmbryosManager = {
             if (!resp.ok) return;
             const data = await resp.json();
             for (const turn of (data.turns || [])) {
-                this.appendChatMessage(turn.role, turn.content);
+                this.appendChatMessage(thread, turn.role, turn.content);
             }
         } catch (err) {
             console.warn('Failed to load chat history', err);
         }
     },
 
-    appendChatMessage(role, content) {
-        const thread = document.getElementById('chat-thread');
+    appendChatMessage(thread, role, content) {
         if (!thread) return null;
 
         const el = document.createElement('div');
@@ -2387,8 +2391,9 @@ const EmbryosManager = {
 
     async sendChat(event) {
         event.preventDefault();
-        const panel = document.querySelector('.chat-panel');
-        const input = document.getElementById('chat-input');
+        const panel = event.target.closest('.chat-panel');
+        const input = panel && panel.querySelector('.chat-input');
+        const thread = panel && panel.querySelector('.chat-thread');
         if (!panel || !input) return false;
 
         const text = input.value.trim();
@@ -2402,13 +2407,13 @@ const EmbryosManager = {
             return false;
         }
 
-        this.appendChatMessage('user', text);
+        this.appendChatMessage(thread, 'user', text);
         input.value = '';
         input.disabled = true;
         const sendBtn = panel.querySelector('.chat-send');
         if (sendBtn) sendBtn.disabled = true;
 
-        const assistantEl = this.appendChatMessage('assistant', '');
+        const assistantEl = this.appendChatMessage(thread, 'assistant', '');
         const contentEl = assistantEl
             ? assistantEl.querySelector('.chat-message-content')
             : null;
@@ -2455,7 +2460,6 @@ const EmbryosManager = {
                         if (payload.type === 'delta') {
                             accumulated += payload.text;
                             if (contentEl) contentEl.textContent = accumulated;
-                            const thread = document.getElementById('chat-thread');
                             if (thread) thread.scrollTop = thread.scrollHeight;
                         } else if (payload.type === 'error') {
                             if (contentEl) {
@@ -2487,8 +2491,12 @@ const EmbryosManager = {
     // Fetch image for detail panel using sequence API
     // Tries multiple data types as fallbacks
     async fetchDetailImage(embryoId, timepoint) {
-        const placeholder = document.getElementById('detail-image-placeholder');
-        if (!placeholder) return;
+        // The panel HTML is still a string when this is called, and hidden
+        // views keep their own placeholders in the DOM, so resolve by data
+        // attributes at replacement time instead of by id up front.
+        const placeholders = () => document.querySelectorAll(
+            `.detail-image-loading[data-embryo="${embryoId}"][data-timepoint="${timepoint}"]`
+        );
 
         // Try these data types in order of preference
         const dataTypes = ['volume_projection', 'volume', 'image'];
@@ -2502,9 +2510,10 @@ const EmbryosManager = {
                     const imgData = data.sequence[0];
                     const uid = imgData.uid;
                     // Use openTimepointInLightbox for navigation through all timepoints
-                    placeholder.outerHTML = `<img src="/api/images/${uid}/png"
-                                                  alt="T${timepoint}"
-                                                  onclick="EmbryosManager.openTimepointInLightbox('${embryoId}', ${timepoint})" />`;
+                    const imgHtml = `<img src="/api/images/${uid}/png"
+                                          alt="T${timepoint}"
+                                          onclick="EmbryosManager.openTimepointInLightbox('${embryoId}', ${timepoint})" />`;
+                    placeholders().forEach(el => { el.outerHTML = imgHtml; });
                     return; // Success - exit
                 }
             } catch (err) {
@@ -2513,7 +2522,9 @@ const EmbryosManager = {
         }
 
         // All types failed
-        placeholder.outerHTML = '<div class="no-image">No image available for this timepoint</div>';
+        placeholders().forEach(el => {
+            el.outerHTML = '<div class="no-image">No image available for this timepoint</div>';
+        });
     },
 
     // Close the detail panel
@@ -3293,7 +3304,7 @@ const EmbryosManager = {
                 }
                 this.currentDetailItem = item;
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+                this.initChatPanel(detail, this.selectedEmbryoId, item.timepoint);
             }
             return;
         }
@@ -3302,7 +3313,7 @@ const EmbryosManager = {
             if (detail) {
                 this.currentDetailItem = item;
                 detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+                this.initChatPanel(detail, this.selectedEmbryoId, item.timepoint);
             }
             return;
         }
