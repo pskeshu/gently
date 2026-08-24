@@ -32,7 +32,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
   font:13px/1.45 'Inter Tight',system-ui,sans-serif;color:var(--text)}
 
 /* ── surface ──────────────────────────────────────────────────── */
-#viewport{position:fixed;inset:0;cursor:grab;overscroll-behavior:none}
+/* R3, one level up: a frame half off the viewport is as half-rendered as
+   content escaping its frame. The bench fades at its boundary so a partly
+   visible window reads as "there is more that way", never as a broken cut. */
+#viewport{position:fixed;inset:0;cursor:grab;overscroll-behavior:none;
+  --fade:38px;
+  -webkit-mask-image:
+    linear-gradient(to right,  transparent 0, #000 var(--fade), #000 calc(100% - var(--fade)), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 var(--fade), #000 calc(100% - var(--fade)), transparent 100%);
+  -webkit-mask-composite:source-in;
+  mask-image:
+    linear-gradient(to right,  transparent 0, #000 var(--fade), #000 calc(100% - var(--fade)), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 var(--fade), #000 calc(100% - var(--fade)), transparent 100%);
+  mask-composite:intersect}
 #viewport.panning{cursor:grabbing}
 #viewport::before{content:'';position:absolute;inset:0;pointer-events:none;
   background-image:linear-gradient(var(--grid) 1px,transparent 1px),
@@ -161,15 +173,22 @@ body.focused .slot .panel{opacity:1;filter:none}   /* pinned never recedes */
 
 /* ── chrome ───────────────────────────────────────────────────── */
 #hud{display:flex;gap:5px;pointer-events:auto;align-items:center;flex:0 0 auto}
-#lay{position:fixed;left:12px;top:52px;display:flex;gap:5px;z-index:10}
+/* R9: chrome lives in the grid's FREE cell — the open middle — so it can never
+   collide with a courtyard resident, whatever edges config declares. */
+#chrome{grid-area:free;pointer-events:none;display:grid;
+  grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;
+  grid-template-areas:"tl . tr" ". . ." "bl . br";z-index:6}
+#chrome > *{pointer-events:auto}
+#lay{grid-area:tl;display:flex;gap:5px;align-self:start;flex-direction:column;align-items:flex-start}
+#lay .row{display:flex;gap:5px}
 #lay .btn{background:#161b22ee;backdrop-filter:blur(6px)}
 #lay .btn.here{border-color:var(--accent);color:#cfe6ff}
 #hud .btn{background:#161b22ee;backdrop-filter:blur(6px)}
 #hud .btn.here{border-color:var(--accent);color:#cfe6ff}
-#zoom{position:fixed;right:12px;bottom:12px;z-index:10;color:var(--muted);font-size:.7rem;
+#zoom{grid-area:br;align-self:end;justify-self:end;color:var(--muted);font-size:.7rem;
   background:#161b22ee;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);
   font-variant-numeric:tabular-nums}
-#hint{position:fixed;left:12px;top:12px;z-index:10;color:var(--muted);font-size:.7rem;
+#hint{color:var(--muted);font-size:.7rem;
   background:#161b22ee;padding:.4rem .6rem;border-radius:6px;border:1px solid var(--border)}
 kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:0 .25rem;font-size:.66rem}
 </style>
@@ -177,12 +196,16 @@ kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:
 <div id="viewport"><div id="board"></div></div>
 <!-- screen-bound layer. same panels, different coordinate space. -->
 <div id="pinned"></div>
-<div id="hint">everything exists · attention travels · <kbd>0</kbd>–<kbd>5</kbd> · surface zoom ≠ frame zoom</div>
-<div id="lay">
-  <button class="btn" data-lay="survey">survey</button>
-  <button class="btn" data-lay="operate">operate</button>
-  <button class="btn" data-lay="acquire">acquire</button>
-</div>
+<template id="chrome-tpl">
+  <div id="lay">
+    <div id="hint">everything exists · attention travels · <kbd>0</kbd>–<kbd>5</kbd> · surface zoom ≠ frame zoom</div>
+    <div class="row">
+      <button class="btn" data-lay="survey">survey</button>
+      <button class="btn" data-lay="operate">operate</button>
+      <button class="btn" data-lay="acquire">acquire</button>
+    </div>
+  </div>
+</template>
 <div id="hud">
   <button class="btn" data-go="home">0 home</button>
   <button class="btn" data-go="detect">1 detect</button>
@@ -200,7 +223,7 @@ kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:
       border-radius:4px;font:inherit;font-size:.7rem">
       <option>1</option><option selected>10</option><option>60</option></select></span>
 </div>
-<div id="zoom">100%</div>
+<template id="zoom-tpl"><div id="zoom">100%</div></template>
 
 
 <script>
@@ -254,7 +277,10 @@ const CONFIG = {
 /* ═══════════════════════════════════════════════════════════════ */
 
 const vp=document.getElementById('viewport'), board=document.getElementById('board');
-const zoomLabel=document.getElementById('zoom');
+/* #zoom starts life inside a <template> and only enters the DOM when seatHud
+   clones it, so it cannot be captured at parse time. Resolve on first use. */
+let zoomLabel=null;
+const zoomEl=()=>(zoomLabel ??= document.getElementById('zoom'));
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 
 /* ── rule 1: the surface ──────────────────────────────────────── */
@@ -263,7 +289,7 @@ function apply(){
   board.style.transform=`translate(${vx}px,${vy}px) scale(${scale})`;
   vp.style.setProperty('--gs',80*scale+'px');
   vp.style.setProperty('--gx',vx+'px'); vp.style.setProperty('--gy',vy+'px');
-  zoomLabel.textContent=Math.round(scale*100)+'%';
+  const z=zoomEl(); if(z) z.textContent=Math.round(scale*100)+'%';
 }
 /* zoom keeps the point under the cursor pinned */
 function zoomAt(cx,cy,k){
@@ -500,7 +526,8 @@ function buildCourtyard(c){
   /* evacuate before demolishing: windows go home to the canvas, the chip bar
      to the body. wiping innerHTML with residents inside would delete them. */
   host.querySelectorAll('.panel').forEach(el=>unpin(el.id));
-  const hud=host.querySelector('#hud'); if(hud) document.body.appendChild(hud);
+  const hud=host.querySelector('#hud');     if(hud)    document.body.appendChild(hud);
+  const chrome=host.querySelector('#chrome'); if(chrome) document.body.appendChild(chrome);
   host.innerHTML='';
   const at=side=>Object.keys(c.edges).find(k=>c.edges[k].side===side);
   const [L,R,T,B]=['left','right','top','bottom'].map(at);
@@ -527,14 +554,28 @@ function buildCourtyard(c){
 }
 buildCourtyard(CONFIG.courtyard);
 
-/* the chip bar rides in whichever edge config placed at the bottom;
-   with no bottom edge it falls back to floating. */
+/* Everything screen-bound is a resident. The chip bar rides in whichever edge
+   config placed at the bottom; the rest of the chrome lives in the free cell,
+   which no courtyard edge can ever occupy. */
 function seatHud(c){
+  const host=document.getElementById('pinned');
+  let chrome=document.getElementById('chrome');
+  if(!chrome){
+    chrome=document.createElement('div'); chrome.id='chrome';
+    chrome.appendChild(document.getElementById('chrome-tpl').content.cloneNode(true));
+    chrome.appendChild(document.getElementById('zoom-tpl').content.cloneNode(true));
+  }
+  host.appendChild(chrome);
+
   const hud=document.getElementById('hud');
   const e=Object.entries(c.edges).find(([,v])=>v.side==='bottom');
   const slot=e && document.getElementById('slot-'+e[0]);
-  (slot||document.body).prepend(hud);
-  hud.style.cssText = slot ? '' : 'position:fixed;left:12px;bottom:12px;z-index:10';
+  if(slot){ slot.prepend(hud); hud.style.cssText=''; }
+  else { chrome.querySelector('#lay').appendChild(hud); hud.style.cssText='margin-top:5px'; }
+
+    document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>attend(b.dataset.go));
+  document.getElementById('density').oninput=e2=>setDensity(+e2.target.value);
+  document.getElementById('speed').onchange=e2=>CONFIG.clock.speed=+e2.target.value;
 }
 seatHud(CONFIG.courtyard);
 
