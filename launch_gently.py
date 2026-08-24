@@ -133,6 +133,11 @@ def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, res
     print(f"  ✦ Gently is running.{tag}")
     print(f"    {line}")
     print(f"    Open:    {url}")
+    if viz_url:
+        # The Atrium spatial shell is off by default (docs/atrium/SPEC.md).
+        # Without this line the banner only advertises the tabbed UI, so the
+        # flag is undiscoverable unless you already know it exists.
+        print(f"    Atrium:  {viz_url}/?atrium=1   (spatial shell — ?atrium=0 to leave)")
     print(f"    Agent:   {agent_status}")
     print(f"    Device:  {dev}")
     print(f"    Storage: {storage_dir}")

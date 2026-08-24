@@ -175,7 +175,8 @@ document.getElementById("go").addEventListener("click", async () => {
     const b = await r.json().catch(() => ({}));
     if (b.error) setStatus("Microscope: " + b.error, "err");
     // Hand off immediately — the dashboard follows the boot from here.
-    window.location.href = "/";
+    // preserve any flag that survived the gate redirect (e.g. ?atrium=1)
+    window.location.href = "/" + location.search;
   } catch (e) {
     setStatus("Something went wrong: " + e, "err");
     btn.disabled = false; paint();

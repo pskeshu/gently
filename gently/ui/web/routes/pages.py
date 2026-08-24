@@ -23,7 +23,12 @@ def create_router(server) -> APIRouter:
         every visit to / bounces to /launch (RFC #78 defer-init boot).
         """
         if not getattr(server, "gate_passed", False):
-            return RedirectResponse("/launch", status_code=302)
+            # Carry the query string through the gate. Without this, any flag
+            # passed to / is silently lost on the bounce — which made
+            # /?atrium=1 land on the tabbed UI and look like the flag was
+            # broken. launch.html carries it back on the way in.
+            q = request.url.query
+            return RedirectResponse(f"/launch?{q}" if q else "/launch", status_code=302)
         # The v2 landing ("what are we doing today?") is for STARTING fresh. Skip
         # it when resuming a session (one-shot flag from the resume route) or when
         # the live session already has work — so a resumed/underway session lands
