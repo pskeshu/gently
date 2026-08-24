@@ -17,6 +17,69 @@
   "result": {
     "map": "# Atrium Migration Map — Gently Web UI
 
+<!-- STATUS BOARD — updated as phases land -->
+
+| Phase | State | Evidence |
+|---|---|---|
+| 1 · delete dead code | ✅ done | `fe6ec80` · 1,784 lines · 0 story deltas |
+| 2 · live bugs | ✅ done | `1c7165b` · 10 fixed, **5 refuted** · 0 story deltas |
+| 3 · transform safety | 🔄 running | must be a no-op at scale 1.0 |
+| 4 · the store | ⬜ | extend `status-store.js`, `stageXY` first |
+| 5 · pilot windows | ⬜ | `notebook.js`, `device-layer.js` |
+| 6 · pure projections | ⬜ | `campaigns.js` |
+| 7 · reconcile with subwindows | ⬜ | **new — see below** |
+| 8 · port the shell | ⬜ | #123 |
+
+**Verification standard for every phase.** CI runs no JavaScript, and the
+committed `tools/ui_crawler/baseline/status.json` was recorded in a *different*
+environment (it expects an account server), so diffing against it produces
+false regressions. The only sound check is same-environment before/after:
+
+```bash
+GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser
+uv run python tools/ui_crawler/run_stories.py --url http://localhost:8080
+```
+
+38 stories. Capture `tools/ui_crawler/out/stories/status.json` before and after
+and diff the two runs, not the run against the baseline. Phases 1 and 2 each
+produced **zero** story deltas by that measure.
+
+**The audit's own error rate is about one in three.** Phase 1 overclaimed
+`viewer.js` by 27x; Phase 2 refuted 5 of 15 claims, including the one ranked
+most severe. Treat every table below as a hypothesis with a file:line to check.
+
+---
+
+## Phase 7 — reconcile with subwindows
+
+This map was written BEFORE the Atrium gained addressable children (SPEC.md R8),
+so it was forced to answer window-or-not for every candidate. With children in
+the model that question softens, and several "merge away" verdicts are probably
+"child of" instead.
+
+Re-read specifically:
+
+| Merged into SUBJECT | Likely actually |
+|---|---|
+| `FILMSTRIP` | a child of SUBJECT — it is a real view, with its own gauge |
+| `EVAL_TIMELINE` | a child; it was called "the folded rendering of TIMEPOINT_DETAIL", which is exactly what a gauge is |
+| `TIMEPOINT_DETAIL` | a child |
+| `PERCEPTION_CHAT` | a child |
+| `CAL_EMBRYO_ROSTER` | still a merge — it is the fourth copy of one roster |
+
+The prototype already carries this shape: EMBRYOS holds `board`/`filmstrip`/
+`vitals` as children, which are precisely the three views `embryos.js` hand-rolls
+today. A child is a full destination (`attend('p-embryos:vitals')`), carries its
+own crit/tolerance, raises its parent when it presses, and can be detached onto
+the bench. That means a decomposition does **not** have to choose between "one
+window" and "three windows" — it can defer, which is the cheaper answer.
+
+**Rule for the port:** if a candidate has its own gauge but no independent
+reason to occupy bench space, make it a child. Promote later if it earns it.
+
+---
+
+
 **Headline:** the seven group reports propose ~100 windows. After the refutations and cross-file dedup, roughly **55 survive**, and about **12 of the ~100 are dead code that must be deleted, not migrated**. The single largest source of inflation is the same capability implemented 2–4 times in different files (stage position ×4, embryo roster ×4, SPIM live ×3, imaging spec ×3, pending ask ×3, embryo marking ×2, temperature ×2). The Atrium's value here is mostly **subtraction**: it deletes seven mode switchers, four view-switchers, one modal system, and the tab shell.
 
 **No framework.** `gently/ui/web/static/js/status-store.js` is already a sticky subscribe-and-replay store written to fix exactly this bug class ("three disagreeing indicators", its own docstring at :1-18). Extend it to four more keys. See §3.
