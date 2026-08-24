@@ -124,20 +124,36 @@ const MarkingManager = {
         this._renderList();
     },
 
+    // Bench hook: a CSS transform on an ancestor fires neither resize nor
+    // ResizeObserver, so the bench calls this after unfolding or rescaling.
+    refresh() {
+        this._syncCanvasSize();
+        this._redraw();
+    },
+
     _syncCanvasSize() {
         if (!this.img || !this.canvas || !this.imageWidth || !this.imageHeight) return;
 
-        const containerRect = this.container.getBoundingClientRect();
+        // Layout size, not getBoundingClientRect(): the rect carries every
+        // ancestor transform, which would oversize the backing store and the
+        // CSS box by the bench scale.
+        const containerStyle = getComputedStyle(this.container);
+        const availW = parseFloat(containerStyle.width);
+        const availH = parseFloat(containerStyle.height);
+        // Zero/NaN means folded or hidden — keep the current size instead of
+        // collapsing the canvas; refresh() restores it on unfold.
+        if (!(availW > 0) || !(availH > 0)) return;
+
         const imgAspect = this.imageWidth / this.imageHeight;
-        const containerAspect = containerRect.width / containerRect.height;
+        const containerAspect = availW / availH;
 
         let renderW, renderH;
         if (imgAspect > containerAspect) {
-            renderW = containerRect.width;
-            renderH = containerRect.width / imgAspect;
+            renderW = availW;
+            renderH = availW / imgAspect;
         } else {
-            renderH = containerRect.height;
-            renderW = containerRect.height * imgAspect;
+            renderH = availH;
+            renderW = availH * imgAspect;
         }
 
         this.canvas.width = renderW;
@@ -150,11 +166,15 @@ const MarkingManager = {
         if (!this.active) return;
 
         const rect = this.canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
         const canvasX = e.clientX - rect.left;
         const canvasY = e.clientY - rect.top;
 
-        const scaleX = this.imageWidth / this.canvas.width;
-        const scaleY = this.imageHeight / this.canvas.height;
+        // Scale from the measured rect, not the backing store: the rect is
+        // transform-inclusive and clientX/clientY are too, so mixing the two
+        // would ship stage coordinates off by the bench scale.
+        const scaleX = this.imageWidth / rect.width;
+        const scaleY = this.imageHeight / rect.height;
         const pixelX = canvasX * scaleX;
         const pixelY = canvasY * scaleY;
 

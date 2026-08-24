@@ -736,7 +736,14 @@ const EmbryosManager = {
                     return;
                 }
                 e.preventDefault();
-                scrollContainer.scrollLeft += e.deltaY;
+                // deltaY is screen px; scrollLeft is layout px. Under a bench
+                // transform they differ by the live scale — measured box over
+                // layout box. Snap to 1 when untransformed (offsetWidth is an
+                // integer, so the ratio only lands near 1) to keep this a
+                // no-op on the tabbed UI.
+                const measured = scrollContainer.getBoundingClientRect().width / scrollContainer.offsetWidth;
+                const scale = measured > 0 && Math.abs(measured - 1) >= 0.01 ? measured : 1;
+                scrollContainer.scrollLeft += e.deltaY / scale;
             }, { passive: false });
         }
 
@@ -1999,11 +2006,10 @@ const EmbryosManager = {
         container.innerHTML = this.renderDetailPanel(item);
         container.classList.add('visible');
 
-        // Auto-scroll active dot into view in the horizontal strip
-        const activeDot = document.querySelector('.eval-dot.active');
-        if (activeDot) {
-            activeDot.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-        }
+        // No auto-scroll here: .eval-dots-track wraps rather than scrolling and
+        // every ancestor is a fixed-height overflow:hidden box, so the dot is
+        // always in view. A scrollIntoView would only find a scrollable
+        // ancestor further out and pan that instead.
 
         this.initChatPanel(container, this.selectedEmbryoId, item.timepoint);
     },
@@ -3300,7 +3306,21 @@ const EmbryosManager = {
                 );
                 if (cell) {
                     cell.classList.add('active');
-                    cell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    // Scroll the filmstrip container itself, not every scrollable
+                    // ancestor: scrollIntoView would also pan whatever encloses it.
+                    // .filmstrip-container is position:relative, so it is the
+                    // cell's offsetParent and these offsets are relative to it.
+                    const sc = cell.closest('.filmstrip-container');
+                    if (sc) {
+                        sc.scrollTo({
+                            left: cell.offsetLeft + cell.offsetWidth / 2 - sc.clientWidth / 2,
+                            top: Math.min(
+                                Math.max(sc.scrollTop, cell.offsetTop + cell.offsetHeight - sc.clientHeight),
+                                cell.offsetTop
+                            ),
+                            behavior: 'smooth',
+                        });
+                    }
                 }
                 this.currentDetailItem = item;
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;

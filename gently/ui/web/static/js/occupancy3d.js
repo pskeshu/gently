@@ -149,13 +149,18 @@ const Occupancy3DManager = (function () {
 
     function _wireInteraction() {
         const el = _renderer.domElement;
+        // Screen px -> canvas-local px. 1.0 unless an ancestor (the Atrium
+        // bench) is CSS-scaled; sampled per drag so orbit speed stays constant.
+        let dragScale = 1;
         el.addEventListener('mousedown', (e) => {
             _isDragging = true; _prevMouse = { x: e.clientX, y: e.clientY };
+            const r = el.getBoundingClientRect();
+            dragScale = el.offsetWidth ? r.width / el.offsetWidth : 1;
         });
         el.addEventListener('mousemove', (e) => {
             if (!_isDragging) return;
-            _root.rotation.y += (e.clientX - _prevMouse.x) * 0.01;
-            _root.rotation.x += (e.clientY - _prevMouse.y) * 0.01;
+            _root.rotation.y += ((e.clientX - _prevMouse.x) / dragScale) * 0.01;
+            _root.rotation.x += ((e.clientY - _prevMouse.y) / dragScale) * 0.01;
             _rot.x = _root.rotation.x; _rot.y = _root.rotation.y;
             _prevMouse = { x: e.clientX, y: e.clientY };
         });

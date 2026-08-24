@@ -231,6 +231,11 @@ const Tooltips = {
     }
 };
 
+// The tooltip is body-parented at viewport coords, so it goes stale whenever an
+// ancestor transform moves its anchor. A CSS transform fires neither scroll nor
+// resize, so the bench must dismiss it explicitly: Tooltips.hide().
+window.Tooltips = Tooltips;
+
 /**
  * Presence Manager - Collaborative presence like Google Docs
  */

@@ -1160,11 +1160,25 @@ function updateStatusbar() {
 //  NAVIGATION HELPERS
 // ══════════════════════════════════════════════════════════
 
+// scrollIntoView scrolls every scrollable ancestor, so inside a transformed
+// wrapper it pans the whole workspace. Scroll #canvas -- the intended container
+// -- explicitly, converting the measured (transform-inclusive) offset back into
+// the canvas's own scroll units.
+function scrollCanvasToEl(el, centered) {
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const scale = canvasRect.height / (canvas.offsetHeight || canvasRect.height) || 1;
+    const rect = el.getBoundingClientRect();
+    const delta = rect.top - canvasRect.top - (centered ? (canvasRect.height - rect.height) / 2 : 0);
+    canvas.scrollTo({ top: canvas.scrollTop + delta / scale, behavior: 'smooth' });
+}
+
 function navigateToItem(itemId) {
     // Scroll to item in canvas
     const el = document.getElementById(`item-${itemId}`);
     if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        scrollCanvasToEl(el, true);
     }
     // Open detail
     selectItem(itemId);
@@ -1172,7 +1186,7 @@ function navigateToItem(itemId) {
 
 function scrollCanvasTo(elementId) {
     const el = document.getElementById(elementId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) scrollCanvasToEl(el, false);
 }
 
 function toggleNavPhase(headerEl) {
@@ -1192,10 +1206,14 @@ function onCanvasScroll() {
     let closestItem = null;
     let closestDist = Infinity;
 
+    // Measured rects are transform-inclusive; the 100 threshold below is in CSS
+    // px, so divide the offset by the live scale before comparing.
+    const canvasRect = canvas.getBoundingClientRect();
+    const scale = canvasRect.height / (canvas.offsetHeight || canvasRect.height) || 1;
+
     document.querySelectorAll('.doc-item').forEach(el => {
         const rect = el.getBoundingClientRect();
-        const canvasRect = canvas.getBoundingClientRect();
-        const relTop = rect.top - canvasRect.top;
+        const relTop = (rect.top - canvasRect.top) / scale;
         if (relTop < 100 && Math.abs(relTop) < closestDist) {
             closestDist = Math.abs(relTop);
             closestItem = el;
@@ -1838,10 +1856,16 @@ function renderTimelinePlanView() {
     if (chartScroll && headerScroll) {
         chartScroll.addEventListener('scroll', () => { headerScroll.scrollLeft = chartScroll.scrollLeft; });
         // Wheel scroll → horizontal pan. Leave native deltaX (trackpad) and shift+wheel alone.
+        // Only consume the wheel when there is something to pan, so an enclosing
+        // zoomable surface still sees the gesture otherwise.
         chartScroll.addEventListener('wheel', (e) => {
-            if (e.deltaY !== 0 && e.deltaX === 0 && !e.shiftKey) {
+            const pannable = chartScroll.scrollWidth > chartScroll.clientWidth;
+            if (pannable && e.deltaY !== 0 && e.deltaX === 0 && !e.shiftKey) {
                 e.preventDefault();
-                chartScroll.scrollLeft += e.deltaY;
+                // deltaY is screen px; scrollLeft is in the element's own units.
+                const rect = chartScroll.getBoundingClientRect();
+                const scale = rect.width / (chartScroll.offsetWidth || rect.width) || 1;
+                chartScroll.scrollLeft += e.deltaY / scale;
             }
         }, { passive: false });
     }

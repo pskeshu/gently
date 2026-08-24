@@ -30,7 +30,7 @@ const DevicesManager = (function () {
     let _mapMarker, _mapMarkerPulse, _mapMarkerRing, _mapMarkerDot;
     let _mapReadoutX, _mapReadoutY;
     let _mapWrap;
-    let _scalebarLabel;
+    let _scalebarLabel, _scalebarTrack;
 
     // Embryo waypoints — driven by EMBRYOS_UPDATE events (the canonical bulk
     // mutation broadcast added by the embryos-broadcast commit) and the
@@ -186,6 +186,7 @@ const DevicesManager = (function () {
         _mapReadoutY      = document.getElementById('devices-map-y');
         _mapWrap          = document.getElementById('devices-map-wrap');
         _scalebarLabel    = document.getElementById('devices-scalebar-value');
+        _scalebarTrack    = document.querySelector('#devices-scalebar .devices-scalebar-track');
 
         _camPanel        = document.getElementById('devices-camera-panel');
         _camToggle       = document.getElementById('devices-camera-toggle');
@@ -1082,7 +1083,11 @@ const DevicesManager = (function () {
         const h = _viewBox.yMax - _viewBox.yMin;
         const scale = Math.min(rect.width / w, rect.height / h);
         if (!isFinite(scale) || scale <= 0) return;
-        const targetPx = 120;
+        // Measure the bar the caption describes rather than assuming its CSS
+        // width: both rects carry any ancestor CSS transform, so the zoom
+        // cancels out and the caption stays true under a scaled bench.
+        const barRect = _scalebarTrack && _scalebarTrack.getBoundingClientRect();
+        const targetPx = barRect && barRect.width ? barRect.width : 120;
         const rawUm = targetPx / scale;
         const pow = Math.pow(10, Math.floor(Math.log10(rawUm)));
         const norm = rawUm / pow;
@@ -1214,11 +1219,14 @@ const DevicesManager = (function () {
         // but the SVG renderer re-rasterises at the new zoom so the 1px
         // strokes stay crisp instead of getting bitmap-scaled.
         if (_camCrosshairGroup && _camStage) {
-            const rect = _camStage.getBoundingClientRect();
             // Convert pixel-space translation to viewBox units (viewBox is
-            // 0..100 in both axes, preserveAspectRatio=none).
-            const txV = rect.width  > 0 ? (_camTx * 100) / rect.width  : 0;
-            const tyV = rect.height > 0 ? (_camTy * 100) / rect.height : 0;
+            // 0..100 in both axes, preserveAspectRatio=none). Use the layout
+            // size, not getBoundingClientRect: _camTx is in the stage's own
+            // px, so a CSS transform on an ancestor must not enter here.
+            const stageW = _camStage.offsetWidth;
+            const stageH = _camStage.offsetHeight;
+            const txV = stageW > 0 ? (_camTx * 100) / stageW : 0;
+            const tyV = stageH > 0 ? (_camTy * 100) / stageH : 0;
             // translate(50+tx, 50+ty) scale(zoom) translate(-50, -50) keeps
             // the viewBox centre (50, 50) as the zoom anchor and offsets by
             // the converted pixel translation.
@@ -1244,9 +1252,10 @@ const DevicesManager = (function () {
     // zoom 1 this collapses to (0, 0).
     function clampCameraPan() {
         if (!_camStage) return;
-        const rect = _camStage.getBoundingClientRect();
-        const maxX = (rect.width  * (_camZoom - 1)) / 2;
-        const maxY = (rect.height * (_camZoom - 1)) / 2;
+        // Layout size, not the client rect: the bounds are compared against
+        // _camTx/_camTy, which live in the stage's own untransformed px.
+        const maxX = (_camStage.offsetWidth  * (_camZoom - 1)) / 2;
+        const maxY = (_camStage.offsetHeight * (_camZoom - 1)) / 2;
         _camTx = Math.max(-maxX, Math.min(maxX, _camTx));
         _camTy = Math.max(-maxY, Math.min(maxY, _camTy));
     }
@@ -1257,8 +1266,12 @@ const DevicesManager = (function () {
         // operator while they're framing a sample.
         event.preventDefault();
         const rect = _camStage.getBoundingClientRect();
-        const cx = event.clientX - rect.left - rect.width  / 2;
-        const cy = event.clientY - rect.top  - rect.height / 2;
+        // rect carries any ancestor CSS transform; _camTx/_camTy do not, so
+        // divide the cursor offset by the live scale before anchoring.
+        const sx = _camStage.offsetWidth  ? rect.width  / _camStage.offsetWidth  : 1;
+        const sy = _camStage.offsetHeight ? rect.height / _camStage.offsetHeight : 1;
+        const cx = (event.clientX - rect.left - rect.width  / 2) / sx;
+        const cy = (event.clientY - rect.top  - rect.height / 2) / sy;
         const oldZoom = _camZoom;
         const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
         const newZoom = Math.max(_CAM_ZOOM_MIN,
@@ -1293,8 +1306,13 @@ const DevicesManager = (function () {
 
     function onCameraPointerMove(event) {
         if (!_camPanLast) return;
-        _camTx += event.clientX - _camPanLast.x;
-        _camTy += event.clientY - _camPanLast.y;
+        // Pointer deltas are screen px; the translate they feed is in the
+        // stage's own px, so divide out any ancestor CSS transform scale.
+        const rect = _camStage.getBoundingClientRect();
+        const sx = _camStage.offsetWidth  ? rect.width  / _camStage.offsetWidth  : 1;
+        const sy = _camStage.offsetHeight ? rect.height / _camStage.offsetHeight : 1;
+        _camTx += (event.clientX - _camPanLast.x) / sx;
+        _camTy += (event.clientY - _camPanLast.y) / sy;
         _camPanLast = { x: event.clientX, y: event.clientY };
         clampCameraPan();
         applyCameraTransform();
@@ -1840,9 +1858,9 @@ const DevicesManager = (function () {
 
     function clampLightsheetPan() {
         if (!_lsStage) return;
-        const rect = _lsStage.getBoundingClientRect();
-        const maxX = (rect.width  * (_lsZoom - 1)) / 2;
-        const maxY = (rect.height * (_lsZoom - 1)) / 2;
+        // Layout size — the bounds are in the stage's own untransformed px.
+        const maxX = (_lsStage.offsetWidth  * (_lsZoom - 1)) / 2;
+        const maxY = (_lsStage.offsetHeight * (_lsZoom - 1)) / 2;
         _lsTx = Math.max(-maxX, Math.min(maxX, _lsTx));
         _lsTy = Math.max(-maxY, Math.min(maxY, _lsTy));
     }
@@ -1851,8 +1869,11 @@ const DevicesManager = (function () {
         if (!_lsStage) return;
         event.preventDefault();
         const rect = _lsStage.getBoundingClientRect();
-        const cx = event.clientX - rect.left - rect.width  / 2;
-        const cy = event.clientY - rect.top  - rect.height / 2;
+        // See onCameraWheel: strip any ancestor CSS transform scale.
+        const sx = _lsStage.offsetWidth  ? rect.width  / _lsStage.offsetWidth  : 1;
+        const sy = _lsStage.offsetHeight ? rect.height / _lsStage.offsetHeight : 1;
+        const cx = (event.clientX - rect.left - rect.width  / 2) / sx;
+        const cy = (event.clientY - rect.top  - rect.height / 2) / sy;
         const oldZoom = _lsZoom;
         const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
         const newZoom = Math.max(_CAM_ZOOM_MIN, Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
@@ -1878,8 +1899,12 @@ const DevicesManager = (function () {
 
     function onLightsheetPointerMove(event) {
         if (!_lsPanLast) return;
-        _lsTx += event.clientX - _lsPanLast.x;
-        _lsTy += event.clientY - _lsPanLast.y;
+        // See onCameraPointerMove: screen-px deltas -> stage-local px.
+        const rect = _lsStage.getBoundingClientRect();
+        const sx = _lsStage.offsetWidth  ? rect.width  / _lsStage.offsetWidth  : 1;
+        const sy = _lsStage.offsetHeight ? rect.height / _lsStage.offsetHeight : 1;
+        _lsTx += (event.clientX - _lsPanLast.x) / sx;
+        _lsTy += (event.clientY - _lsPanLast.y) / sy;
         _lsPanLast = { x: event.clientX, y: event.clientY };
         clampLightsheetPan();
         applyLightsheetTransform();
