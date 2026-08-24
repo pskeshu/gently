@@ -73,6 +73,29 @@ const Atrium = (() => {
         ],
         home: { cx: 940, cy: 560, scale: 0.58 },
 
+        /* R4: a gauge answers "what is in here" without opening it. Read the
+           app's own state, not the window's DOM — a DOM-derived count inherits
+           every rendering bug, and GALLERY proved it: it read "empty" while
+           state.snapshots held 40 images. State tells the truth about what
+           exists; the panel's failure to draw it is a separate defect.
+           A count needs its noun, or "32" says nothing. */
+        gauges: {
+            embryos: () => {
+                const n = plural(state.embryos?.length, 'embryo');
+                const sel = SharedState.get('selectedEmbryoId');
+                return sel ? `${n} · ${sel}` : n;
+            },
+            devices: () => {
+                const c = ConnectionStatus.get();
+                if (!c.microscopeConnected) return 'scope offline';
+                const xy = SharedState.get('stageXY');
+                return xy ? `${Math.round(xy.x)}, ${Math.round(xy.y)} µm` : 'scope online';
+            },
+            events:      () => plural(state.allEvents?.length, 'event'),
+            gallery:     () => plural(state.snapshots?.length, 'image'),
+            calibration: () => plural(state.calibration?.length, 'cal image'),
+        },
+
         /* R5/R6. urgency = crit x overdue, zero when fresh; the ladder is a
            threshold on that one number, not an authored policy table. The cap
            is the whole safety argument for letting an agent drive this. */
@@ -258,18 +281,6 @@ const Atrium = (() => {
     }
 
     /* ── R4 corollary: a folded window is a live gauge, not a blank ──── */
-    function gauge(tab, key, fmt) {
-        const w = wins.get(tab);
-        const peek = w && w.frame.querySelector('.atr-peek');
-        if (!peek) return;
-
-        SharedState.on(key, v => {                                   // sticky: paints now
-            const t = fmt(v);
-            peek.dataset.explicit = t ? '1' : '0';
-            if (t) peek.textContent = t;
-        });
-    }
-
     /* R4's test: "every folded window carries a non-empty gauge." A bare title
        reads as broken rather than folded — it already produced a false bug
        report ("home, events, notebook, gallery render empty"). Two windows had
@@ -280,15 +291,48 @@ const Atrium = (() => {
        session, informative in a live one, and it needs no new state.
        ponytail: generic row count, give a window an explicit gauge() when its
        own noun matters more than the number. */
-    const ROWS = 'tr,li,[data-embryo],[data-session-id],.card,.note-card,.campaign-item';
+    /* A gauge answers "what is in this window without opening it". Counting
+       a hard-coded list of selectors cannot generalise — it missed HOME's
+       `home-item` rows and would miss the next panel's class names too. So
+       count the DOMINANT REPEATED STRUCTURE instead: the largest group of
+       elements sharing a first class name. That is what a list looks like, in
+       any panel, without the Atrium knowing anything about it.
+
+       Threshold of 3 keeps a pair of filter selects or view buttons from
+       reading as content.
+       ponytail: first-class-name grouping, O(nodes) per window per tick. Give a
+       window an explicit gauge() when its own noun matters more than a count. */
+    const ROW_MIN = 3;
+    /* "4 embryos" reads; "4" does not. Zero says so in words rather than a
+       bare 0, which looks like a failed render. */
+    const plural = (n, noun) =>
+        !n ? `no ${noun}s` : `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+    function dominantCount(body) {
+        const tally = new Map();
+        for (const e of body.querySelectorAll('*')) {
+            const c = e.classList[0];
+            if (!c) continue;
+            tally.set(c, (tally.get(c) || 0) + 1);
+        }
+        let best = 0;
+        for (const n of tally.values()) if (n > best) best = n;
+        return best >= ROW_MIN ? best : 0;
+    }
+
     function contentGauge(f) {
         const peek = f.querySelector('.atr-peek');
         const body = f.querySelector('.atr-body');
         if (!peek || !body) return;
-        if (peek.dataset.explicit === '1') return;   // a store gauge has a value
-
-        const n = body.querySelectorAll(ROWS).length;
-        const txt = n ? String(n) : 'empty';
+        const declared = CONFIG.gauges[f.dataset.tab];
+        let txt;
+        if (declared) {
+            try { txt = declared(); } catch (_) { txt = ''; }
+        }
+        if (!txt) {                                  // no declared reading: infer one
+            const n = dominantCount(body);
+            txt = n ? `${n} rows` : 'empty';
+        }
         if (peek.textContent !== txt) peek.textContent = txt;
     }
 
@@ -598,8 +642,6 @@ const Atrium = (() => {
         }
 
         wins.forEach(({ frame: f }) => contentGauge(f));   // never blank on arrival
-        gauge('embryos', 'selectedEmbryoId', v => (v ? '◆ ' + v : ''));
-        gauge('devices', 'stageXY', v => (v ? `${Math.round(v.x)}, ${Math.round(v.y)} µm` : ''));
 
         vp.addEventListener('wheel', e => {
             if (e.target.closest('.atr-body')) return;      // frames own their own zoom
