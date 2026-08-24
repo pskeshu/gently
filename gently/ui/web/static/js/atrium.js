@@ -47,13 +47,23 @@ const Atrium = (() => {
                 { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
                 { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
               ] },
-            { tab: 'experiment',  title: 'EXPERIMENT',  x: 1280, y: 700, w: 700, h: 460, crit: 0.6 },
+            { tab: 'experiment',  title: 'EXPERIMENT',  x: 1280, y: 700, w: 700, h: 460, crit: 0.6, children: [
+                { key: 'overview', title: 'overview', go: () => ExperimentOverview.setView('overview') },
+                { key: 'rules',    title: 'rules',    go: () => ExperimentOverview.setView('rules') },
+              ] },
             { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4, children: [
                 { key: 'log',      title: 'log',      go: () => switchSystemView('log') },
                 { key: 'timeline', title: 'timeline', go: () => switchSystemView('timeline') },
                 { key: 'summary',  title: 'summary',  go: () => switchSystemView('summary') },
               ] },
-            { tab: 'plans',       title: 'PLANS',       x: 2020, y: 40,  w: 620, h: 620, crit: 0.5 },
+            { tab: 'plans',       title: 'PLANS',       x: 2020, y: 40,  w: 620, h: 620, crit: 0.5, children: [
+                { key: 'doc',      title: 'document',  click: 'plan-view-switcher' },
+                { key: 'graph',    title: 'graph',     click: 'plan-view-switcher' },
+                { key: 'board',    title: 'board',     click: 'plan-view-switcher' },
+                { key: 'decide',   title: 'decisions', click: 'plan-view-switcher' },
+                { key: 'matrix',   title: 'matrix',    click: 'plan-view-switcher' },
+                { key: 'timeline', title: 'timeline',  click: 'plan-view-switcher' },
+              ] },
             { tab: 'sessions',    title: 'SESSIONS',    x: 2020, y: 700, w: 620, h: 300, crit: 0.3 },
             { tab: 'notebook',    title: 'NOTEBOOK',    x: 40,   y: 1060, w: 460, h: 400, crit: 0.4 },
             { tab: 'gallery',     title: 'GALLERY',     x: 540,  y: 1200, w: 700, h: 400, crit: 0.4 },
@@ -323,7 +333,22 @@ const Atrium = (() => {
         if (!k) return false;
         f._active = key;
         paintKids(f);
-        try { k.go(); } catch (e) { console.warn('[atrium] child', key, 'failed', e); }
+        try {
+            if (k.click) {
+                // Drive the panel's own control. Every switcher in this app is
+                // initViewSwitcher(id, ...) delegating on [data-view], so a
+                // click reaches even a module-private handler — campaigns.js
+                // keeps switchPlanView inside an IIFE and it is unreachable
+                // any other way.
+                const btn = f.querySelector(`#${k.click} [data-view="${k.key}"]`);
+                if (btn) btn.click();
+                else return false;
+            } else if (k.go) {
+                k.go();
+            }
+        } catch (e) {
+            console.warn('[atrium] child', key, 'unavailable yet —', e.message);
+        }
         return true;
     }
 

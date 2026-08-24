@@ -18,10 +18,10 @@
 | 2 · live bugs | ✅ done | `1c7165b` · 10 fixed, **5 refuted** · 0 story deltas |
 | 3 · transform safety | ✅ done | 27 fixed, **23 refuted**, 6 deferred |
 | 8 · port the shell | ✅ done | `atrium.js` + `atrium.css`, flag-gated, all 10 panels adopted |
-| 4 · the store | ⬜ | extend `status-store.js`, `stageXY` first |
-| 5 · pilot windows | ⬜ | `notebook.js`, `device-layer.js` |
-| 6 · pure projections | ⬜ | `campaigns.js` |
-| 7 · reconcile with subwindows | ⬜ | see below |
+| 4 · the store | ✅ done | `SharedState` · 13 done, 5 skipped, **3 refuted** · the `cacheDom` latch is gone |
+| 7 · children | ✅ done | 17 addressable children across 5 windows |
+| 5 · pilot windows | ⛔ superseded | the port adopted all ten at once; no pilot needed |
+| 6 · pure projections | ✅ done | campaigns' six projections are children of PLANS |
 
 **Phase 3's refutation rate was 46%** — higher than phase 2's 33%. The pattern in
 what got refuted is worth internalising, because it is the same mistake four
@@ -109,6 +109,35 @@ bench on demand. So a decomposition need not choose between "one window" and
 
 **Rule for the port:** if a candidate has its own gauge but no independent
 reason to occupy bench space, make it a child. Promote later if it earns it.
+
+### How it actually shipped
+
+Phases 5 and 6 dissolved. The plan assumed the port would decompose one tab at
+a time, so it needed a cheap pilot (`notebook.js`) to test the window contract
+before risking `embryos.js`. Adoption made that unnecessary — all ten panels
+moved into frames at once, because the panels did not have to change at all.
+
+What phases 5–7 became instead: **17 addressable children across 5 windows.**
+
+| Window | Children |
+|---|---|
+| EMBRYOS | default · board · filmstrip · vitals |
+| PLANS | document · graph · board · decisions · matrix · timeline |
+| EVENTS | log · timeline · summary |
+| CALIBRATION | profile · gallery |
+| EXPERIMENT | overview · rules |
+
+Every one of those was already an internal view switcher inside its tab — the
+nested-switcher symptom of a UI with nowhere to put things. None of that logic
+changed; a child simply calls the switcher that already exists, and the native
+control is hidden where a child strip replaces it.
+
+A child drives its panel one of two ways. `go` calls a function when the panel
+exposes one. `click` drives the panel's own `[data-view]` button — which is how
+PLANS works, because `campaigns.js` keeps `switchPlanView` inside an IIFE where
+nothing can reach it. The click path is the general one: every switcher in this
+app is `initViewSwitcher(id, …)` delegating on `[data-view]`, so it works even
+for handlers that are private by construction.
 
 ---
 
