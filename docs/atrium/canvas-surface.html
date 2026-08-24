@@ -183,6 +183,11 @@ kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:
   <span class="btn" style="display:flex;gap:.4rem;align-items:center;cursor:default">
     density <input type="range" id="density" min="1" max="8" value="5" style="width:70px">
     <b id="density-n" class="mono">5</b></span>
+  <span class="btn" style="display:flex;gap:.4rem;align-items:center;cursor:default">
+    <b id="clock" class="mono" style="color:var(--muted)">t+0s</b>
+    ×<select id="speed" style="background:#0d1117;color:var(--text);border:1px solid var(--border);
+      border-radius:4px;font:inherit;font-size:.7rem">
+      <option>1</option><option selected>10</option><option>60</option></select></span>
 </div>
 <div id="zoom">100%</div>
 
@@ -208,8 +213,23 @@ const CONFIG = {
   },
   /* the landing: board coords + scale. density is per-layout. */
   home: {cx:655, cy:310, scale:.9},
-  /* information index weights — what earns a window an open slot. */
-  index: {crit:.65, freq:.35, freqCap:10},
+  /* release policy. pressure = crit x (1 + overdue), and the ladder is a
+     threshold on that one number rather than an authored policy table. */
+  release: {
+    ladder: [
+      {at:0,    channel:'gauge',  cost:'nothing'},
+      {at:0.85, channel:'chip',   cost:'a glance if they look'},
+      {at:1.25, channel:'open',   cost:'a glance they will take'},
+      {at:1.80, channel:'offer',  cost:'a decision'},
+      {at:2.50, channel:'seize',  cost:'the current task'},
+      {at:3.30, channel:'notify', cost:'a context switch'},
+      {at:4.30, channel:'email',  cost:'their evening'},
+    ],
+    /* the cap. pressure can never win past this, whatever it climbs to. */
+    maxChannel: 'notify',
+    overdueCap: 3,          // an overdue fact stops getting louder eventually
+  },
+  clock: {speed: 1},        // time compression, for feeling an hour in a minute
   /* attention layouts: what is pinned where, and where the canvas looks. */
   layouts: {
     survey:  {pin:{}, look:'bench', density:8},
@@ -290,7 +310,7 @@ function home(anim){
   if(anim){ glide(tx,ty,HOME.scale); } else { stopGlide(); vx=tx; vy=ty; scale=HOME.scale; apply(); }
 }
 
-const STEPS={bench:null, design:['p-design'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
+const STEPS={bench:null, design:['p-design'], releases:['p-releases'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
   calibrate:['p-cal'], acquire:['p-acq'], curate:['p-curator'], watch:['p-view']};
 const ORDER=['home','detect','position','calibrate','acquire','curate'];
 function attend(k){
@@ -320,20 +340,16 @@ addEventListener('keydown',e=>{
 
 /* ── rule 3: a panel is a frame, a state, and clipped content ─── */
 const FOLDED_H=34;
-/* information index — how often it changes x how much the experiment depends on it.
-   freq in updates/sec, crit in 0..1. the density dial opens the top N by index. */
-const index = (freq,crit) => { const W=CONFIG.index;
-  return +(crit*W.crit + clamp(freq/W.freqCap,0,1)*W.freq).toFixed(3); };
-
-function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5}){
+function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5,tol=0}){
   const el=document.createElement('div');
   el.className='panel'; el.id=id;
-  el.dataset.h=h; el.dataset.idx=index(freq,crit);
+  el.dataset.h=h; el.dataset.crit=crit; el.dataset.tol=tol;
+  el.dataset.freq=freq; el.dataset.since=0; el.dataset.rung=0;
   el.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
-  el._peek = typeof peek==='function' ? peek : ()=>peek;
+  el._peek = typeof peek==='function' ? ()=>peek(el) : ()=>peek;
   el.innerHTML=`<div class="ph"><button class="fold" title="fold / open">▼</button>
       <b>${title}</b><span class="peek">${el._peek()}</span>
-      <i class="idx">${el.dataset.idx}</i><i class="st ${state}">${state}</i></div>
+      <i class="idx">${pressure(el).toFixed(2)}</i><i class="st ${state}">${state}</i></div>
     <div class="pb${flush?' flush':''}">${body}</div>`;
   el.querySelector('.fold').onclick = e => { e.stopPropagation(); fold(el, !el.classList.contains('folded')); };
   const ph=el.querySelector('.ph');
@@ -352,7 +368,7 @@ function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5
    one source, one render pass. gauges refresh at reading speed (4 Hz),
    NOT at data rate — nobody reads a number thirty times a second.
    ponytail: single global tick, per-panel cadence if a gauge ever needs it. */
-const S={x:1610.4, y:905.2, z:-12.8, fps:30, found:4, events:0, since:0, laser:35, exp:40};
+const S={calDone:false, x:1610.4, y:905.2, z:-12.8, fps:30, found:4, events:0, since:0, laser:35, exp:40};
 const n1=v=>v.toFixed(1);
 function drift(){
   S.x += (Math.random()-.5)*1.4;  S.y += (Math.random()-.5)*1.4;
@@ -377,7 +393,12 @@ function render(){
         `<div>t+${(S.since+i*7).toFixed(0)}s · frame written</div>`).join('')}</div>`
     : `<div class="hollow">no events this session</div>`;
 }
-setInterval(()=>{drift(); render();}, 250);
+setInterval(()=>{
+  CLOCK += .25*CONFIG.clock.speed;
+  drift(); render(); releasePass();
+  const c=document.getElementById('clock');
+  if(c) c.textContent=`t+${CLOCK|0}s`;
+}, 250);
 
 /* folding never moves anything — geography survives, so muscle memory does too */
 function fold(el,on){
@@ -386,12 +407,14 @@ function fold(el,on){
 }
 /* density: how many windows are open at once. the rest fold to their gauge. */
 function setDensity(n){
-  const ps=onCanvas().sort((a,b)=>b.dataset.idx-a.dataset.idx);   // pinned windows opt out
+  const ps=onCanvas().sort((a,b)=>salience(b)-salience(a));   // pinned windows opt out
   ps.forEach((el,i)=>fold(el, i>=n));
   document.getElementById('density-n').textContent=n;
   requestAnimationFrame(relieve);
 }
 document.getElementById('density').oninput = e => setDensity(+e.target.value);
+document.getElementById('speed').onchange = e => CONFIG.clock.speed = +e.target.value;
+CONFIG.clock.speed = 10;
 
 /* build the cloister from CONFIG.courtyard — grid template and slot
    elements both, so a new edge is one config line and nothing else. */
@@ -490,6 +513,37 @@ document.querySelectorAll('[data-lay]').forEach(b=>b.onclick=()=>setLayout(b.dat
    ponytail: measured on demand, not observed — swap in ResizeObserver if
    content starts changing size without a layout call. */
 const PRESSURE={panelH:.78, edgeW:.34};
+
+/* ── pressure, one primitive ────────────────────────────────────
+   every scale is the same two functions: how far a demand exceeds its
+   container, and how much of that a bounded container can give back. */
+const strain = (demand, capacity) => Math.max(0, demand - capacity);
+const give   = (current, need, cap) => Math.min(current + need, cap);
+
+/* Two quantities, not one. Importance is not urgency — importance amplifies
+   urgency, it does not manufacture it. Collapsing them made a merely-critical
+   window shout while perfectly fresh.
+
+   urgency  = crit x overdue     0 when fresh. drives the release ladder.
+   salience = crit + urgency     always > 0. drives deck ranking.  */
+let CLOCK=0;                                   // seconds, compressible
+function urgency(el){
+  const crit=+el.dataset.crit||0, tol=+el.dataset.tol||0;
+  if(!tol) return 0;                           // nothing that cannot go stale is urgent
+  /* resolved is not the same as refreshed. a solved transform is done; it does
+     not restart its staleness clock and creep back up the ladder. */
+  if(el.dataset.resolved==='1') return 0;
+  const overdue=Math.min((CLOCK-(+el.dataset.since||0))/tol, CONFIG.release.overdueCap);
+  return +(crit*Math.max(0,overdue)).toFixed(3);
+}
+function salience(el){ return +((+el.dataset.crit||0)+urgency(el)).toFixed(3); }
+const pressure = salience;                     // what the gauges display
+function channelFor(p){
+  const L=CONFIG.release.ladder;
+  const capIdx=L.findIndex(r=>r.channel===CONFIG.release.maxChannel);
+  let i=0; while(i+1<L.length && p>=L[i+1].at) i++;
+  return Math.min(i, capIdx<0?L.length-1:capIdx);
+}
 /* a container query can reflow content in response to the width we just set,
    so one measurement is stale by definition. settle over a couple of passes. */
 function relieve(passes=2){
@@ -527,6 +581,43 @@ function buildCourtyardSizes(){
   host.style.gridTemplateColumns=`${size(at('left'))} 1fr ${size(at('right'))}`;
   host.style.gridTemplateRows=`${size(at('top'))} 1fr ${size(at('bottom'))}`;
   paintDesigner();
+}
+
+/* ── release: what reaches the human, through which channel ─────
+   release at the lowest channel that will still be seen in time. a window
+   only ever climbs — one release per rung, so nothing spams. */
+const RELEASES=[];
+function releasePass(){
+  let deckDirty=false;
+  allPanels().forEach(el=>{
+    if(!+el.dataset.tol) return;
+    const p=urgency(el), rung=channelFor(p), was=+el.dataset.rung;   // urgency, not importance
+    if(rung<=was) return;                       // only escalate
+    el.dataset.rung=rung;
+    const L=CONFIG.release.ladder[rung];
+    RELEASES.unshift({t:CLOCK, id:el.id, title:el.querySelector('b').textContent,
+                      p:p.toFixed(2), channel:L.channel, cost:L.cost});
+    switch(L.channel){
+      case 'chip':   el.querySelector('.st').className='st stale'; break;
+      case 'open':   deckDirty=true; break;                 // earns an open slot
+      case 'offer':  el.classList.add('calling'); break;    // curator asks
+      case 'seize':  attend(Object.keys(STEPS).find(k=>(STEPS[k]||[]).includes(el.id))||'bench');
+                     break;
+      case 'notify': el.classList.add('calling'); break;    // would leave the app
+      case 'email':  break;
+    }
+  });
+  if(deckDirty) setDensity(+document.getElementById('density').value);
+  if(RELEASES.length) paintReleases();
+}
+function paintReleases(){
+  const b=document.getElementById('rel-body'); if(!b) return;
+  b.innerHTML = RELEASES.length ? `<div class="list">${RELEASES.slice(0,14).map(r=>
+    `<div title="${r.cost}"><span class="mono" style="color:var(--muted)">t+${r.t|0}s</span>
+      <b style="font-weight:600">${r.channel}</b>
+      <span style="color:var(--muted)">${r.title.trim()}</span>
+      <span class="mono" style="float:right;color:var(--accent)">${r.p}</span></div>`).join('')}</div>`
+    : `<div class="hollow">nothing released yet</div>`;
 }
 
 /* ── the courtyard designer ─────────────────────────────────────
@@ -614,12 +705,12 @@ const rows=['e01  1420, 880','e02  1610, 905','e03  1755, 1120','e04  2010, 860'
 const sl=(l,v,u)=>`<div class="row"><span>${l}</span><input type="range" value="${v}"><span class="mono">${v}${u}</span></div>`;
 
 panel({id:'p-embryos',title:'EMBRYOS · <span id="v-found">4</span>',x:80,y:80,w:290,h:230,state:'live',
-  peek:()=>`${S.found} · e02 sel`, freq:.2, crit:.7,
+  peek:()=>`${S.found} · e02 sel`, freq:.2, crit:.7, tol:0,
   body:`<div class="list">${rows}</div><div class="row" style="margin-top:.4rem">
     <button class="btn">remap region</button><span class="mono">µm</span></div>`});
 
 panel({id:'p-view',title:'BOTTOM CAMERA',x:410,y:80,w:470,h:380,state:'live',flush:true,
-  peek:()=>`${S.fps.toFixed(0)} fps · ${S.found} found`, freq:30, crit:.9,
+  peek:()=>`${S.fps.toFixed(0)} fps · ${S.found} found`, freq:30, crit:.9, tol:0,
   body:`<div class="inner" id="in-bottom"><canvas id="cv-bottom"></canvas>
     <div class="izoom"><button data-iz="-">−</button><span id="iz-l">1.0×</span><button data-iz="+">+</button></div></div>`});
 
@@ -636,12 +727,22 @@ panel({id:'p-stage',title:'STAGE',x:930,y:380,w:300,h:160,state:'live',
     <div class="row"><span>z</span><span class="mono" id="v-z">-12.8 µm</span></div>`});
 
 panel({id:'p-cal',title:'CALIBRATION · two-point',x:1290,y:80,w:400,h:205,state:'stale',
-  peek:()=>'stale · 1 of 2', freq:0, crit:.95,
+  peek:el=>`${S.calDone?'solved':'stale · 1 of 2'} · p${pressure(el).toFixed(1)}`, freq:0, crit:.95, tol:25,
   body:`<div class="row"><span>source</span><span class="mono">laser 488</span></div>
     <div class="row"><span>point 1</span><span class="mono">captured</span></div>
     <div class="row"><span>point 2</span><span class="mono">—</span></div>
     <div class="row" style="margin-top:.5rem"><button class="btn">capture point 2</button>
-    <button class="btn">solve transform</button></div>`});
+    <button class="btn" id="solve">solve transform</button></div>`});
+document.getElementById('solve').onclick=()=>{
+  const cal=document.getElementById('p-cal');
+  S.calDone=true; cal.dataset.resolved='1'; cal.dataset.since=CLOCK; cal.dataset.rung=0;
+  cal.querySelector('.st').className='st live';
+  cal.querySelector('.st').textContent='live';
+  cal.classList.remove('calling');
+  RELEASES.unshift({t:CLOCK|0, id:'p-cal', title:'CALIBRATION',
+    p:'0.00', channel:'relieved', cost:'operator solved it'});
+  paintReleases(); setDensity(+document.getElementById('density').value);
+};
 
 panel({id:'p-acq',title:'ACQUISITION',x:1750,y:80,w:300,h:205,state:'ready',
   peek:()=>'idle · 120s × 60', freq:0, crit:.5,
@@ -659,6 +760,11 @@ panel({id:'p-curator',title:'CURATOR',x:1290,y:335,w:400,h:205,state:'live',
       <button class="btn">dismiss</button>
       <span class="mono" style="color:#4d5867">rule 5: keys 0–5 do this without me</span></div>`});
 
+panel({id:'p-releases',title:'RELEASES',x:1750,y:600,w:340,h:230,state:'live',
+  peek:()=>RELEASES.length?`${RELEASES.length} · ${RELEASES[0].channel}`:'none', freq:1, crit:.4,
+  body:`<div id="rel-body"></div>`});
+paintReleases();
+
 panel({id:'p-design',title:'COURTYARD',x:80,y:355,w:290,h:230,state:'ready',
   peek:()=>Object.keys(CONFIG.courtyard.edges).join(' · ')||'open', freq:0, crit:.3,
   body:`<div id="design-body"></div>`});
@@ -675,7 +781,7 @@ document.getElementById('call').onclick=()=>{
 
 /* an empty capability still occupies its frame and says what it is */
 panel({id:'p-events',title:'EVENTS',x:1750,y:335,w:300,h:205,state:'ready',
-  peek:()=>S.events?`${S.events} · ${S.since.toFixed(0)}s ago`:'none', freq:.1, crit:.2,
+  peek:()=>S.events?`${S.events} · ${S.since.toFixed(0)}s ago`:'none', freq:.1, crit:.2, tol:0,
   body:`<div id="ev-body"><div class="hollow">no events this session</div></div>`});
 
 /* ── rule 3, demonstrated: the frame owns its own zoom ────────── */
@@ -722,7 +828,7 @@ if(location.search.includes('selftest')){
   setLayout('survey');                                  // bbox is a canvas fact
   const [x1,y1,x2,y2]=bbox(onCanvas());
   console.assert(x1===80&&y1===80&&x2>=2050&&y2>=540,'bbox wrong',x1,y1,x2,y2);
-  console.assert(allPanels().length===9,'a capability lost its frame',allPanels().length);
+  console.assert(allPanels().length===10,'a capability lost its frame',allPanels().length);
   allPanels().forEach(p=>console.assert(getComputedStyle(p).overflow==='hidden',
     'rule 3 violated: '+p.id+' does not clip'));
   home(false);                                          // landing is deterministic

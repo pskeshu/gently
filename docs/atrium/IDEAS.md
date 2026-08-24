@@ -93,6 +93,24 @@ pressure = criticality × (elapsed / tolerance)
 A stale calibration presses harder the longer it is stale. The release ladder is
 then a threshold on one number, not an authored policy table.
 
+### Three quantities, not one
+
+Attempting to run everything off a single number failed twice, and the
+corrections are the model:
+
+- **urgency = crit x overdue.** Zero when fresh. Drives the release ladder.
+  Importance *amplifies* urgency; it does not manufacture it. Collapsing the
+  two made a merely-critical window shout while perfectly fresh.
+- **salience = crit + urgency.** Always positive. Drives deck ranking, so an
+  important window still earns a slot before anything is overdue, and an
+  overdue one climbs.
+- **strain / give.** The spatial pair, for content against its frame. Same
+  *shape* as urgency, different *quantity* — do not force one scalar to do both.
+
+And one more distinction the clock exposed: **resolved is not refreshed.** A
+solved transform is done. It must not restart its staleness clock and creep
+back up the ladder a tolerance later.
+
 ### The release ladder — escalating cost to the human
 
 | # | Channel | Costs |
@@ -124,11 +142,6 @@ than builds · full keyboard operability with no agent.
 
 ## Not built yet
 
-- Pressure unified into one function at all three scales (currently `relieve()`,
-  `setDensity()` and `index()` are three ad-hoc mechanisms — unifying **removes** code)
-- Time dimension / latency tolerance
-- The release ladder and a visible release log (what was released where, and why —
-  this is how you defend the policy when it wakes someone up)
 - Semantic zoom that *reflows content* at focus rather than only scaling it
 
 ## Known gaps in the prototype
@@ -156,6 +169,14 @@ than builds · full keyboard operability with no agent.
   *Attention implies the open view.*
 - Pressure measured before container queries reflowed the content. *One
   measurement is stale by definition; settle over two passes.*
+- One number for importance and urgency → a fresh but critical window flipped
+  its own chip to `STALE` a second after being solved. *Over-unification is a
+  bug too. Importance amplifies urgency, it does not create it.*
+- Relief reset the staleness clock rather than marking the fact done, so a
+  solved calibration went stale again one tolerance later. *Resolved is not
+  refreshed.*
+- `peek()` called `getElementById` on the panel still being constructed.
+  *Pass the element in; a window cannot look itself up before it exists.*
 
 ## Open questions
 
