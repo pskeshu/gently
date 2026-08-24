@@ -8,10 +8,37 @@ body.atrium-on #tab-content > *:not(#atr-viewport):not(#atr-pinned) { display: n
 /* R2: adopted panels are always live — the tab shell's hiding no longer applies */
 body.atrium-on .atr-body > .tab-content { display: block !important; }
 
+/* ── theme ───────────────────────────────────────────────────────────
+   The Atrium was first written with dark literals behind var(…, fallback),
+   so light mode was never actually designed: the bench resolved to #f8fafc
+   against #ffffff windows — seven units of lightness apart, so nothing looked
+   like it was sitting ON anything — and the shadow was rgba(0,0,0,.6), which
+   on white is a smudge rather than depth.
+
+   A bench must read as a surface. That means it is always DARKER than the
+   windows resting on it, in either theme, and the shadow is tinted with the
+   surface colour rather than pure black. */
+:root {
+    --atr-bench:       #0b0f15;   /* darker than --bg-card, so windows lift off it */
+    --atr-grid:        #1b2430;
+    --atr-shadow:      0 6px 20px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .4);
+    --atr-shadow-lift: 0 14px 40px rgba(0, 0, 0, .6), 0 2px 4px rgba(0, 0, 0, .45);
+    --atr-win-border:  #2b3440;
+    --atr-chrome-bg:   rgba(22, 27, 34, .92);
+}
+[data-theme="light"] {
+    --atr-bench:       #dde3ec;   /* a real surface, not almost-white */
+    --atr-grid:        #c3ccda;
+    --atr-shadow:      0 4px 14px rgba(15, 23, 42, .10), 0 1px 2px rgba(15, 23, 42, .06);
+    --atr-shadow-lift: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 4px rgba(15, 23, 42, .08);
+    --atr-win-border:  #cbd5e1;
+    --atr-chrome-bg:   rgba(255, 255, 255, .92);
+}
+
 /* ── the bench ───────────────────────────────────────────────────────── */
 #atr-viewport {
     position: fixed; inset: 0; z-index: 40; cursor: grab;
-    overscroll-behavior: none; background: var(--bg, #0d1117);
+    overscroll-behavior: none; background: var(--atr-bench);
     overflow: hidden;
 }
 /* R3 one level up: a frame half off the viewport is as half-rendered as content
@@ -32,10 +59,10 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
 }
 #atr-viewport.panning { cursor: grabbing; }
 #atr-masked::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .65;
     background-image:
-        linear-gradient(var(--border, #2b3440) 1px, transparent 1px),
-        linear-gradient(90deg, var(--border, #2b3440) 1px, transparent 1px);
+        linear-gradient(var(--atr-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--atr-grid) 1px, transparent 1px);
     background-size: var(--atr-gs, 80px) var(--atr-gs, 80px);
     background-position: var(--atr-gx, 0) var(--atr-gy, 0);
 }
@@ -44,14 +71,17 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
 /* ── windows: R3 says every one is a bounded frame ───────────────────── */
 .atr-win {
     position: absolute; display: flex; flex-direction: column;
-    background: var(--bg-card, #161b22); border: 1px solid var(--border, #2b3440);
+    background: var(--bg-card, #161b22); border: 1px solid var(--atr-win-border);
     border-radius: 10px; overflow: hidden;              /* the boundary */
-    box-shadow: 0 8px 30px #0009;
+    box-shadow: var(--atr-shadow);
     transition: opacity .32s ease, filter .32s ease, border-color .32s ease,
                 height .26s cubic-bezier(.3, .9, .3, 1);
 }
 body.atr-focused .atr-win { opacity: .18; filter: saturate(.2); }
-body.atr-focused .atr-win.atr-attend { opacity: 1; filter: none; border-color: var(--accent, #4ea3ff); }
+body.atr-focused .atr-win.atr-attend {
+    opacity: 1; filter: none; border-color: var(--accent, #4ea3ff);
+    box-shadow: var(--atr-shadow-lift);                 /* attention lifts it */
+}
 body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned never recedes */
 
 .atr-head {
@@ -88,6 +118,7 @@ body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned ne
     pointer-events: auto; position: relative;
     left: auto !important; top: auto !important;
     width: var(--atr-pw, auto) !important; flex: 0 0 auto;
+    box-shadow: var(--atr-shadow);
 }
 .atr-slot .atr-head { cursor: default; }
 
@@ -102,9 +133,9 @@ body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned ne
 #atr-br { grid-area: br; align-self: end; justify-self: end; display: flex; gap: 6px; align-items: center; }
 #atr-hint, #atr-br > * {
     font-size: .68rem; color: var(--text-muted, #7d8998);
-    background: color-mix(in srgb, var(--bg-card, #161b22) 92%, transparent);
-    border: 1px solid var(--border, #2b3440); border-radius: 6px; padding: .3rem .5rem;
-    backdrop-filter: blur(6px);
+    background: var(--atr-chrome-bg);
+    border: 1px solid var(--atr-win-border); border-radius: 6px; padding: .3rem .5rem;
+    backdrop-filter: blur(8px); box-shadow: var(--atr-shadow);
 }
 #atr-br label { display: flex; gap: .4rem; align-items: center; }
 #atr-br input[type=range] { width: 74px; accent-color: var(--accent, #4ea3ff); }
@@ -112,9 +143,9 @@ body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned ne
 #atr-chips { display: flex; gap: 4px; flex-wrap: wrap; max-width: 46vw; }
 .atr-btn {
     font-size: .68rem; padding: .26rem .5rem; border-radius: 6px; cursor: pointer;
-    color: var(--text, #d7e0ea); border: 1px solid var(--border, #2b3440);
-    background: color-mix(in srgb, var(--bg-card, #161b22) 92%, transparent);
-    backdrop-filter: blur(6px); white-space: nowrap;
+    color: var(--text, #d7e0ea); border: 1px solid var(--atr-win-border);
+    background: var(--atr-chrome-bg);
+    backdrop-filter: blur(8px); white-space: nowrap; box-shadow: var(--atr-shadow);
 }
 .atr-btn:hover { border-color: var(--accent, #4ea3ff); }
 .atr-btn:disabled { opacity: .35; cursor: default; }
@@ -156,3 +187,22 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
     50% { box-shadow: 0 8px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--warn, #d29922) 55%, transparent); }
 }
 #atr-releases { color: var(--warn, #d29922); cursor: help; }
+
+/* The chrome is screen-fixed and the bench pans beneath it, so a window WILL
+   slide under the chip bar. It cannot be prevented by layout — only made
+   legible. Give the chrome a real surface and a hairline so it reads as an
+   overlay sitting above the bench rather than as text tangled with a window
+   header. */
+#atr-tl, #atr-br {
+    background: var(--atr-chrome-bg);
+    border: 1px solid var(--atr-win-border);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: var(--atr-shadow-lift);
+    backdrop-filter: blur(10px);
+}
+/* the children already carry their own chip styling; drop the doubled frame */
+#atr-tl > #atr-hint, #atr-br > * {
+    background: none; border: 0; box-shadow: none; backdrop-filter: none; padding: .1rem .3rem;
+}
+#atr-chips .atr-btn { box-shadow: none; }
