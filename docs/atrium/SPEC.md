@@ -86,9 +86,10 @@ they just made.
 non-empty gauge. A wheel over a frame's inner surface zooms the sample and stops
 propagating; a wheel over the bench zooms the bench.
 
-*Known violation:* frames are still sliced mid-title by the viewport edge. A
-frame half off the viewport is as half-rendered as content escaping its frame.
-This rule is not yet fully honoured — see MIGRATION.md.
+*One level up:* a frame half off the viewport is as half-rendered as content
+escaping its frame. Both surfaces therefore fade at their boundary — the mask
+sits on an inner layer, not the viewport itself, or the viewport goes
+see-through at the edges and whatever is behind it ghosts in.
 
 ## R4 — Windows have two renderings
 
