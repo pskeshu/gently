@@ -36,10 +36,15 @@ const OperateManager = (function () {
     let _embryos = [];
     // A CURSOR, not a step. It parameterises request bodies and readouts. It
     // must never appear in a `disabled` or visibility expression.
+    // Mirrors SharedState 'selectedEmbryoId' (see wire()): this file both
+    // publishes it and follows it, so a selection made in another surface lands
+    // here too instead of the two drifting apart.
     let _selected = null;
 
     // ── device state ────────────────────────────────────────────────────────
-    let _xy = null;                 // {x, y} from DEVICE_STATE_UPDATE
+    // {x, y}. Fed from SharedState 'stageXY' (see wire()); DEVICE_STATE_UPDATE
+    // publishes into the store rather than writing here directly.
+    let _xy = null;
     // Last bottom-cam frame. Kept because the marking canvas needs its geometry
     // and capture position; the SPIM frame is only ever displayed, so it isn't.
     let _lastBottom = null;
@@ -811,6 +816,11 @@ const OperateManager = (function () {
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
     function selectEmbryo(id) {
         _selected = id;
+        // Publish AFTER the local assignment: the subscription in wire() sees
+        // _selected already equal and no-ops, so our own click renders exactly
+        // once, as before. The set() is what makes the other copies of this
+        // cursor follow.
+        SharedState.set('selectedEmbryoId', id);
         renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
     }
 
@@ -855,7 +865,10 @@ const OperateManager = (function () {
             // EMBRYOS_UPDATE will reconcile every view; prune optimistically so
             // the row disappears immediately even before the event lands.
             _embryos = _embryos.filter(e => e.id !== id);
-            if (_selected === id) _selected = _embryos.length ? _embryos[0].id : null;
+            if (_selected === id) {
+                _selected = _embryos.length ? _embryos[0].id : null;
+                SharedState.set('selectedEmbryoId', _selected);
+            }
             renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
             toast(`Delete failed (${e.status || e.message})`);
@@ -1159,6 +1172,7 @@ const OperateManager = (function () {
         // ("No embryo selected") right after registering. The operator can still
         // switch by clicking a registered embryo (bottom) or a roster row.
         if (!_selected && _embryos.length) _selected = _embryos[0].id;
+        SharedState.set('selectedEmbryoId', _selected);
         // Render the shared rail even when the Operate view isn't the active tab,
         // so switching to it (or refreshing) shows the list immediately rather
         // than waiting for the next mutation event.
@@ -1279,6 +1293,20 @@ const OperateManager = (function () {
             new ResizeObserver(() => { if (_active && _pane === 'bottom') drawMarkers(); }).observe(camBox);
         }
 
+        // ── shared state: follow the values this file used to keep privately ──
+        // Both are sticky and synchronous, so a set() from our own handler has
+        // applied the local before the handler's next line runs. Assignment
+        // only: the renders stay where they already were, so nothing here can
+        // change what is drawn today. What it buys is fan-IN — when another
+        // surface moves the stage or the cursor, these locals follow instead of
+        // going stale.
+        SharedState.on('stageXY', v => { if (v) _xy = v; });
+        SharedState.on('selectedEmbryoId', id => {
+            if (id === _selected) return;      // our own publish, already applied
+            _selected = id;
+            renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
+        });
+
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
@@ -1286,7 +1314,9 @@ const OperateManager = (function () {
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
                 const pos = p && p.positions;
                 if (!pos) return;
-                if (Array.isArray(pos.xy_stage)) _xy = { x: pos.xy_stage[0], y: pos.xy_stage[1] };
+                if (Array.isArray(pos.xy_stage)) {
+                    SharedState.set('stageXY', { x: pos.xy_stage[0], y: pos.xy_stage[1] });
+                }
                 if (!_active) return;
                 for (const v of Object.values(pos)) {
                     if (!v || typeof v !== 'object' || v.Position == null) continue;

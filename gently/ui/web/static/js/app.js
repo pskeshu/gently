@@ -123,7 +123,16 @@ function copySessionId() {
 
     if (!sessionLink || !sessionLink.textContent) return;
 
-    const sessionId = sessionLink.textContent;
+    // The header link (written by embryos.js) is the only place app.js learns a
+    // session id — the DOM-as-IPC read MIGRATION.md flagged. Publish it here,
+    // the one moment app.js legitimately has it, then consume the shared value
+    // rather than the element. Publish-before-read on purpose: a cached id read
+    // first could be older than the id the user is looking at, and copy must
+    // yield what the header shows. set() is deep-equal guarded, so a repeat
+    // click notifies nobody, and once another writer publishes on session
+    // change this line is a no-op and the DOM read can go.
+    SharedState.set('sessionId', sessionLink.textContent);
+    const sessionId = SharedState.get('sessionId');
 
     function onCopied() {
         copyBtn.classList.add('copied');

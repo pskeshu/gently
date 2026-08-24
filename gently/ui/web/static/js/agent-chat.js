@@ -46,6 +46,13 @@ const AgentChat = (() => {
     let pendingSlot = null;       // sticky slot for ASK approval proposals
     let acComplete = null;        // the autocomplete dropdown element
 
+    // Publish the two values other files consume (AgentChat.hasControl(), the
+    // busy state) into SharedState. Additive mirror — the locals above stay the
+    // source of truth for this file; the store is how the Atrium's always-live
+    // windows learn about a change. Seed it with the optimistic default so a
+    // sticky subscriber replays what AgentChat.hasControl() would answer.
+    SharedState.set('hasControl', hasControl);
+
     // ── Safe rendering ────────────────────────────────────────
     function escapeHtml(s) {
         const d = document.createElement('div');
@@ -454,6 +461,7 @@ const AgentChat = (() => {
 
             case 'control_status':
                 hasControl = !!msg.you_have_control;
+                SharedState.set('hasControl', hasControl);
                 holderLabel = msg.holder_label || null;
                 renderControl();
                 // The main-stage ask renderer re-renders read-only on control loss.
@@ -947,6 +955,10 @@ const AgentChat = (() => {
 
     function setBusy(busy, source) {
         agentBusy = !!busy;
+        // Publish before the rest of the body: drainQueue() below can re-enter
+        // setBusy(true) synchronously, and a trailing publish would then write
+        // the outer `false` last and leave the store contradicting agentBusy.
+        SharedState.set('agentBusy', agentBusy);
         busySource = agentBusy ? (source || 'user') : null;
         if (!agentBusy) askPending = false;  // turn ended — reset ask state too
         renderComposerButton();  // morph send <-> stop

@@ -36,7 +36,12 @@ const MarkingManager = {
     defaultRole: 'test',
 
     // Coordinate / overlay state
-    stageXUm: 0,             // current stage position (um)
+    // Capture-time stage position of the marking image, NOT the live stage.
+    // The image is a still; its centre is this position by construction, and
+    // the server converts markers with the same `initial_stage_position`.
+    // Do not subscribe these to SharedState 'stageXY' — a live value would
+    // slide the coverslip overlay off a static image.
+    stageXUm: 0,
     stageYUm: 0,
     umPerPixel: 0.65,        // effective um per pixel on sample
     coverslip: null,         // {center_um: [x,y], size_mm: [w,h]} from /api/devices/coverslip

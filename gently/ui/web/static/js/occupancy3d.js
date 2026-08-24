@@ -54,7 +54,19 @@ const Occupancy3DManager = (function () {
     // Live data caches
     let _geom = null;                 // last SCAN_GEOMETRY_UPDATE.data
     let _firmwareBox = null;          // {x:[min,max], y:[min,max]} µm
+    // stageXY is shared (status-store.js): _stage is a local mirror kept in sync
+    // by the subscription below, and every write goes through _setStage so the
+    // other windows see the same position. Sticky replay means a late mount
+    // cannot miss it.
     let _stage = { x: null, y: null };
+    SharedState.on('stageXY', (v) => { if (v) _stage = { x: v.x, y: v.y }; });
+    // Partial update: DEVICE_STATE_UPDATE may carry X without Y.
+    function _setStage(x, y) {
+        SharedState.set('stageXY', {
+            x: x != null ? x : _stage.x,
+            y: y != null ? y : _stage.y,
+        });
+    }
     let _piezoZ = null;               // live axial position (µm)
     let _galvo = { a: null, b: null };
     let _embryos = [];                // [{x,y,role,id}]
@@ -328,8 +340,7 @@ const Occupancy3DManager = (function () {
         for (const name of Object.keys(pos)) {
             const e = pos[name] || {};
             if (e.kind === 'xy_stage') {
-                if (e.X != null) _stage.x = e.X;
-                if (e.Y != null) _stage.y = e.Y;
+                _setStage(e.X, e.Y);
             } else if (e.kind === 'piezo') {
                 if (e.Position != null) _piezoZ = e.Position;
             } else if (e.kind === 'galvo') {
@@ -348,8 +359,7 @@ const Occupancy3DManager = (function () {
         if (!payload) return;
         _geom = payload;
         if (payload.stage_position_um) {
-            if (payload.stage_position_um.x != null) _stage.x = payload.stage_position_um.x;
-            if (payload.stage_position_um.y != null) _stage.y = payload.stage_position_um.y;
+            _setStage(payload.stage_position_um.x, payload.stage_position_um.y);
         }
         _rebuildSceneObjects();
         _renderReadouts();

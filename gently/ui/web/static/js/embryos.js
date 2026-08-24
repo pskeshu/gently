@@ -156,7 +156,27 @@ const EmbryosManager = {
         this._subscribeToEvents();
     },
 
+    // Publishes an OPERATOR-CHOSEN embryo (MIGRATION.md: this id had 7 writers
+    // here and a private copy in three other files). The local property stays —
+    // ~20 readers below use it directly.
+    //
+    // Deliberately not used by the derived/clearing writers (loadState,
+    // reconcileWithServerState, clearAllState, handleAcquisitionStarted): those
+    // publish a null or an auto-picked first embryo, and operate.js follows this
+    // key, so they would blank or hijack its acquisition target.
+    //
+    // Deliberately no subscription either: operate.js re-publishes
+    // ``_embryos[0].id`` on every EMBRYOS_UPDATE even when its tab is hidden,
+    // so following this key would move the reasoning panel off the embryo the
+    // operator is reading. Fan-IN needs a selection event that means "the
+    // operator chose this", which this key does not yet carry.
+    _setSelectedEmbryo(id) {
+        this.selectedEmbryoId = id;
+        SharedState.set('selectedEmbryoId', id);
+    },
+
     _subscribeToEvents() {
+        // No SharedState.on('selectedEmbryoId') here — see _setSelectedEmbryo.
         ClientEventBus.on('ACQUISITION_STARTED', (data) => this.handleAcquisitionStarted(data));
         ClientEventBus.on('ACQUISITION_COMPLETED', (data) => this.handleAcquisitionCompleted(data));
         ClientEventBus.on('VOLUME_ACQUIRED', (data) => this.handleVolumeAcquired(data));
@@ -401,7 +421,7 @@ const EmbryosManager = {
         container.querySelectorAll('.board-row').forEach(row => {
             row.addEventListener('click', () => {
                 const eid = row.dataset.embryoId;
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 // Toggle expansion
                 const detail = document.getElementById('board-detail');
                 const wasOpen = row.classList.contains('expanded');
@@ -699,7 +719,7 @@ const EmbryosManager = {
             cell.addEventListener('click', () => {
                 const eid = cell.dataset.embryoId;
                 const tp = parseInt(cell.dataset.timepoint);
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 // Find the matching item
                 const reasoning = this.detectionReasoning[eid] || [];
                 const item = reasoning.find(r => r.timepoint === tp);
@@ -805,7 +825,7 @@ const EmbryosManager = {
                 e.stopPropagation();
                 const eid = pt.dataset.embryoId;
                 const tp = parseInt(pt.dataset.timepoint);
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 const reasoning = this.detectionReasoning[eid] || [];
                 const item = reasoning.find(r => r.timepoint === tp);
                 if (item) {
@@ -1007,8 +1027,11 @@ const EmbryosManager = {
                 }
             }
 
-            // Restore session ID (will be validated against server on connect)
-            this.currentSessionId = data.sessionId || null;
+            // Restore session ID (will be validated against server on connect).
+            // A value already published wins over ours; otherwise we are the
+            // one who discovered it, so publish it.
+            this.currentSessionId = SharedState.get('sessionId') || data.sessionId || null;
+            SharedState.set('sessionId', this.currentSessionId);
 
             this.state.status = data.status || 'IDLE';
             this.state.startedAt = data.startedAt ? new Date(data.startedAt) : null;
@@ -1077,8 +1100,9 @@ const EmbryosManager = {
             console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);
         }
 
-        // Update session ID
+        // Update session ID (the server value is the authoritative discovery)
         this.currentSessionId = serverSessionId;
+        SharedState.set('sessionId', serverSessionId || null);
         this.updateSessionIdLink();
 
         // Server state is authoritative - replace everything
@@ -1782,7 +1806,7 @@ const EmbryosManager = {
             this.detailPanelVisible = false;
         }
 
-        this.selectedEmbryoId = embryoId;
+        this._setSelectedEmbryo(embryoId);
 
         // Update card selection styles
         document.querySelectorAll('.embryo-rail-item').forEach(card => {
