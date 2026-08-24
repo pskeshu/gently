@@ -347,7 +347,36 @@ Each phase is independently shippable and revertable. **CI runs no JavaScript** 
 GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser
 ```
 
-### Phase 1 — Delete dead code (no behaviour change, ~1500 lines)
+### Phase 1 — Delete dead code — ✅ DONE (2026-08-24, commit fe6ec80)
+
+Removed 1,784 lines: embryos.js 4557→3376, devices.js 2554→2483,
+gallery.js 1803→1523, plus campaigns.js, viewer.js and 200 lines of orphaned
+CSS. Verified against a running instance (all nine tabs, three embryo views,
+calibration gallery, gallery tab → zero JS errors).
+
+**Two corrections to this document, found while executing it:**
+
+1. **viewer.js was overclaimed.** This map called ~190 of 220 lines dead.
+   Reachability says **7** (`showInModal`). `loadZSlice`,
+   `updateZSliderDisplay` and `show3DVolume` are called from other files —
+   reachable but non-functional, because their DOM ids exist in no template.
+   That is a broken feature (phase 2), not dead code. Only `showInModal` went.
+
+2. **`detectionAgreements` was not listed** and needed removing. It sat
+   between two dead methods; all its readers were being deleted, leaving
+   `loadAgreements` restoring localStorage state nothing consumes. Removed too.
+
+**Method note for whoever runs the next phase:** a naive "top-level method"
+parser attributes object-literal *properties* to the preceding method's range.
+That made `adjustZSlider` and `showHelp` (bound in app.js's keyboard shortcut
+map) and four `zoom-pan.js` class methods (reached via the constructor) look
+unreachable. They are not. Always hand-verify before deleting.
+
+Also spotted, not fixed: `app.js:428` binds keyboard `3` to
+`switchTab('main')`, and there is no `main` tab in the TABS enum. Phase 2.
+
+<details><summary>Original phase 1 plan</summary>
+
 
 Cheapest possible high-value work. Nothing here is an Atrium change; it is the difference between migrating 55 windows and inventing 12 phantom ones.
 
@@ -361,6 +390,7 @@ Cheapest possible high-value work. Nothing here is an Atrium change; it is the d
 - Dead fields: `app.js:546,603`; `campaigns.js:66,194,1802`; `gallery.js:970`; `experiment-strip.js` entirely (see phase 5).
 
 **Hand check:** load every one of the ten tabs; open a detection detail, the calibration profile, the lightbox, a 3D volume, the chat panel. Console must be clean. `git revert` is a single commit.
+</details>
 
 ### Phase 2 — Fix the live bugs the audit surfaced (no Atrium dependency)
 
