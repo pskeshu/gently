@@ -211,10 +211,3 @@ function show3DVolume(uid) {
         switchTab('main');
     }
 }
-
-function showInModal(uid, source) {
-    const img = state.calibration.find(i => i.uid === uid);
-    if (img) displayImage(img);
-    // Switch to main tab to show the image
-    switchTab('main');
-}

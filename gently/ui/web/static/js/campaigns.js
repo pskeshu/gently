@@ -63,7 +63,6 @@ const state = {
     docData: null,              // plan document data for plan view
     versions: [],               // snapshots list
     viewingSnapshotId: null,
-    allItemsFlat: {},           // id → item for quick lookup
     editingSpec: false,         // inspector imaging-spec edit mode
     _inspectorData: null,       // last item-detail payload (for re-render on edit toggle)
     _specError: '',             // inline save error in the spec editor
@@ -186,17 +185,6 @@ async function loadCampaigns() {
         const data = await res.json();
         state.allCampaigns = data.campaigns || [];
 
-        // Build flat item index across all campaigns
-        state.allItemsFlat = {};
-        function indexItems(tree) {
-            for (const item of (tree.items || [])) {
-                state.allItemsFlat[item.id] = item;
-                item._rootCampaignId = tree.campaign.id;
-            }
-            for (const child of (tree.children || [])) indexItems(child);
-        }
-        state.allCampaigns.forEach(indexItems);
-
         hideLoading();
         renderNavigator();
 
@@ -228,8 +216,6 @@ async function loadDocument(campaignId) {
         const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/document`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         state.docData = await res.json();
-        state.allItemsFlat = {};
-        buildItemIndex(state.docData.document);
     } catch (err) {
         console.error('Failed to load document:', err);
         state.docData = null;
@@ -245,15 +231,6 @@ async function loadVersions(campaignId) {
     } catch (err) {
         console.error('Failed to load versions:', err);
         state.versions = [];
-    }
-}
-
-function buildItemIndex(node) {
-    for (const item of (node.items || [])) {
-        state.allItemsFlat[item.id] = item;
-    }
-    for (const child of (node.children || [])) {
-        buildItemIndex(child);
     }
 }
 
@@ -1097,8 +1074,6 @@ async function viewVersion(versionId, isCurrent) {
             state.docData.document = normalized;
             state.docData.status = normalized.status;
             state.docData.bibliography = [];  // snapshots don't carry bibliography
-            state.allItemsFlat = {};
-            buildItemIndex(normalized);
 
             renderAll();
 
@@ -1799,7 +1774,6 @@ function renderTimelinePlanView() {
     const totalDays = Math.max(1, ...Object.values(endDay));
     const dayWidth = 36;
     const rowHeight = 32;
-    const labelWidth = 220;
     const headerHeight = 40;
     const chartWidth = totalDays * dayWidth;
 

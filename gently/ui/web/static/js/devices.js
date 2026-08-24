@@ -41,11 +41,6 @@ const DevicesManager = (function () {
     // grey=unassigned). EMBRYO_DETECTED / STATUS_CHANGED listeners stay
     // hooked as a belt-and-braces refresh path.
     let _embryos = [];
-    const _ROLE_COLOR = {
-        test: '#ff66cc',
-        calibration: '#00cccc',
-        unassigned: '#888888',
-    };
 
     // Map-side edit state. _selectedEmbryoId means "picked up": the next
     // click on empty map space drops it there (with a confirm), Delete /
@@ -564,73 +559,6 @@ const DevicesManager = (function () {
         renderEmbryos();
         updateMapMarker();
         updateScalebar();
-    }
-
-    function renderEmbryos() {
-        if (!_mapEmbryos || !_viewBox) return;
-        _mapEmbryos.innerHTML = '';
-        if (!_embryos || _embryos.length === 0) return;
-
-        const { xMin, xMax, yMin, yMax } = _viewBox;
-        const span = Math.max(xMax - xMin, yMax - yMin);
-        const r = span * 0.006;              // embryo dot radius (stage µm)
-        const ringR = r * 1.9;               // accent ring
-        const labelFontSize = span * 0.012;
-
-        for (const emb of _embryos) {
-            if (emb.x == null || emb.y == null) continue;
-            const color = _ROLE_COLOR[emb.role] || _ROLE_COLOR.test;
-            // Group so we can attach the title (tooltip).
-            const g = document.createElementNS(SVG_NS, 'g');
-            g.setAttribute('class', `devices-embryo devices-embryo-${emb.role || 'test'}`);
-
-            // Soft outer ring — makes the marker visible even on dense
-            // background grids without overpowering the position marker.
-            const ring = document.createElementNS(SVG_NS, 'circle');
-            ring.setAttribute('cx', emb.x);
-            ring.setAttribute('cy', svgY(emb.y));
-            ring.setAttribute('r', ringR);
-            ring.setAttribute('fill', 'none');
-            ring.setAttribute('stroke', color);
-            ring.setAttribute('stroke-opacity', '0.45');
-            ring.setAttribute('stroke-width', r * 0.35);
-            g.appendChild(ring);
-
-            const dot = document.createElementNS(SVG_NS, 'circle');
-            dot.setAttribute('cx', emb.x);
-            dot.setAttribute('cy', svgY(emb.y));
-            dot.setAttribute('r', r);
-            dot.setAttribute('fill', color);
-            dot.setAttribute('fill-opacity', '0.9');
-            dot.setAttribute('stroke', '#000');
-            dot.setAttribute('stroke-opacity', '0.5');
-            dot.setAttribute('stroke-width', r * 0.18);
-            g.appendChild(dot);
-
-            // Label — embryo id, small, just above the dot.
-            const label = document.createElementNS(SVG_NS, 'text');
-            label.setAttribute('x', emb.x);
-            label.setAttribute('y', svgY(emb.y + r * 2.2));
-            label.setAttribute('font-size', labelFontSize);
-            label.setAttribute('text-anchor', 'middle');
-            label.setAttribute('class', 'devices-embryo-label');
-            label.setAttribute('fill', color);
-            label.textContent = emb.user_label || emb.embryo_id || '';
-            g.appendChild(label);
-
-            const title = document.createElementNS(SVG_NS, 'title');
-            const role = emb.role || 'test';
-            const parts = [
-                `${emb.user_label || emb.embryo_id}`,
-                `role: ${role}`,
-                `(${emb.x.toFixed(1)}, ${emb.y.toFixed(1)}) µm`,
-            ];
-            if (emb.cadence_phase) parts.push(`phase: ${emb.cadence_phase}`);
-            title.textContent = parts.join('\n');
-            g.appendChild(title);
-
-            _mapEmbryos.appendChild(g);
-        }
     }
 
     async function loadEmbryos() {

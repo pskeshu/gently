@@ -6,7 +6,7 @@ function renderRecentList() {
     const list = document.getElementById('recent-list');
     if (!list) return;
 
-    const filtered = filterByEmbryo(state.snapshots);
+    const filtered = state.snapshots;
     const displayList = filtered.slice(-20).reverse();
 
     if (displayList.length === 0) {
@@ -24,7 +24,7 @@ function renderRecentList() {
 }
 
 function openSnapshotsLightbox(index) {
-    const filtered = filterByEmbryo(state.snapshots);
+    const filtered = state.snapshots;
     const displayList = filtered.slice(-20).reverse();
     Lightbox.open(displayList, index, 'snapshots');
 }
@@ -429,12 +429,7 @@ const CalibrationProfileView = {
             <div class="cal-spim-indicator" id="cal-spim-preview">
                 <span class="cal-spim-led idle" id="cal-spim-led"></span>
                 <span class="cal-spim-label">SPIM</span>
-                <button type="button" class="cal-spim-thumb-btn" id="cal-spim-thumb-btn"
-                        title="Open live SPIM popout"
-                        onclick="SpimPopout.open()">
-                    <img class="cal-spim-img cal-spim-thumb" id="cal-spim-img" alt="">
-                    <span class="cal-spim-expand-icon" aria-hidden="true">⤢</span>
-                </button>
+                <img class="cal-spim-img cal-spim-thumb" id="cal-spim-img" alt="">
                 <span class="cal-spim-placeholder" id="cal-spim-placeholder" hidden></span>
                 <span class="cal-spim-meta" id="cal-spim-meta">—</span>
             </div>
@@ -864,39 +859,6 @@ const CalibrationProfileView = {
         `;
     },
 
-    _renderSliceDetail(sliceItem) {
-        const img = sliceItem.image;
-        const m = img.metadata || {};
-        return `
-            <div class="cal-detail-card">
-                <div class="cal-detail-card-title">${img.data_type}</div>
-                <img class="cal-detail-img" src="data:image/png;base64,${img.base64_png}"
-                     alt="${img.data_type}"/>
-                <div class="cal-detail-meta">
-                    ${m.galvo != null ? `
-                        <div class="cal-meta-item">
-                            <span class="cal-meta-label">Galvo</span>
-                            <span class="cal-meta-value">${m.galvo.toFixed(3)} deg</span>
-                        </div>` : ''}
-                    ${m.piezo != null ? `
-                        <div class="cal-meta-item">
-                            <span class="cal-meta-label">Piezo</span>
-                            <span class="cal-meta-value">${m.piezo.toFixed(1)} um</span>
-                        </div>` : ''}
-                    ${m.visible != null ? `
-                        <div class="cal-meta-item">
-                            <span class="cal-meta-label">Visible</span>
-                            <span class="cal-meta-value">${m.visible ? 'Yes' : 'No'}</span>
-                        </div>` : ''}
-                    ${m.feature_score ? `
-                        <div class="cal-meta-item">
-                            <span class="cal-meta-label">Feature</span>
-                            <span class="cal-meta-value">${m.feature_score}/10</span>
-                        </div>` : ''}
-                </div>
-            </div>
-        `;
-    },
 
     _renderFallback(allImages, focusPlots, summaries) {
         // No galvo position data — show focus plots and summaries prominently
@@ -940,18 +902,6 @@ const CalibrationProfileView = {
             .sort((a, b) => a.metadata.galvo - b.metadata.galvo);
 
         if (edgeData[index]) {
-            const sliceItem = {
-                image: edgeData[index],
-                galvo: edgeData[index].metadata.galvo,
-                feature_score: edgeData[index].metadata.feature_score || edgeData[index].metadata.vision_score || 0
-            };
-
-            // Update detail panel
-            const detail = document.getElementById('cal-profile-detail');
-            if (detail) {
-                detail.innerHTML = this._renderSliceDetail(sliceItem);
-            }
-
             // Update selected state on SVG lines
             document.querySelectorAll('.cal-slice-line').forEach(l => l.classList.remove('selected'));
             line.classList.add('selected');
@@ -1353,16 +1303,6 @@ const SpimLivePreview = {
                 if (led) led.classList.add('idle');
             }
         }
-
-        // Mirror into popout if it's open — the popout lives outside the
-        // calibration panel's innerHTML reset, so we paint it independently.
-        if (typeof SpimPopout !== 'undefined') {
-            SpimPopout.paint(latest ? {
-                base64_png: latest.base64_png,
-                meta: this._formatMeta(latest),
-                embryoId,
-            } : null);
-        }
     },
 
     _formatMeta(latest) {
@@ -1393,226 +1333,6 @@ const SpimLivePreview = {
 
 document.addEventListener('DOMContentLoaded', () => SpimLivePreview.init());
 
-// ==========================================
-// SPIM live popout (floating draggable window)
-// ==========================================
-// Lazy-built floating window that mirrors SpimLivePreview at a larger
-// size. Draggable via the header bar, resizable from the bottom-right
-// corner. Position and size persist in localStorage so the window
-// re-opens where the operator last left it. Closes on Escape.
-const SpimPopout = {
-    _STORAGE_KEY: 'gently.spimPopout.v1',
-    _root: null,
-    _isOpen: false,
-
-    _ensureBuilt() {
-        if (this._root) return this._root;
-
-        const el = document.createElement('div');
-        el.className = 'cal-spim-popout';
-        el.id = 'cal-spim-popout';
-        el.hidden = true;
-        el.innerHTML = `
-            <div class="cal-spim-popout-header" id="cal-spim-popout-header">
-                <span class="cal-spim-popout-led idle" id="cal-spim-popout-led"></span>
-                <span class="cal-spim-popout-title">SPIM Live</span>
-                <span class="cal-spim-popout-embryo" id="cal-spim-popout-embryo"></span>
-                <span class="cal-spim-popout-spacer"></span>
-                <button type="button" class="cal-spim-popout-close" id="cal-spim-popout-close"
-                        title="Close (Esc)" aria-label="Close popout">×</button>
-            </div>
-            <div class="cal-spim-popout-body">
-                <img class="cal-spim-popout-img" id="cal-spim-popout-img" alt="">
-                <div class="cal-spim-popout-placeholder" id="cal-spim-popout-placeholder">
-                    Awaiting SPIM frame…
-                </div>
-            </div>
-            <div class="cal-spim-popout-footer">
-                <span class="cal-spim-popout-meta" id="cal-spim-popout-meta">—</span>
-            </div>
-        `;
-        document.body.appendChild(el);
-        this._root = el;
-
-        // Restore persisted geometry
-        const saved = this._loadGeometry();
-        if (saved) {
-            el.style.left = `${saved.left}px`;
-            el.style.top = `${saved.top}px`;
-            el.style.width = `${saved.width}px`;
-            el.style.height = `${saved.height}px`;
-        }
-
-        el.querySelector('#cal-spim-popout-close').addEventListener('click', () => this.close());
-        this._wireDrag(el);
-        this._wireResizeObserver(el);
-
-        return el;
-    },
-
-    open() {
-        const el = this._ensureBuilt();
-        if (this._isOpen) return;
-        el.hidden = false;
-        this._isOpen = true;
-
-        // Clamp into viewport in case window was resized while popout was hidden
-        this._clampIntoViewport(el);
-
-        // Paint current frame for the selected embryo
-        const selected = (typeof CalibrationManager !== 'undefined')
-            ? CalibrationManager.selectedEmbryoId : null;
-        if (selected && typeof SpimLivePreview !== 'undefined') {
-            const latest = SpimLivePreview._latestByEmbryo[selected];
-            this.paint(latest ? {
-                base64_png: latest.base64_png,
-                meta: SpimLivePreview._formatMeta(latest),
-                embryoId: selected,
-            } : null);
-        } else {
-            this.paint(null);
-        }
-
-        document.addEventListener('keydown', this._onKey);
-    },
-
-    close() {
-        if (!this._root || !this._isOpen) return;
-        this._root.hidden = true;
-        this._isOpen = false;
-        document.removeEventListener('keydown', this._onKey);
-    },
-
-    toggle() {
-        this._isOpen ? this.close() : this.open();
-    },
-
-    /** Called by SpimLivePreview whenever the current embryo's latest
-     * frame changes. Frame is {base64_png, meta, embryoId} or null. */
-    paint(frame) {
-        if (!this._root || !this._isOpen) return;
-        const img = this._root.querySelector('#cal-spim-popout-img');
-        const placeholder = this._root.querySelector('#cal-spim-popout-placeholder');
-        const meta = this._root.querySelector('#cal-spim-popout-meta');
-        const embryoEl = this._root.querySelector('#cal-spim-popout-embryo');
-        const led = this._root.querySelector('#cal-spim-popout-led');
-
-        if (frame) {
-            img.src = `data:image/png;base64,${frame.base64_png}`;
-            img.classList.add('has-frame');
-            placeholder.hidden = true;
-            meta.textContent = frame.meta || '—';
-            embryoEl.textContent = frame.embryoId || '';
-            led.classList.remove('idle');
-        } else {
-            img.removeAttribute('src');
-            img.classList.remove('has-frame');
-            placeholder.hidden = false;
-            meta.textContent = '—';
-            embryoEl.textContent = '';
-            led.classList.add('idle');
-        }
-    },
-
-    _onKey: (e) => {
-        if (e.key === 'Escape') SpimPopout.close();
-    },
-
-    _wireDrag(el) {
-        const header = el.querySelector('#cal-spim-popout-header');
-        let dragging = false;
-        let startX = 0, startY = 0, startLeft = 0, startTop = 0;
-
-        header.addEventListener('pointerdown', (e) => {
-            // Don't start drag on the close button
-            if (e.target.closest('.cal-spim-popout-close')) return;
-            dragging = true;
-            const rect = el.getBoundingClientRect();
-            startX = e.clientX;
-            startY = e.clientY;
-            startLeft = rect.left;
-            startTop = rect.top;
-            // Switch to absolute positioning if currently default
-            el.style.left = `${startLeft}px`;
-            el.style.top = `${startTop}px`;
-            el.style.right = 'auto';
-            el.style.bottom = 'auto';
-            header.setPointerCapture(e.pointerId);
-            el.classList.add('dragging');
-        });
-
-        header.addEventListener('pointermove', (e) => {
-            if (!dragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            let nextLeft = startLeft + dx;
-            let nextTop = startTop + dy;
-            // Keep at least 40px of header on-screen
-            const w = el.offsetWidth;
-            const h = el.offsetHeight;
-            nextLeft = Math.max(-(w - 80), Math.min(window.innerWidth - 80, nextLeft));
-            nextTop = Math.max(0, Math.min(window.innerHeight - 40, nextTop));
-            el.style.left = `${nextLeft}px`;
-            el.style.top = `${nextTop}px`;
-        });
-
-        const endDrag = (e) => {
-            if (!dragging) return;
-            dragging = false;
-            el.classList.remove('dragging');
-            try { header.releasePointerCapture(e.pointerId); } catch (_) {}
-            this._saveGeometry(el);
-        };
-        header.addEventListener('pointerup', endDrag);
-        header.addEventListener('pointercancel', endDrag);
-    },
-
-    _wireResizeObserver(el) {
-        if (typeof ResizeObserver === 'undefined') return;
-        let saveTimer = null;
-        const ro = new ResizeObserver(() => {
-            if (!this._isOpen) return;
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => this._saveGeometry(el), 250);
-        });
-        ro.observe(el);
-    },
-
-    _clampIntoViewport(el) {
-        const rect = el.getBoundingClientRect();
-        if (rect.left + 80 > window.innerWidth || rect.top + 40 > window.innerHeight
-            || rect.left < -(rect.width - 80) || rect.top < 0) {
-            // Recenter
-            const w = Math.min(rect.width || 520, window.innerWidth - 40);
-            const h = Math.min(rect.height || 440, window.innerHeight - 40);
-            el.style.width = `${w}px`;
-            el.style.height = `${h}px`;
-            el.style.left = `${Math.max(20, (window.innerWidth - w) / 2)}px`;
-            el.style.top = `${Math.max(20, (window.innerHeight - h) / 2)}px`;
-        }
-    },
-
-    _saveGeometry(el) {
-        const rect = el.getBoundingClientRect();
-        const data = {
-            left: Math.round(rect.left),
-            top: Math.round(rect.top),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-        };
-        try { localStorage.setItem(this._STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
-    },
-
-    _loadGeometry() {
-        try {
-            const raw = localStorage.getItem(this._STORAGE_KEY);
-            if (!raw) return null;
-            const data = JSON.parse(raw);
-            if (typeof data.left !== 'number') return null;
-            return data;
-        } catch (_) { return null; }
-    },
-};
 
 // Legacy wrappers kept for backward compatibility
 function renderCalibrationGallery() { CalibrationManager.render(); }
@@ -1625,11 +1345,6 @@ function formatMeta(meta) {
     if (meta.piezo != null) return `${meta.piezo.toFixed(1)}um`;
     if (meta.galvo != null) return `${meta.galvo.toFixed(3)}°`;
     return '';
-}
-
-function filterByEmbryo(list) {
-    if (!state.embryoFilter) return list;
-    return list.filter(img => img.metadata?.embryo_id === state.embryoFilter);
 }
 
 // ==========================================
