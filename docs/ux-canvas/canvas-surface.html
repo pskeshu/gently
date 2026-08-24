@@ -1,0 +1,738 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Gently — view surface prototype</title>
+<!--
+  THE VIEW SURFACE — five rules this prototype exists to test.
+
+  1. The surface is a map. Pan and zoom, one continuous plane.
+  2. Everything exists. Every capability has a view, always, in the same place.
+     Nothing is created or destroyed — attention travels instead.
+  3. The surface is protected. Nothing renders on it unframed, orphaned, or
+     half-complete. Content too big for its frame gets its OWN internal zoom;
+     it never bleeds onto the board. The frame is the boundary between
+     zooming the UI and zooming the sample.
+  4. A specialist agent keeps the feed current. Its only job is what is live
+     and where attention should be — not what the experiment should do.
+  5. Zero agent turns required. Every move the curator makes, the operator can
+     make by hand. The agent is an accelerant, never a dependency.
+-->
+<style>
+:root{
+  --bg:#0d1117; --grid:#1a222c; --card:#161b22; --border:#2b3440; --frame:#33415a;
+  --text:#d7e0ea; --muted:#7d8998; --accent:#4ea3ff; --warn:#ef4444;
+  --ok:#3fb950; --stale:#d29922;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+  font:13px/1.45 'Inter Tight',system-ui,sans-serif;color:var(--text)}
+
+/* ── surface ──────────────────────────────────────────────────── */
+#viewport{position:fixed;inset:0;cursor:grab;overscroll-behavior:none}
+#viewport.panning{cursor:grabbing}
+#viewport::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:var(--gs,80px) var(--gs,80px);
+  background-position:var(--gx,0) var(--gy,0)}
+#board{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+
+/* ── rule 3: every thing on the surface is a bounded frame ────── */
+.panel{position:absolute;background:var(--card);border:1px solid var(--frame);
+  border-radius:10px;display:flex;flex-direction:column;
+  overflow:hidden;                 /* the boundary. content cannot escape it. */
+  box-shadow:0 8px 28px #0008;
+  transition:opacity .35s ease,filter .35s ease,border-color .35s ease}
+
+/* rule 2: unattended panels recede — they never leave */
+body.focused .panel{opacity:.2;filter:saturate(.2)}
+body.focused .panel.attend{opacity:1;filter:none;border-color:var(--accent)}
+.panel.calling{animation:call 1.5s ease-in-out infinite}
+@keyframes call{50%{box-shadow:0 8px 28px #0008,0 0 0 3px #4ea3ff55}}
+
+.ph{display:flex;align-items:center;gap:.45rem;padding:.4rem .55rem;flex:0 0 auto;
+  background:#1b222c;border-bottom:1px solid var(--border);cursor:grab;user-select:none}
+.ph:active{cursor:grabbing}
+.ph b{font-weight:600;font-size:.75rem;letter-spacing:.02em;flex:1}
+.st{font-size:.62rem;letter-spacing:.06em;padding:.1rem .3rem;border-radius:3px;
+  border:1px solid;text-transform:uppercase}
+.st.live{color:var(--ok);border-color:#1d4b2a;background:#0f2416}
+.st.ready{color:var(--muted);border-color:var(--border);background:#1b222c}
+.st.stale{color:var(--stale);border-color:#4a3a11;background:#241c08}
+/* every window is a container: children size to the WINDOW, not the viewport.
+   the same panel renders differently at 200px in a rail and 500px on the canvas. */
+.pb{padding:.55rem;overflow:auto;flex:1;min-height:0;position:relative;
+  container-type:inline-size;container-name:win}
+@container win (max-width:210px){
+  .row{flex-direction:column;align-items:stretch;gap:.05rem;padding:.3rem 0}
+  .row span:first-child{font-size:.66rem}
+  .row input[type=range]{width:100%}
+  .row .btn{width:100%;text-align:center}
+}
+@container win (min-width:360px){
+  .row input[type=range]{width:160px}
+  .row{padding:.3rem 0}
+}
+/* folded is its own rendering: the gauge. open is the control. */
+.panel{transition:opacity .35s,filter .35s,border-color .35s,height .28s cubic-bezier(.3,.9,.3,1)}
+.panel.folded .pb{display:none}
+.panel.folded .peek{display:block}
+.peek{display:none;font-family:ui-monospace,monospace;font-size:.72rem;color:var(--accent);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}
+.fold{background:none;border:0;color:var(--muted);cursor:pointer;padding:0 .15rem;
+  font-size:.6rem;width:14px;transition:transform .2s}
+.panel.folded .fold{transform:rotate(-90deg)}
+.fold:hover{color:var(--text)}
+.idx{font-size:.6rem;color:#4d5867;font-variant-numeric:tabular-nums}
+.pb.flush{padding:0}
+
+/* rule 3: content that cannot fit zooms INSIDE its own frame */
+.inner{position:absolute;inset:0;overflow:hidden;background:#05080c}
+.inner canvas{position:absolute;top:50%;left:50%;transform-origin:50% 50%;
+  transition:transform .18s ease;image-rendering:pixelated}
+.izoom{position:absolute;right:6px;bottom:6px;display:flex;gap:3px;z-index:2}
+.izoom button{width:22px;height:22px;border-radius:4px;border:1px solid var(--border);
+  background:#161b22dd;color:var(--text);cursor:pointer;font-size:.72rem;line-height:1;padding:0}
+.izoom span{align-self:center;font-size:.62rem;color:var(--muted);
+  background:#161b22dd;padding:.15rem .3rem;border-radius:4px;font-variant-numeric:tabular-nums}
+
+/* rule 3: never blank, never partial — an empty frame says so */
+/* ── courtyard schematic: one renderer, preview and thumbnails ── */
+.sch{display:grid;gap:2px;background:#0a0e14;border:1px solid var(--border);
+  border-radius:5px;padding:2px}
+.sch i{border-radius:2px;background:#1b222c}
+.sch i.on{background:#2d4f74}
+.sch i.free{background:#0d1117;border:1px dashed #2b3440}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin:.1rem 0 .45rem}
+.preset{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
+  padding:.25rem;border-radius:6px;border:1px solid transparent}
+.preset:hover{border-color:var(--border);background:#1b222c}
+.preset.on{border-color:var(--accent);background:#152436}
+.preset span{font-size:.62rem;color:var(--muted)}
+.edges{display:flex;flex-direction:column;gap:1px}
+.edge{display:flex;align-items:center;gap:.4rem;font-size:.72rem}
+.edge label{flex:1;color:var(--muted);text-transform:capitalize}
+.edge input[type=text]{width:56px;background:#0d1117;border:1px solid var(--border);
+  color:var(--text);border-radius:4px;padding:.1rem .25rem;font:inherit;font-size:.7rem}
+.hollow{display:flex;align-items:center;justify-content:center;height:100%;
+  color:#4d5867;font-size:.72rem;border:1px dashed #263040;border-radius:6px;margin:.1rem}
+
+.row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.22rem 0}
+.row span:first-child{color:var(--muted);font-size:.73rem}
+.mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace;font-size:.75rem}
+input[type=range]{width:92px;accent-color:var(--accent)}
+.btn{background:#22303f;border:1px solid var(--border);color:var(--text);border-radius:6px;
+  padding:.28rem .55rem;font-size:.73rem;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.danger{background:#3a1c1c;border-color:#5c2626;color:#ffb4b4}
+.list{display:flex;flex-direction:column;gap:2px}
+.list div{padding:.25rem .4rem;border-radius:5px;font-size:.75rem;cursor:pointer}
+.list div:hover{background:#212a35}
+.list div.sel{background:#1d3550;color:#cfe6ff}
+
+/* ── pinned layer: fixed to the viewport, never travels ───────── */
+/* the courtyard: fixed cloister around an open middle.
+   geometry comes from CONFIG.courtyard — see the top of the script. */
+#pinned{position:fixed;inset:0;pointer-events:none;display:grid;z-index:5}
+.slot{display:flex;gap:8px;pointer-events:none;min-height:0}
+.slot.vert{flex-direction:column;align-self:start;overflow:auto}
+.slot.horz{flex-direction:row;flex-wrap:wrap;align-items:flex-end}
+/* a pinned panel drops out of board coordinates and flows in its slot */
+.slot .panel{pointer-events:auto;position:relative;left:auto!important;top:auto!important;
+  width:var(--pw,auto)!important;flex:0 0 auto;box-shadow:0 6px 22px #000a}
+.slot .panel .ph{cursor:default}
+body.focused .slot .panel{opacity:1;filter:none}   /* pinned never recedes */
+.pinmark{color:var(--accent);font-size:.6rem;letter-spacing:.05em}
+
+/* ── chrome ───────────────────────────────────────────────────── */
+#hud{display:flex;gap:5px;pointer-events:auto;align-items:center;flex:0 0 auto}
+#lay{position:fixed;left:12px;top:52px;display:flex;gap:5px;z-index:10}
+#lay .btn{background:#161b22ee;backdrop-filter:blur(6px)}
+#lay .btn.here{border-color:var(--accent);color:#cfe6ff}
+#hud .btn{background:#161b22ee;backdrop-filter:blur(6px)}
+#hud .btn.here{border-color:var(--accent);color:#cfe6ff}
+#zoom{position:fixed;right:12px;bottom:12px;z-index:10;color:var(--muted);font-size:.7rem;
+  background:#161b22ee;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);
+  font-variant-numeric:tabular-nums}
+#hint{position:fixed;left:12px;top:12px;z-index:10;color:var(--muted);font-size:.7rem;
+  background:#161b22ee;padding:.4rem .6rem;border-radius:6px;border:1px solid var(--border)}
+kbd{background:#22303f;border:1px solid var(--border);border-radius:3px;padding:0 .25rem;font-size:.66rem}
+</style>
+
+<div id="viewport"><div id="board"></div></div>
+<!-- screen-bound layer. same panels, different coordinate space. -->
+<div id="pinned"></div>
+<div id="hint">everything exists · attention travels · <kbd>0</kbd>–<kbd>5</kbd> · surface zoom ≠ frame zoom</div>
+<div id="lay">
+  <button class="btn" data-lay="survey">survey</button>
+  <button class="btn" data-lay="operate">operate</button>
+  <button class="btn" data-lay="acquire">acquire</button>
+</div>
+<div id="hud">
+  <button class="btn" data-go="home">0 home</button>
+  <button class="btn" data-go="detect">1 detect</button>
+  <button class="btn" data-go="position">2 position</button>
+  <button class="btn" data-go="calibrate">3 calibrate</button>
+  <button class="btn" data-go="acquire">4 acquire</button>
+  <button class="btn" data-go="curate">5 curator</button>
+  <button class="btn" data-go="bench" style="opacity:.7">bench</button>
+  <span class="btn" style="display:flex;gap:.4rem;align-items:center;cursor:default">
+    density <input type="range" id="density" min="1" max="8" value="5" style="width:70px">
+    <b id="density-n" class="mono">5</b></span>
+</div>
+<div id="zoom">100%</div>
+
+
+<script>
+/* ════ CONFIG ═══════════════════════════════════════════════════
+   The whole surface is described here. Nothing below needs editing to
+   move the courtyard, add an edge, retune the index, or add a layout. */
+const CONFIG = {
+  courtyard: {
+    pad: 12, gap: 10,
+    /* which edges exist, and how thick. add or delete a line to change
+       the shape of the cloister. */
+    edges: {
+      rail: {side:'right',  size:'300px', panelWidth:null},
+      deck: {side:'bottom', size:'auto',  panelWidth:'280px'},
+      // dock:  {side:'left', size:'260px'},
+      // strip: {side:'top',  size:'auto'},
+    },
+    /* who owns the corners: 'sides' → left/right run full height,
+       'ends' → top/bottom run full width. */
+    corners: 'sides',
+  },
+  /* the landing: board coords + scale. density is per-layout. */
+  home: {cx:655, cy:310, scale:.9},
+  /* information index weights — what earns a window an open slot. */
+  index: {crit:.65, freq:.35, freqCap:10},
+  /* attention layouts: what is pinned where, and where the canvas looks. */
+  layouts: {
+    survey:  {pin:{}, look:'bench', density:8},
+    operate: {pin:{'p-stage':'rail','p-curator':'rail','p-spim':'rail'},
+              look:'detect', density:4},
+    acquire: {pin:{'p-acq':'deck','p-events':'deck','p-curator':'rail','p-stage':'rail'},
+              look:'watch', density:3},
+  },
+  default: 'operate',
+};
+/* ═══════════════════════════════════════════════════════════════ */
+
+const vp=document.getElementById('viewport'), board=document.getElementById('board');
+const zoomLabel=document.getElementById('zoom');
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+
+/* ── rule 1: the surface ──────────────────────────────────────── */
+let vx=0, vy=0, scale=1; const MIN=.25, MAX=2.5;
+function apply(){
+  board.style.transform=`translate(${vx}px,${vy}px) scale(${scale})`;
+  vp.style.setProperty('--gs',80*scale+'px');
+  vp.style.setProperty('--gx',vx+'px'); vp.style.setProperty('--gy',vy+'px');
+  zoomLabel.textContent=Math.round(scale*100)+'%';
+}
+/* zoom keeps the point under the cursor pinned */
+function zoomAt(cx,cy,k){
+  stopGlide();
+  const ns=clamp(scale*k,MIN,MAX);
+  vx=cx-(cx-vx)*(ns/scale); vy=cy-(cy-vy)*(ns/scale); scale=ns; apply();
+}
+vp.addEventListener('wheel',e=>{
+  if(e.target.closest('.inner')) return;      // rule 3: frames own their own zoom
+  e.preventDefault(); zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*.0015));
+},{passive:false});
+
+vp.addEventListener('pointerdown',e=>{
+  if(e.target.closest('.panel')) return;
+  stopGlide(); vp.setPointerCapture(e.pointerId); vp.classList.add('panning');
+  const sx=e.clientX-vx, sy=e.clientY-vy;
+  const move=m=>{vx=m.clientX-sx; vy=m.clientY-sy; apply();};
+  vp.addEventListener('pointermove',move);
+  vp.addEventListener('pointerup',()=>{vp.removeEventListener('pointermove',move);
+    vp.classList.remove('panning');},{once:true});
+});
+
+/* ── rule 2: attention travels, the board stays put ───────────── */
+function bbox(ps){return [Math.min(...ps.map(p=>p.offsetLeft)), Math.min(...ps.map(p=>p.offsetTop)),
+  Math.max(...ps.map(p=>p.offsetLeft+p.offsetWidth)), Math.max(...ps.map(p=>p.offsetTop+p.offsetHeight))];}
+/* a running glide must lose to anything newer — a later navigation, or the
+   operator grabbing the board. otherwise you land where you did not ask. */
+let glideGen=0;
+const stopGlide=()=>{glideGen++;};
+function glide(tx,ty,ts){
+  const gen=++glideGen, sx=vx, sy=vy, ss=scale, t0=performance.now(), D=430;
+  (function step(now){
+    if(gen!==glideGen) return;                       // superseded
+    const k=Math.min(1,(now-t0)/D), e=1-Math.pow(1-k,3);
+    vx=sx+(tx-sx)*e; vy=sy+(ty-sy)*e; scale=ss+(ts-ss)*e; apply();
+    if(k<1) requestAnimationFrame(step);
+  })(performance.now());
+}
+function frame(ps,pad){
+  if(!ps.length) return;
+  const [x1,y1,x2,y2]=bbox(ps);
+  const ts=clamp(Math.min(innerWidth/(x2-x1+pad*2),innerHeight/(y2-y1+pad*2)),MIN,MAX);
+  glide((innerWidth-(x2-x1)*ts)/2-x1*ts,(innerHeight-(y2-y1)*ts)/2-y1*ts,ts);
+}
+/* the geography IS the workflow — Ryan's steps are places, always the same place */
+/* the landing. authored, not computed — you arrive at the same place every time.
+   density = how much is legible here: detect+position crisp, calibrate+curator
+   peripheral at the edge, acquire over the horizon until you travel to it. */
+const HOME=CONFIG.home;
+function home(anim){
+  const tx=innerWidth/2-HOME.cx*HOME.scale, ty=innerHeight/2-HOME.cy*HOME.scale;
+  document.body.classList.remove('focused');
+  allPanels().forEach(p=>p.classList.remove('attend','calling'));
+  document.querySelectorAll('#hud .btn').forEach(b=>b.classList.toggle('here',b.dataset.go==='home'));
+  if(anim){ glide(tx,ty,HOME.scale); } else { stopGlide(); vx=tx; vy=ty; scale=HOME.scale; apply(); }
+}
+
+const STEPS={bench:null, design:['p-design'], detect:['p-embryos','p-view'], position:['p-spim','p-stage'],
+  calibrate:['p-cal'], acquire:['p-acq'], curate:['p-curator'], watch:['p-view']};
+const ORDER=['home','detect','position','calibrate','acquire','curate'];
+function attend(k){
+  if(k==='home') return home(true);
+  if(!(k in STEPS)) return;
+  const ids=STEPS[k];
+  document.body.classList.toggle('focused',!!ids);
+  allPanels().forEach(p=>{
+    const on=!!ids&&ids.includes(p.id);
+    p.classList.toggle('attend',on); p.classList.remove('calling');
+    /* attention implies the open view — you never travel to a gauge */
+    if(on && !p.dataset.slot) fold(p,false);
+  });
+  document.querySelectorAll('#hud .btn').forEach(b=>b.classList.toggle('here',b.dataset.go===k));
+  const tgt=(ids?ids.map(i=>document.getElementById(i)):onCanvas()).filter(e=>e&&!e.dataset.slot);
+  frame(tgt.length?tgt:onCanvas(), ids?110:70);
+}
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>attend(b.dataset.go));
+/* travel keys must not steal from a focused control — typing "40" into an
+   exposure field would otherwise fling the operator to home, then acquire. */
+addEventListener('keydown',e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  const t=e.target;
+  if(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)) return;
+  if(/^[0-5]$/.test(e.key)) attend(ORDER[+e.key]);
+});
+
+/* ── rule 3: a panel is a frame, a state, and clipped content ─── */
+const FOLDED_H=34;
+/* information index — how often it changes x how much the experiment depends on it.
+   freq in updates/sec, crit in 0..1. the density dial opens the top N by index. */
+const index = (freq,crit) => { const W=CONFIG.index;
+  return +(crit*W.crit + clamp(freq/W.freqCap,0,1)*W.freq).toFixed(3); };
+
+function panel({id,title,x,y,w,h,state='ready',flush,body,peek='',freq=0,crit=.5}){
+  const el=document.createElement('div');
+  el.className='panel'; el.id=id;
+  el.dataset.h=h; el.dataset.idx=index(freq,crit);
+  el.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
+  el._peek = typeof peek==='function' ? peek : ()=>peek;
+  el.innerHTML=`<div class="ph"><button class="fold" title="fold / open">▼</button>
+      <b>${title}</b><span class="peek">${el._peek()}</span>
+      <i class="idx">${el.dataset.idx}</i><i class="st ${state}">${state}</i></div>
+    <div class="pb${flush?' flush':''}">${body}</div>`;
+  el.querySelector('.fold').onclick = e => { e.stopPropagation(); fold(el, !el.classList.contains('folded')); };
+  const ph=el.querySelector('.ph');
+  ph.addEventListener('pointerdown',e=>{
+    ph.setPointerCapture(e.pointerId);
+    const ox=e.clientX,oy=e.clientY,px=el.offsetLeft,py=el.offsetTop;
+    const move=m=>{el.style.left=px+(m.clientX-ox)/scale+'px';   // /scale: tracks the cursor at any zoom
+                   el.style.top =py+(m.clientY-oy)/scale+'px';};
+    ph.addEventListener('pointermove',move);
+    ph.addEventListener('pointerup',()=>ph.removeEventListener('pointermove',move),{once:true});
+  });
+  board.appendChild(el); return el;
+}
+
+/* ── live state ─────────────────────────────────────────────────
+   one source, one render pass. gauges refresh at reading speed (4 Hz),
+   NOT at data rate — nobody reads a number thirty times a second.
+   ponytail: single global tick, per-panel cadence if a gauge ever needs it. */
+const S={x:1610.4, y:905.2, z:-12.8, fps:30, found:4, events:0, since:0, laser:35, exp:40};
+const n1=v=>v.toFixed(1);
+function drift(){
+  S.x += (Math.random()-.5)*1.4;  S.y += (Math.random()-.5)*1.4;
+  S.z += (Math.random()-.5)*0.25;
+  S.fps = 28 + Math.random()*4;
+  if(Math.random()<.06){ S.events++; S.since=0; } else S.since += .25;
+  if(Math.random()<.02) S.found = 3 + (Math.random()*3|0);
+}
+const set=(id,v)=>{const e=document.getElementById(id); if(e) e.textContent=v;};
+function render(){
+  // folded windows: repaint the gauge
+  document.querySelectorAll('.panel.folded').forEach(el=>{
+    const t=el._peek(); const g=el.querySelector('.peek');
+    if(g.textContent!==t) g.textContent=t;
+  });
+  // open windows: the same numbers, in full
+  set('v-x', n1(S.x)+' µm'); set('v-y', n1(S.y)+' µm'); set('v-z', n1(S.z)+' µm');
+  set('v-found', S.found); set('v-events', S.events);
+  const ev=document.getElementById('ev-body');
+  if(ev) ev.innerHTML = S.events
+    ? `<div class="list">${Array.from({length:Math.min(S.events,6)},(_,i)=>
+        `<div>t+${(S.since+i*7).toFixed(0)}s · frame written</div>`).join('')}</div>`
+    : `<div class="hollow">no events this session</div>`;
+}
+setInterval(()=>{drift(); render();}, 250);
+
+/* folding never moves anything — geography survives, so muscle memory does too */
+function fold(el,on){
+  el.classList.toggle('folded',on);
+  el.style.height = (on ? FOLDED_H : +el.dataset.h) + 'px';
+}
+/* density: how many windows are open at once. the rest fold to their gauge. */
+function setDensity(n){
+  const ps=onCanvas().sort((a,b)=>b.dataset.idx-a.dataset.idx);   // pinned windows opt out
+  ps.forEach((el,i)=>fold(el, i>=n));
+  document.getElementById('density-n').textContent=n;
+  requestAnimationFrame(relieve);
+}
+document.getElementById('density').oninput = e => setDensity(+e.target.value);
+
+/* build the cloister from CONFIG.courtyard — grid template and slot
+   elements both, so a new edge is one config line and nothing else. */
+function buildCourtyard(c){
+  const host=document.getElementById('pinned');
+  /* evacuate before demolishing: windows go home to the canvas, the chip bar
+     to the body. wiping innerHTML with residents inside would delete them. */
+  host.querySelectorAll('.panel').forEach(el=>unpin(el.id));
+  const hud=host.querySelector('#hud'); if(hud) document.body.appendChild(hud);
+  host.innerHTML='';
+  const at=side=>Object.keys(c.edges).find(k=>c.edges[k].side===side);
+  const [L,R,T,B]=['left','right','top','bottom'].map(at);
+  const size=k=>k?c.edges[k].size:'0px';
+  const cell=k=>k||'.';
+  const sides = c.corners==='sides';
+  /* corners go to whichever axis owns them */
+  const rows = sides
+    ? [[cell(L),cell(T),cell(R)], [cell(L),'free',cell(R)], [cell(L),cell(B),cell(R)]]
+    : [[cell(T),cell(T),cell(T)], [cell(L),'free',cell(R)], [cell(B),cell(B),cell(B)]];
+  Object.assign(host.style,{
+    padding:c.pad+'px', gap:c.gap+'px',
+    gridTemplateColumns:`${size(L)} 1fr ${size(R)}`,
+    gridTemplateRows:`${size(T)} 1fr ${size(B)}`,
+    gridTemplateAreas:rows.map(r=>`"${r.join(' ')}"`).join(' '),
+  });
+  for(const [name,e] of Object.entries(c.edges)){
+    const d=document.createElement('div');
+    d.className='slot '+(e.side==='left'||e.side==='right'?'vert':'horz');
+    d.id='slot-'+name; d.style.gridArea=name;
+    if(e.panelWidth) d.style.setProperty('--pw',e.panelWidth);
+    host.appendChild(d);
+  }
+}
+buildCourtyard(CONFIG.courtyard);
+
+/* the chip bar rides in whichever edge config placed at the bottom;
+   with no bottom edge it falls back to floating. */
+function seatHud(c){
+  const hud=document.getElementById('hud');
+  const e=Object.entries(c.edges).find(([,v])=>v.side==='bottom');
+  const slot=e && document.getElementById('slot-'+e[0]);
+  (slot||document.body).prepend(hud);
+  hud.style.cssText = slot ? '' : 'position:fixed;left:12px;bottom:12px;z-index:10';
+}
+seatHud(CONFIG.courtyard);
+
+/* ── attention layouts ──────────────────────────────────────────
+   a layout is two decisions: which windows are screen-bound (always there,
+   whatever attention does) and where the canvas is looking. safety and
+   orientation get pinned; the thing you are working on stays on the surface. */
+function pin(id,slot){
+  const el=document.getElementById(id);
+  if(!document.getElementById('slot-'+slot)) return unpin(id);   // edge no longer exists
+  if(el.dataset.slot===slot) return;
+  if(!el.dataset.ox){ el.dataset.ox=el.style.left; el.dataset.oy=el.style.top; }
+  el.dataset.slot=slot;
+  document.getElementById('slot-'+slot).appendChild(el);
+}
+function unpin(id){
+  const el=document.getElementById(id);
+  if(!el.dataset.slot) return;
+  el.style.left=el.dataset.ox; el.style.top=el.dataset.oy;
+  delete el.dataset.slot;
+  board.appendChild(el);
+}
+const onCanvas = () => [...board.children];
+const allPanels = () => [...document.querySelectorAll('.panel')];
+
+const LAYOUTS=CONFIG.layouts;
+let layout='survey';
+function setLayout(name){
+  const L=LAYOUTS[name]; if(!L) return;
+  layout=name;
+  allPanels().forEach(el=>{ const want=L.pin[el.id];
+    want ? pin(el.id,want) : unpin(el.id); });
+  allPanels().forEach(el=>{
+    const p=!!el.dataset.slot;
+    el.querySelector('.ph').classList.toggle('pinned-head',p);
+    let m=el.querySelector('.pinmark');
+    if(p && !m){ m=document.createElement('i'); m.className='pinmark'; m.textContent='PIN';
+      el.querySelector('.st').before(m); }
+    if(!p && m) m.remove();
+    if(p) fold(el,true);                    // pinned windows ride as gauges
+  });
+  document.getElementById('density').value=L.density;
+  setDensity(L.density);
+  document.querySelectorAll('#lay .btn').forEach(b=>b.classList.toggle('here',b.dataset.lay===name));
+  attend(L.look);
+  requestAnimationFrame(relieve);
+}
+document.querySelectorAll('[data-lay]').forEach(b=>b.onclick=()=>setLayout(b.dataset.lay));
+
+/* ── inner pressure ─────────────────────────────────────────────
+   a window whose content does not fit claims space outward, bounded by what
+   is actually free. pressure propagates: a pressed resident widens its edge.
+   ponytail: measured on demand, not observed — swap in ResizeObserver if
+   content starts changing size without a layout call. */
+const PRESSURE={panelH:.78, edgeW:.34};
+/* a container query can reflow content in response to the width we just set,
+   so one measurement is stale by definition. settle over a couple of passes. */
+function relieve(passes=2){
+  for(let i=0;i<passes;i++) relievePass();
+}
+function relievePass(){
+  allPanels().forEach(el=>{
+    if(el.classList.contains('folded')) return;
+    const pb=el.querySelector('.pb'), over=pb.scrollHeight-pb.clientHeight;
+    if(over<=2) return;
+    const cap=Math.round(innerHeight*PRESSURE.panelH);
+    const want=Math.min(el.offsetHeight+over+2, cap);
+    if(want>el.offsetHeight){ el.style.height=want+'px'; el.dataset.h=want; }
+  });
+  // edge pressure: a side edge widens if its residents are still squeezed
+  Object.entries(CONFIG.courtyard.edges).forEach(([name,e])=>{
+    if(e.side!=='left'&&e.side!=='right') return;
+    const slot=document.getElementById('slot-'+name); if(!slot) return;
+    const squeezed=[...slot.children].filter(el=>el.classList?.contains('panel'))
+      .reduce((m,el)=>{const pb=el.querySelector('.pb');
+        return Math.max(m, pb ? pb.scrollWidth-pb.clientWidth : 0);},0);
+    if(squeezed<=2) return;
+    const cur=slot.getBoundingClientRect().width;
+    const cap=Math.round(innerWidth*PRESSURE.edgeW);
+    const want=Math.min(Math.ceil(cur+squeezed+4), cap);
+    if(want>cur){ CONFIG.courtyard.edges[name].size=want+'px';
+      buildCourtyardSizes(); }
+  });
+}
+/* resize an existing edge without demolishing the courtyard */
+function buildCourtyardSizes(){
+  const c=CONFIG.courtyard, host=document.getElementById('pinned');
+  const at=side=>Object.keys(c.edges).find(k=>c.edges[k].side===side);
+  const size=k=>k?c.edges[k].size:'0px';
+  host.style.gridTemplateColumns=`${size(at('left'))} 1fr ${size(at('right'))}`;
+  host.style.gridTemplateRows=`${size(at('top'))} 1fr ${size(at('bottom'))}`;
+  paintDesigner();
+}
+
+/* ── the courtyard designer ─────────────────────────────────────
+   a meta window: it edits the shape of the cloister that surrounds it.
+   the schematic is the preview; applying rebuilds the real thing live. */
+const SIDES=['top','right','bottom','left'];
+function schematic(c, px){
+  const at=s=>Object.keys(c.edges).find(k=>c.edges[k].side===s);
+  const [T,R,B,L]=SIDES.map(at);
+  const ends=c.corners==='ends';
+  // 3x3: corners belong to whichever axis owns them
+  const on=[[T&&(ends||L?ends:false)||(ends?T:L), T, (ends?T:R)],
+            [L, 'free', R],
+            [(ends?B:L), B, (ends?B:R)]];
+  const w=px, h=Math.round(px*.68), e=Math.round(px*.26);
+  return `<div class="sch" style="width:${w}px;height:${h}px;
+      grid-template-columns:${L?e:4}px 1fr ${R?e:4}px;
+      grid-template-rows:${T?e*.7:4}px 1fr ${B?e*.7:4}px">
+    ${on.flat().map(v=>`<i class="${v==='free'?'free':(v?'on':'')}"></i>`).join('')}</div>`;
+}
+const PRESETS={
+  cockpit:  {pad:12,gap:10,corners:'sides',edges:{rail:{side:'right',size:'300px'},
+             deck:{side:'bottom',size:'auto',panelWidth:'280px'}}},
+  cloister: {pad:12,gap:10,corners:'ends',edges:{strip:{side:'top',size:'auto',panelWidth:'300px'},
+             rail:{side:'right',size:'280px'},deck:{side:'bottom',size:'auto',panelWidth:'260px'},
+             dock:{side:'left',size:'250px'}}},
+  sidebar:  {pad:12,gap:10,corners:'sides',edges:{dock:{side:'left',size:'280px'}}},
+  bands:    {pad:12,gap:10,corners:'ends',edges:{strip:{side:'top',size:'auto',panelWidth:'280px'},
+             deck:{side:'bottom',size:'auto',panelWidth:'280px'}}},
+  open:     {pad:12,gap:10,corners:'sides',edges:{}},
+};
+function applyCourtyard(c){
+  CONFIG.courtyard=c;
+  buildCourtyard(c); seatHud(c);
+  setLayout(layout);            // re-pin; missing slots fall back to the canvas
+  paintDesigner();
+}
+function paintDesigner(){
+  const c=CONFIG.courtyard, host=document.getElementById('design-body');
+  if(!host) return;
+  const match=Object.keys(PRESETS).find(k=>
+    JSON.stringify(PRESETS[k].edges)===JSON.stringify(c.edges) && PRESETS[k].corners===c.corners);
+  host.innerHTML=`
+    <div class="presets">${Object.keys(PRESETS).map(k=>
+      `<div class="preset ${k===match?'on':''}" data-preset="${k}">
+         ${schematic(PRESETS[k],54)}<span>${k}</span></div>`).join('')}</div>
+    <div style="display:flex;gap:.6rem;align-items:flex-start">
+      ${schematic(c,104)}
+      <div class="edges" style="flex:1">
+        ${SIDES.map(side=>{
+          const key=Object.keys(c.edges).find(k=>c.edges[k].side===side);
+          return `<div class="edge">
+            <input type="checkbox" data-side="${side}" ${key?'checked':''}>
+            <label>${side}</label>
+            <input type="text" data-size="${side}" value="${key?c.edges[key].size:''}"
+              placeholder="auto" ${key?'':'disabled'}></div>`;}).join('')}
+        <div class="edge" style="margin-top:.3rem">
+          <label style="flex:0">corners</label>
+          <button class="btn" id="corner-t" style="flex:1">${c.corners}</button></div>
+      </div></div>`;
+
+  host.querySelectorAll('[data-preset]').forEach(el=>el.onclick=()=>
+    applyCourtyard(JSON.parse(JSON.stringify(PRESETS[el.dataset.preset]))));
+  host.querySelectorAll('[data-side]').forEach(el=>el.onchange=()=>{
+    const c2=JSON.parse(JSON.stringify(c)), side=el.dataset.side;
+    const key=Object.keys(c2.edges).find(k=>c2.edges[k].side===side);
+    if(el.checked && !key) c2.edges[{top:'strip',right:'rail',bottom:'deck',left:'dock'}[side]]=
+      {side, size:(side==='left'||side==='right')?'280px':'auto', panelWidth:'280px'};
+    if(!el.checked && key) delete c2.edges[key];
+    applyCourtyard(c2);
+  });
+  host.querySelectorAll('[data-size]').forEach(el=>el.onchange=()=>{
+    const c2=JSON.parse(JSON.stringify(c));
+    const key=Object.keys(c2.edges).find(k=>c2.edges[k].side===el.dataset.size);
+    if(key){ c2.edges[key].size=el.value||'auto'; applyCourtyard(c2); }
+  });
+  const ct=document.getElementById('corner-t');
+  if(ct) ct.onclick=()=>{const c2=JSON.parse(JSON.stringify(c));
+    c2.corners=c2.corners==='sides'?'ends':'sides'; applyCourtyard(c2);};
+}
+
+/* ── the bench — every capability, always present ─────────────── */
+const rows=['e01  1420, 880','e02  1610, 905','e03  1755, 1120','e04  2010, 860']
+  .map((t,i)=>`<div class="${i===1?'sel':''}">${t}</div>`).join('');
+const sl=(l,v,u)=>`<div class="row"><span>${l}</span><input type="range" value="${v}"><span class="mono">${v}${u}</span></div>`;
+
+panel({id:'p-embryos',title:'EMBRYOS · <span id="v-found">4</span>',x:80,y:80,w:290,h:230,state:'live',
+  peek:()=>`${S.found} · e02 sel`, freq:.2, crit:.7,
+  body:`<div class="list">${rows}</div><div class="row" style="margin-top:.4rem">
+    <button class="btn">remap region</button><span class="mono">µm</span></div>`});
+
+panel({id:'p-view',title:'BOTTOM CAMERA',x:410,y:80,w:470,h:380,state:'live',flush:true,
+  peek:()=>`${S.fps.toFixed(0)} fps · ${S.found} found`, freq:30, crit:.9,
+  body:`<div class="inner" id="in-bottom"><canvas id="cv-bottom"></canvas>
+    <div class="izoom"><button data-iz="-">−</button><span id="iz-l">1.0×</span><button data-iz="+">+</button></div></div>`});
+
+panel({id:'p-spim',title:'SPIM HEAD',x:930,y:80,w:300,h:250,state:'ready',
+  peek:()=>`${S.laser}% · ${S.exp}ms`, freq:0, crit:.8,
+  body:`${sl('laser','35','%')}${sl('exposure','40','ms')}${sl('step','50','µm')}
+    <div class="row" style="margin-top:.5rem"><button class="btn">go to e02</button>
+    <button class="btn danger">HALT</button></div>`});
+
+panel({id:'p-stage',title:'STAGE',x:930,y:380,w:300,h:160,state:'live',
+  peek:()=>`${n1(S.x)}, ${n1(S.y)}, ${n1(S.z)}`, freq:5, crit:.6,
+  body:`<div class="row"><span>x</span><span class="mono" id="v-x">1610.4 µm</span></div>
+    <div class="row"><span>y</span><span class="mono" id="v-y">905.2 µm</span></div>
+    <div class="row"><span>z</span><span class="mono" id="v-z">-12.8 µm</span></div>`});
+
+panel({id:'p-cal',title:'CALIBRATION · two-point',x:1290,y:80,w:400,h:205,state:'stale',
+  peek:()=>'stale · 1 of 2', freq:0, crit:.95,
+  body:`<div class="row"><span>source</span><span class="mono">laser 488</span></div>
+    <div class="row"><span>point 1</span><span class="mono">captured</span></div>
+    <div class="row"><span>point 2</span><span class="mono">—</span></div>
+    <div class="row" style="margin-top:.5rem"><button class="btn">capture point 2</button>
+    <button class="btn">solve transform</button></div>`});
+
+panel({id:'p-acq',title:'ACQUISITION',x:1750,y:80,w:300,h:205,state:'ready',
+  peek:()=>'idle · 120s × 60', freq:0, crit:.5,
+  body:`${sl('interval','120','s')}${sl('timepoints','60','')}
+    <div class="row" style="margin-top:.5rem"><button class="btn">start</button></div>`});
+
+/* rule 4: a specialist. its only job is what is live and where to look. */
+panel({id:'p-curator',title:'CURATOR',x:1290,y:335,w:400,h:205,state:'live',
+  peek:()=>'1 needs you', freq:1, crit:.85,
+  body:`<div class="row"><span>tracking</span><span class="mono">e02 · bottom cam · stage</span></div>
+    <div class="row"><span>stale</span><span class="mono">calibration transform</span></div>
+    <div style="color:var(--muted);font-size:.74rem;margin:.4rem 0 .1rem;line-height:1.45">
+      Calibration never completed. Acquisition would put e02 off-centre.</div>
+    <div class="row"><button class="btn" id="call">show me</button>
+      <button class="btn">dismiss</button>
+      <span class="mono" style="color:#4d5867">rule 5: keys 0–5 do this without me</span></div>`});
+
+panel({id:'p-design',title:'COURTYARD',x:80,y:355,w:290,h:230,state:'ready',
+  peek:()=>Object.keys(CONFIG.courtyard.edges).join(' · ')||'open', freq:0, crit:.3,
+  body:`<div id="design-body"></div>`});
+paintDesigner();
+
+/* rule 5: the curator points at a place that already exists. it builds nothing. */
+document.getElementById('call').onclick=()=>{
+  const cal=document.getElementById('p-cal');
+  cal.dataset.idx=index(0,1);                 // criticality rose — the deck refolds itself
+  setDensity(+document.getElementById('density').value);
+  cal.classList.add('calling');
+  setTimeout(()=>attend('calibrate'),550);
+};
+
+/* an empty capability still occupies its frame and says what it is */
+panel({id:'p-events',title:'EVENTS',x:1750,y:335,w:300,h:205,state:'ready',
+  peek:()=>S.events?`${S.events} · ${S.since.toFixed(0)}s ago`:'none', freq:.1, crit:.2,
+  body:`<div id="ev-body"><div class="hollow">no events this session</div></div>`});
+
+/* ── rule 3, demonstrated: the frame owns its own zoom ────────── */
+const cv=document.getElementById('cv-bottom'), cx=cv.getContext('2d');
+cv.width=460; cv.height=330;
+let iz=1;
+function applyIz(){
+  cv.style.transform=`translate(-50%,-50%) scale(${iz})`;
+  document.getElementById('iz-l').textContent=iz.toFixed(1)+'×';
+}
+document.querySelectorAll('[data-iz]').forEach(b=>b.onclick=()=>{
+  iz=clamp(iz*(b.dataset.iz==='+'?1.35:1/1.35),.5,6); applyIz();
+});
+document.getElementById('in-bottom').addEventListener('wheel',e=>{
+  e.preventDefault(); e.stopPropagation();     // sample zoom, not surface zoom
+  iz=clamp(iz*Math.exp(-e.deltaY*.0015),.5,6); applyIz();
+},{passive:false});
+applyIz();
+
+const blobs=[[110,90,16],[190,110,19],[250,180,15],[330,100,17]];
+let t=0;
+(function draw(){
+  cx.fillStyle='#05080c'; cx.fillRect(0,0,cv.width,cv.height);
+  blobs.forEach(([x,y,r],i)=>{
+    const p=r+Math.sin(t/28+i)*1.6;
+    const g=cx.createRadialGradient(x,y,1,x,y,p*1.9);
+    g.addColorStop(0,'#9fd4ff'); g.addColorStop(.45,'#2b6ea8'); g.addColorStop(1,'#05080c00');
+    cx.fillStyle=g; cx.beginPath(); cx.arc(x,y,p*1.9,0,7); cx.fill();
+    cx.strokeStyle=i===1?'#4ea3ff':'#ffffff20'; cx.lineWidth=1;
+    cx.strokeRect(x-p-6,y-p-6,(p+6)*2,(p+6)*2);
+  });
+  t++; requestAnimationFrame(draw);
+})();
+
+render();
+setLayout(CONFIG.default);
+home(false);     // and a still landing at a known viewpoint
+
+/* ── self-check: the two bits of maths that silently break ───── */
+if(location.search.includes('selftest')){
+  const eq=(a,b,m)=>console.assert(Math.abs(a-b)<1e-6,m,a,b);
+  vx=0; vy=0; scale=1; zoomAt(400,300,2);              // cursor stays pinned under zoom
+  eq((400-vx)/scale,400,'zoomAt: x not pinned'); eq((300-vy)/scale,300,'zoomAt: y not pinned');
+  setLayout('survey');                                  // bbox is a canvas fact
+  const [x1,y1,x2,y2]=bbox(onCanvas());
+  console.assert(x1===80&&y1===80&&x2>=2050&&y2>=540,'bbox wrong',x1,y1,x2,y2);
+  console.assert(allPanels().length===9,'a capability lost its frame',allPanels().length);
+  allPanels().forEach(p=>console.assert(getComputedStyle(p).overflow==='hidden',
+    'rule 3 violated: '+p.id+' does not clip'));
+  home(false);                                          // landing is deterministic
+  const a=[vx,vy,scale]; attend('calibrate'); home(false);
+  console.assert(a[0]===vx&&a[1]===vy&&a[2]===scale,'home not repeatable',a,[vx,vy,scale]);
+  [1,5,8].forEach(n=>{ setDensity(n);
+    const open=onCanvas().filter(e=>!e.classList.contains('folded')).length;
+    console.assert(open===Math.min(n,onCanvas().length),`density ${n} left ${open} open`);
+    allPanels().filter(e=>e.classList.contains('folded'))
+      .forEach(e=>console.assert(e.querySelector('.peek').textContent.trim()!=='',
+        'folded with no gauge: '+e.id));   // rule 3: folded is a view, not a blank
+  });
+  setDensity(5);
+  render();
+setLayout(CONFIG.default);
+home(false);     // and a still landing at a known viewpoint console.log('selftest done — check for assertion failures above');
+}
+</script>
