@@ -36,11 +36,23 @@ const Atrium = (() => {
         // Windows are adopted from #<tab>-content. crit/tol drive SPEC R5.
         windows: [
             { tab: 'home',        title: 'HOME',        x: 40,   y: 200, w: 460, h: 380, crit: 0.3 },
-            { tab: 'embryos',     title: 'EMBRYOS',     x: 540,  y: 40,  w: 700, h: 620, crit: 0.8 },
+            { tab: 'embryos',     title: 'EMBRYOS',     x: 540,  y: 40,  w: 700, h: 620, crit: 0.8, children: [
+                { key: 'default',   title: 'default',   go: () => EmbryosManager.switchView('default') },
+                { key: 'board',     title: 'board',     go: () => EmbryosManager.switchView('board') },
+                { key: 'filmstrip', title: 'filmstrip', go: () => EmbryosManager.switchView('filmstrip') },
+                { key: 'vitals',    title: 'vitals',    go: () => EmbryosManager.switchView('vitals') },
+              ] },
             { tab: 'devices',     title: 'DEVICES',     x: 1280, y: 40,  w: 700, h: 620, crit: 0.9, pin: 'rail' },
-            { tab: 'calibration', title: 'CALIBRATION', x: 540,  y: 700, w: 700, h: 460, crit: 0.85 },
+            { tab: 'calibration', title: 'CALIBRATION', x: 540,  y: 700, w: 700, h: 460, crit: 0.85, children: [
+                { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
+                { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
+              ] },
             { tab: 'experiment',  title: 'EXPERIMENT',  x: 1280, y: 700, w: 700, h: 460, crit: 0.6 },
-            { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4 },
+            { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4, children: [
+                { key: 'log',      title: 'log',      go: () => switchSystemView('log') },
+                { key: 'timeline', title: 'timeline', go: () => switchSystemView('timeline') },
+                { key: 'summary',  title: 'summary',  go: () => switchSystemView('summary') },
+              ] },
             { tab: 'plans',       title: 'PLANS',       x: 2020, y: 40,  w: 620, h: 620, crit: 0.5 },
             { tab: 'sessions',    title: 'SESSIONS',    x: 2020, y: 700, w: 620, h: 300, crit: 0.3 },
             { tab: 'notebook',    title: 'NOTEBOOK',    x: 40,   y: 1060, w: 460, h: 400, crit: 0.4 },
@@ -114,6 +126,13 @@ const Atrium = (() => {
 
     /* ── R2: attention travels; nothing is created or destroyed ──────── */
     function attend(tab, opts = {}) {
+        if (typeof tab === 'string' && tab.includes(':')) {   // R8: a child is a destination
+            const [parent, kid] = tab.split(':');
+            const pw = wins.get(parent);
+            if (!pw) return false;
+            attend(parent, opts);
+            return activateChild(pw.frame, kid);
+        }
         const w = wins.get(tab);
         if (!w) return false;
         if (!travelling) {
@@ -199,6 +218,14 @@ const Atrium = (() => {
         save();
     }
 
+    /* ── R4 corollary: a folded window is a live gauge, not a blank ──── */
+    function gauge(tab, key, fmt) {
+        const w = wins.get(tab);
+        const peek = w && w.frame.querySelector('.atr-peek');
+        if (!peek) return;
+        SharedState.on(key, v => { peek.textContent = fmt(v); });   // sticky: paints now
+    }
+
     /* ── R9: the courtyard is generated from config ──────────────────── */
     function buildCourtyard(c) {
         host.querySelectorAll('.atr-win').forEach(f => unpin(f));      // evacuate first
@@ -251,6 +278,7 @@ const Atrium = (() => {
         f.style.cssText = `left:${cfg.x}px;top:${cfg.y}px;width:${cfg.w}px;height:${cfg.h}px`;
         f.innerHTML = `<div class="atr-head"><button class="atr-fold" title="fold / open">▼</button>`
                     + `<b>${cfg.title}</b><span class="atr-peek"></span></div>`
+                    + (cfg.children ? `<div class="atr-kids"></div>` : '')
                     + `<div class="atr-body"></div>`;
         f.querySelector('.atr-body').appendChild(content);   // MOVE, never clone
         content.classList.add('active');                      // it is always live now
@@ -269,8 +297,34 @@ const Atrium = (() => {
             head.addEventListener('pointermove', mv);
             head.addEventListener('pointerup', () => { head.removeEventListener('pointermove', mv); save(); }, { once: true });
         });
+        if (cfg.children) {
+            f._kids = cfg.children;
+            f._active = cfg.children[0].key;
+            paintKids(f);
+        }
         board.appendChild(f);
         return f;
+    }
+
+    /* R8: a child is a full destination, not a click-path. The strip calls the
+       panel's OWN switcher, so no panel logic changes — the win is that
+       attend('embryos:vitals') addresses it from anywhere on the surface. */
+    function paintKids(f) {
+        const strip = f.querySelector('.atr-kids');
+        if (!strip) return;
+        strip.innerHTML = f._kids.map(k =>
+            `<span class="atr-kid ${k.key === f._active ? 'on' : ''}" data-kid="${k.key}">${k.title}</span>`
+        ).join('');
+        strip.querySelectorAll('[data-kid]').forEach(n => n.onclick = () => activateChild(f, n.dataset.kid));
+    }
+
+    function activateChild(f, key) {
+        const k = (f._kids || []).find(c => c.key === key);
+        if (!k) return false;
+        f._active = key;
+        paintKids(f);
+        try { k.go(); } catch (e) { console.warn('[atrium] child', key, 'failed', e); }
+        return true;
     }
 
     /* ── persistence ─────────────────────────────────────────────────── */
@@ -351,6 +405,9 @@ const Atrium = (() => {
         for (const cfg of CONFIG.windows) {
             if (cfg.pin && wins.has(cfg.tab)) pin(wins.get(cfg.tab).frame, cfg.pin);
         }
+
+        gauge('embryos', 'selectedEmbryoId', v => (v ? '◆ ' + v : ''));
+        gauge('devices', 'stageXY', v => (v ? `${Math.round(v.x)}, ${Math.round(v.y)} µm` : ''));
 
         vp.addEventListener('wheel', e => {
             if (e.target.closest('.atr-body')) return;      // frames own their own zoom
