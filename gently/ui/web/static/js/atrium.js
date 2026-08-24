@@ -128,6 +128,7 @@ const Atrium = (() => {
     /* ── surface state ───────────────────────────────────────────────── */
     let vp, board, host, on = false;
     let vx = 0, vy = 0, scale = 1, glideGen = 0, tipDrop = null;
+    let handsOn = false;        // a pointer is down somewhere on the surface
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const wins = new Map();            // tab -> {el, frame, cfg}
     const TRAIL = [];
@@ -255,16 +256,20 @@ const Atrium = (() => {
        is now the trigger, so the same hooks fire on first travel. */
     const inited = new Set();
     function lazyInit(tab) {
-        if (inited.has(tab)) return;
-        inited.add(tab);
+        if (!tab || inited.has(tab)) return;
         try {
             if (tab === 'home' && typeof HomeApp !== 'undefined') HomeApp.init();
             if (tab === 'calibration' && typeof renderCalibrationGallery === 'function') renderCalibrationGallery();
             if (tab === 'events' && typeof renderEventsTable === 'function') renderEventsTable();
-            if (tab === 'plans' && typeof CampaignsApp !== 'undefined') CampaignsApp.init();
             if (tab === 'embryos' && typeof EmbryosManager !== 'undefined') EmbryosManager.clearDetectionBadge?.();
+            if (tab === 'plans' && typeof CampaignsApp !== 'undefined') CampaignsApp.init();
+            if (tab === 'sessions' && typeof ReviewApp !== 'undefined') ReviewApp.init();
+            if (tab === 'experiment' && typeof ExperimentOverview !== 'undefined') ExperimentOverview.init();
+            if (tab === 'notebook' && typeof NotebookApp !== 'undefined') NotebookApp.init();
+            if (tab === 'gallery' && typeof GalleryTab !== 'undefined') GalleryTab.init();
+            inited.add(tab);          // AFTER the work: a throw must not count as done
         } catch (e) {
-            console.warn('[atrium] lazy init failed for', tab, e);
+            console.warn('[atrium] lazy init failed for', tab, '— will retry on next open', e);
         }
     }
 
@@ -272,6 +277,7 @@ const Atrium = (() => {
     const FOLDED_H = 32;
     function fold(frame, on_) {
         const was = frame.classList.contains('atr-folded');
+        if (!on_) lazyInit(frame.dataset.tab);   // opened by density or the ladder
         frame.classList.toggle('atr-folded', on_);
         frame.style.height = (on_ ? FOLDED_H : +frame.dataset.h) + 'px';
         // Unfolding gives a window a box it did not have. occupancy3d.js and
@@ -322,6 +328,10 @@ const Atrium = (() => {
         for (const e of body.querySelectorAll('*')) {
             const c = e.classList[0];
             if (!c) continue;
+            // Skip what is not rendered. PLANS read "6 rows" from the six
+            // .view-btn children of a switcher this stylesheet hides — the
+            // ROW_MIN guard exists to stop exactly that and six walked through.
+            if (e.offsetParent === null) continue;
             tally.set(c, (tally.get(c) || 0) + 1);
         }
         let best = 0;
@@ -456,7 +466,13 @@ const Atrium = (() => {
     /* R6: release at the lowest channel that will still be seen in time.
        A window only climbs — one release per rung, so nothing spams. */
     function pressTick() {
-        wins.forEach(({ frame: f }) => { contentGauge(f); fitToContent(f); });
+        // Never re-fit or re-pack while a pointer is down. packColumns rewrites
+        // style.top for every window from the authored order, with no transition
+        // — so a window could teleport out from under the cursor mid-drag, and a
+        // vertical drag was reverted inside two seconds.
+        wins.forEach(({ frame: f }) => contentGauge(f));
+        if (handsOn) return;
+        wins.forEach(({ frame: f }) => fitToContent(f));
         packColumns();
         wins.forEach(({ frame: f, cfg }) => {
             if (!cfg.pressWhen) return;
@@ -472,6 +488,10 @@ const Atrium = (() => {
             f._rung = rung;
             const ch = CONFIG.release.ladder[rung].channel;
             RELEASES.unshift({ t: new Date().toLocaleTimeString(), tab: cfg.tab, u: u.toFixed(2), ch });
+            if (RELEASES.length > 200) RELEASES.length = 200;
+            // R6 calls this log "how the policy gets defended the first time it
+            // wakes someone up" — so it has to outlive a refresh.
+            console.info('[atrium] release', ch, cfg.tab, 'u=' + u.toFixed(2));
             if (ch === 'chip') f.classList.add('atr-calling');
             if (ch === 'open') {
                 // The courtyard is for gauges. A rail is 300px and DEVICES wants
@@ -559,6 +579,7 @@ const Atrium = (() => {
         const head = f.querySelector('.atr-head');
         head.addEventListener('pointerdown', e => {
             if (e.target.tagName === 'BUTTON') return;
+            handsOn = true;
             head.setPointerCapture(e.pointerId);
             const ox = e.clientX, oy = e.clientY, px = f.offsetLeft, py = f.offsetTop;
             const mv = m => {                                 // /scale: track the cursor at any zoom
@@ -566,7 +587,9 @@ const Atrium = (() => {
                 f.style.top = py + (m.clientY - oy) / scale + 'px';
             };
             head.addEventListener('pointermove', mv);
-            head.addEventListener('pointerup', () => { head.removeEventListener('pointermove', mv); save(); }, { once: true });
+            head.addEventListener('pointerup', () => {
+                head.removeEventListener('pointermove', mv); handsOn = false; save();
+            }, { once: true });
         });
         if (cfg.children) {
             f._kids = cfg.children;
@@ -702,8 +725,16 @@ const Atrium = (() => {
         }, { passive: false });
 
         vp.addEventListener('pointerdown', e => {
+            // Freeze the bench on ANY pointerdown, including one on a window.
+            // A glide is 420ms of simultaneous pan and zoom, so a click landing
+            // mid-travel hits a moving, rescaling target — and DEVICES' canvas
+            // turns a click into a real stage move.
+            stopGlide();
+            handsOn = true;
+            addEventListener('pointerup', () => { handsOn = false; }, { once: true });
+            addEventListener('pointercancel', () => { handsOn = false; }, { once: true });
             if (e.target.closest('.atr-win')) return;
-            stopGlide(); vp.setPointerCapture(e.pointerId); vp.classList.add('panning');
+            vp.setPointerCapture(e.pointerId); vp.classList.add('panning');
             const sx = e.clientX - vx, sy = e.clientY - vy;
             const mv = m => { vx = m.clientX - sx; vy = m.clientY - sy; apply(); };
             vp.addEventListener('pointermove', mv);
@@ -720,6 +751,23 @@ const Atrium = (() => {
         }
 
         on = true;
+        // A window whose crit x overdueCap cannot reach the capped rung is
+        // permanently confined below it. EVENTS (crit .4) ceilings at 1.20
+        // against an `open` threshold of 1.25 — it can never open, and it is the
+        // window watching the telemetry socket. Say so rather than hide it.
+        {
+            const L = CONFIG.release.ladder;
+            const capAt = (L.find(r => r.channel === CONFIG.release.maxChannel) || {}).at || 0;
+            for (const cfg of CONFIG.windows) {
+                if (!cfg.pressWhen) continue;
+                const ceiling = (cfg.crit || 0) * CONFIG.release.overdueCap;
+                if (ceiling < capAt) {
+                    console.warn(`[atrium] ${cfg.tab}: urgency ceiling ${ceiling.toFixed(2)} `
+                        + `cannot reach '${CONFIG.release.maxChannel}' at ${capAt} — `
+                        + `raise crit above ${(capAt / CONFIG.release.overdueCap).toFixed(2)}`);
+                }
+            }
+        }
         pressTimer = setInterval(pressTick, CONFIG.release.tickMs);
         portalFixedOverlays();
         setDensity(CONFIG.density);

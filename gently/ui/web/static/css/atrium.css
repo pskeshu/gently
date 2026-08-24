@@ -25,6 +25,7 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
     --atr-shadow-lift: 0 14px 40px rgba(0, 0, 0, .6), 0 2px 4px rgba(0, 0, 0, .45);
     --atr-win-border:  #2b3440;
     --atr-chrome-bg:   rgba(22, 27, 34, .92);
+    --warn:            #d29922;   /* consumed by .atr-calling and #atr-releases */
 }
 [data-theme="light"] {
     --atr-bench:       #dde3ec;   /* a real surface, not almost-white */
@@ -33,6 +34,7 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
     --atr-shadow-lift: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 4px rgba(15, 23, 42, .08);
     --atr-win-border:  #cbd5e1;
     --atr-chrome-bg:   rgba(255, 255, 255, .92);
+    --warn:            #b45309;   /* darker: the light chrome is nearly white */
 }
 
 /* ── the bench ───────────────────────────────────────────────────────── */
@@ -83,6 +85,12 @@ body.atr-focused .atr-win.atr-attend {
     box-shadow: var(--atr-shadow-lift);                 /* attention lifts it */
 }
 body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned never recedes */
+/* Nor does one that is calling. `body.atr-focused .atr-win` is specificity
+   (0,2,1) and `.atr-win.atr-calling` is (0,2,0), so an escalating window was
+   drawn at 18% opacity with its amber ring desaturated to grey — for the whole
+   time the operator was attending anything, which is the normal working state.
+   R6 escalated, the log recorded it, and nothing was visible. */
+body.atr-focused .atr-win.atr-calling { opacity: 1; filter: none; }
 
 .atr-head {
     display: flex; align-items: center; gap: .45rem; flex: 0 0 auto;
@@ -206,3 +214,14 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
     background: none; border: 0; box-shadow: none; backdrop-filter: none; padding: .1rem .3rem;
 }
 #atr-chips .atr-btn { box-shadow: none; }
+
+/* main.css forces animation-iteration-count:1 and duration:.01ms on * under
+   prefers-reduced-motion, which snaps .atr-calling past its 50% keyframe and
+   leaves NO ring — deleting the alarm while the 420ms bench glide, being rAF
+   and not CSS, was untouched. Give reduced-motion a static ring instead. */
+@media (prefers-reduced-motion: reduce) {
+    .atr-win.atr-calling {
+        animation: none;
+        box-shadow: var(--atr-shadow-lift), 0 0 0 3px var(--warn);
+    }
+}
