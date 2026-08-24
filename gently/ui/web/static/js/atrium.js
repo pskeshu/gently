@@ -96,7 +96,7 @@ const Atrium = (() => {
 
     /* ── surface state ───────────────────────────────────────────────── */
     let vp, board, host, on = false;
-    let vx = 0, vy = 0, scale = 1, glideGen = 0;
+    let vx = 0, vy = 0, scale = 1, glideGen = 0, tipDrop = null;
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const wins = new Map();            // tab -> {el, frame, cfg}
     const TRAIL = [];
@@ -116,6 +116,8 @@ const Atrium = (() => {
         // A CSS transform fires neither resize nor ResizeObserver, so anything
         // holding a backing store has to be told. (SPEC R10 / migration cat. f)
         window.dispatchEvent(new CustomEvent('atrium:transform', { detail: { scale, vx, vy } }));
+        if (tipDrop) { clearTimeout(tipDrop); }
+        tipDrop = setTimeout(dropStaleTooltips, 60);   // coalesce across a glide
     }
 
     const stopGlide = () => { glideGen++; };
@@ -255,6 +257,51 @@ const Atrium = (() => {
         const peek = w && w.frame.querySelector('.atr-peek');
         if (!peek) return;
         SharedState.on(key, v => { peek.textContent = fmt(v); });   // sticky: paints now
+    }
+
+    /* ── compatibility: the transform containing-block trap ──────────
+       A CSS transform makes an ancestor the containing block for
+       position:fixed descendants. So a "full-screen" overlay created INSIDE a
+       window is not viewport-fixed at all — it is scaled by the bench, offset
+       by the pan, and then clipped by the window's overflow:hidden. Measured
+       in situ: a fixed 50px box at (0,0) rendered at (20,53) and 33px wide.
+
+       Every overlay in the app today happens to be parented to <body> or to
+       #app-main, so nothing is broken right now. That is luck, not design —
+       the next modal written inside a panel breaks silently and ONLY under the
+       Atrium, which is the worst kind of bug to inherit. So: portal it out and
+       say so loudly. This is a detector as much as a fix. */
+    let portalObserver = null;
+    function portalFixedOverlays() {
+        const escape = el => {
+            if (!(el instanceof HTMLElement) || !el.closest('#atr-board')) return;
+            if (getComputedStyle(el).position !== 'fixed') return;
+            console.warn('[atrium] portalled a position:fixed overlay out of the bench —',
+                el.id || el.className,
+                '\n  A transformed ancestor is its containing block, so inside a window it',
+                '\n  would be scaled, offset and clipped. Parent overlays to <body>.');
+            document.body.appendChild(el);
+        };
+        portalObserver = new MutationObserver(muts => {
+            for (const m of muts) {
+                m.addedNodes.forEach(n => {
+                    escape(n);
+                    if (n instanceof HTMLElement) n.querySelectorAll('*').forEach(escape);
+                });
+            }
+        });
+        portalObserver.observe(board, { childList: true, subtree: true });
+        // anything already trapped at enable() time
+        board.querySelectorAll('*').forEach(escape);
+    }
+
+    /* A tooltip anchored to a window is stale the moment the bench moves. Its
+       own dismissal triggers are mouseleave and a capturing scroll listener,
+       and a transform change is NEITHER — so it would hang in space while its
+       anchor slides away. Cheaper to drop them here than to teach app.js's
+       Tooltips module about the bench. */
+    function dropStaleTooltips() {
+        document.querySelectorAll('.tooltip').forEach(t => t.remove());
     }
 
     /* ── R5: pressure ────────────────────────────────────────────────
@@ -536,6 +583,7 @@ const Atrium = (() => {
 
         on = true;
         pressTimer = setInterval(pressTick, CONFIG.release.tickMs);
+        portalFixedOverlays();
         setDensity(CONFIG.density);
         restore();
         goHome(false);
@@ -590,7 +638,7 @@ const Atrium = (() => {
     }
 
     return { init, enable, disable, attend, bench, home: goHome, back, setDensity,
-             urgency, channelFor, pressTick, RELEASES,
+             urgency, channelFor, pressTick, RELEASES, dropStaleTooltips,
              fold, pin, unpin, buildCourtyard, CONFIG,
              get on() { return on; }, get windows() { return wins; }, _trail: TRAIL };
 })();
