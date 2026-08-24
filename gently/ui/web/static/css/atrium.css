@@ -149,3 +149,10 @@ body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned ne
    windows the Atrium gives children, or the operator sees the same control
    twice. Windows without children keep theirs; it is still the only way in. */
 body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important; }
+
+/* R6: a window that has released above the gauge says so */
+.atr-win.atr-calling { animation: atr-call 1.7s ease-in-out infinite; }
+@keyframes atr-call {
+    50% { box-shadow: 0 8px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--warn, #d29922) 55%, transparent); }
+}
+#atr-releases { color: var(--warn, #d29922); cursor: help; }

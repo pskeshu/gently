@@ -14,8 +14,10 @@ Two implementations, deliberately:
 - **Production** — `gently/ui/web/static/js/atrium.js` + `static/css/atrium.css`.
   Runs on the real UI behind `?atrium=1`, off by default. It adopts the ten
   existing `.tab-content` divs as windows rather than rewriting them. Carries
-  R1–R4 and R9–R10 today; pressure and the release ladder land once the store
-  gives them real data to press on.
+  **all ten rules**. Pressure is wired to genuine signals — the microscope
+  dropping off `ConnectionStatus`, the telemetry socket going down — and its
+  ladder is capped at `open` until an operator has seen it escalate. Adding a
+  source is one line: give a window `tol` and `pressWhen`.
 
 The reference is allowed to be ahead. When the two disagree, the reference is
 the design and the production shell is the debt.

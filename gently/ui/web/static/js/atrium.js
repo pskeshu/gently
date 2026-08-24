@@ -42,7 +42,9 @@ const Atrium = (() => {
                 { key: 'filmstrip', title: 'filmstrip', go: () => EmbryosManager.switchView('filmstrip') },
                 { key: 'vitals',    title: 'vitals',    go: () => EmbryosManager.switchView('vitals') },
               ] },
-            { tab: 'devices',     title: 'DEVICES',     x: 1280, y: 40,  w: 700, h: 620, crit: 0.9, pin: 'rail' },
+            { tab: 'devices',     title: 'DEVICES',     x: 1280, y: 40,  w: 700, h: 620, crit: 0.9, pin: 'rail',
+              // a real fact that genuinely goes stale: the scope dropped off
+              tol: 20, pressWhen: () => !ConnectionStatus.get().microscopeConnected },
             { tab: 'calibration', title: 'CALIBRATION', x: 540,  y: 700, w: 700, h: 460, crit: 0.85, children: [
                 { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
                 { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
@@ -51,7 +53,8 @@ const Atrium = (() => {
                 { key: 'overview', title: 'overview', go: () => ExperimentOverview.setView('overview') },
                 { key: 'rules',    title: 'rules',    go: () => ExperimentOverview.setView('rules') },
               ] },
-            { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4, children: [
+            { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4,
+              tol: 45, pressWhen: () => !ConnectionStatus.get().gentlyConnected, children: [
                 { key: 'log',      title: 'log',      go: () => switchSystemView('log') },
                 { key: 'timeline', title: 'timeline', go: () => switchSystemView('timeline') },
                 { key: 'summary',  title: 'summary',  go: () => switchSystemView('summary') },
@@ -69,6 +72,24 @@ const Atrium = (() => {
             { tab: 'gallery',     title: 'GALLERY',     x: 540,  y: 1200, w: 700, h: 400, crit: 0.4 },
         ],
         home: { cx: 940, cy: 560, scale: 0.58 },
+
+        /* R5/R6. urgency = crit x overdue, zero when fresh; the ladder is a
+           threshold on that one number, not an authored policy table. The cap
+           is the whole safety argument for letting an agent drive this. */
+        release: {
+            ladder: [
+                { at: 0,    channel: 'gauge' },
+                { at: 0.85, channel: 'chip' },
+                { at: 1.25, channel: 'open' },
+                { at: 1.80, channel: 'offer' },
+                { at: 2.50, channel: 'seize' },
+                { at: 3.30, channel: 'notify' },
+                { at: 4.30, channel: 'email' },
+            ],
+            maxChannel: 'open',      // conservative until an operator has seen it
+            overdueCap: 3,
+            tickMs: 2000,
+        },
         density: 4,
         minScale: 0.12, maxScale: 2.5,
     };
@@ -236,6 +257,59 @@ const Atrium = (() => {
         SharedState.on(key, v => { peek.textContent = fmt(v); });   // sticky: paints now
     }
 
+    /* ── R5: pressure ────────────────────────────────────────────────
+       A window presses when its own predicate says a fact is outstanding.
+       urgency = crit x overdue. Zero when fresh — importance amplifies
+       urgency, it does not manufacture it. Adding a source is one line:
+       give a window `tol` and `pressWhen`. */
+    const RELEASES = [];
+    let pressTimer = null;
+
+    function urgency(f) {
+        const tol = +f.dataset.tol || 0;
+        if (!tol || !f._since) return 0;                 // not pressing
+        const overdue = Math.min((Date.now() - f._since) / 1000 / tol, CONFIG.release.overdueCap);
+        return +((+f.dataset.crit || 0) * Math.max(0, overdue)).toFixed(3);
+    }
+    function channelFor(u) {
+        const L = CONFIG.release.ladder;
+        const cap = L.findIndex(r => r.channel === CONFIG.release.maxChannel);
+        let i = 0; while (i + 1 < L.length && u >= L[i + 1].at) i++;
+        return Math.min(i, cap < 0 ? L.length - 1 : cap);
+    }
+
+    /* R6: release at the lowest channel that will still be seen in time.
+       A window only climbs — one release per rung, so nothing spams. */
+    function pressTick() {
+        wins.forEach(({ frame: f, cfg }) => {
+            if (!cfg.pressWhen) return;
+            let pressing = false;
+            try { pressing = !!cfg.pressWhen(); } catch (_) { pressing = false; }
+            if (!pressing) {                              // resolved is not refreshed
+                if (f._since) { f._since = 0; f._rung = 0; f.classList.remove('atr-calling'); }
+                return;
+            }
+            if (!f._since) f._since = Date.now();
+            const u = urgency(f), rung = channelFor(u);
+            if (rung <= (f._rung || 0)) return;
+            f._rung = rung;
+            const ch = CONFIG.release.ladder[rung].channel;
+            RELEASES.unshift({ t: new Date().toLocaleTimeString(), tab: cfg.tab, u: u.toFixed(2), ch });
+            if (ch === 'chip') f.classList.add('atr-calling');
+            if (ch === 'open') { fold(f, false); f.classList.add('atr-calling'); }
+            if (ch === 'offer' || ch === 'seize') attend(cfg.tab);
+            paintReleases();
+        });
+    }
+    function paintReleases() {
+        const el = document.getElementById('atr-releases');
+        if (!el) return;
+        el.textContent = RELEASES.length ? `${RELEASES[0].ch} · ${RELEASES[0].tab}` : '';
+        el.title = RELEASES.slice(0, 8).map(r => `${r.t}  ${r.ch}  ${r.tab}  u=${r.u}`).join('\n')
+                 || 'nothing released';
+        el.hidden = !RELEASES.length;
+    }
+
     /* ── R9: the courtyard is generated from config ──────────────────── */
     function buildCourtyard(c) {
         host.querySelectorAll('.atr-win').forEach(f => unpin(f));      // evacuate first
@@ -285,6 +359,8 @@ const Atrium = (() => {
         const f = document.createElement('div');
         f.className = 'atr-win'; f.id = 'atr-' + cfg.tab;
         f.dataset.h = cfg.h; f.dataset.crit = cfg.crit ?? 0.5; f.dataset.tab = cfg.tab;
+        if (cfg.tol) f.dataset.tol = cfg.tol;
+        f._since = 0; f._rung = 0;
         f.style.cssText = `left:${cfg.x}px;top:${cfg.y}px;width:${cfg.w}px;height:${cfg.h}px`;
         f.innerHTML = `<div class="atr-head"><button class="atr-fold" title="fold / open">▼</button>`
                     + `<b>${cfg.title}</b><span class="atr-peek"></span></div>`
@@ -386,6 +462,7 @@ const Atrium = (() => {
             <div id="atr-chips"></div>
           </div>
           <div id="atr-br">
+            <span id="atr-releases" hidden></span>
             <span id="atr-zoom">100%</span>
             <label>density <input type="range" id="atr-density" min="1" max="10"
               value="${CONFIG.density}"><b id="atr-density-n">${CONFIG.density}</b></label>
@@ -458,6 +535,7 @@ const Atrium = (() => {
         }
 
         on = true;
+        pressTimer = setInterval(pressTick, CONFIG.release.tickMs);
         setDensity(CONFIG.density);
         restore();
         goHome(false);
@@ -512,6 +590,7 @@ const Atrium = (() => {
     }
 
     return { init, enable, disable, attend, bench, home: goHome, back, setDensity,
+             urgency, channelFor, pressTick, RELEASES,
              fold, pin, unpin, buildCourtyard, CONFIG,
              get on() { return on; }, get windows() { return wins; }, _trail: TRAIL };
 })();
