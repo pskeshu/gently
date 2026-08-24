@@ -5,8 +5,20 @@
 > **pressure**, bounded by a **cap**, and shared between an operator and an
 > agent that can point but never build.
 
-Reference implementation: [`canvas-surface.html`](canvas-surface.html) —
-self-testing, load with `?selftest` and read the console.
+Two implementations, deliberately:
+
+- **Reference** — [`canvas-surface.html`](canvas-surface.html). Self-testing;
+  load with `?selftest` and read the console. Fake data, full model: pressure,
+  the release ladder, subwindows, the courtyard designer. This is where a rule
+  gets tried before it is trusted.
+- **Production** — `gently/ui/web/static/js/atrium.js` + `static/css/atrium.css`.
+  Runs on the real UI behind `?atrium=1`, off by default. It adopts the ten
+  existing `.tab-content` divs as windows rather than rewriting them. Carries
+  R1–R4 and R9–R10 today; pressure and the release ladder land once the store
+  gives them real data to press on.
+
+The reference is allowed to be ahead. When the two disagree, the reference is
+the design and the production shell is the debt.
 Migration into the live UI: [`MIGRATION.md`](MIGRATION.md).
 How it was arrived at: [`IDEAS.md`](IDEAS.md).
 
