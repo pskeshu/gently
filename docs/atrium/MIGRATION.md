@@ -16,12 +16,54 @@
 |---|---|---|
 | 1 · delete dead code | ✅ done | `fe6ec80` · 1,784 lines · 0 story deltas |
 | 2 · live bugs | ✅ done | `1c7165b` · 10 fixed, **5 refuted** · 0 story deltas |
-| 3 · transform safety | 🔄 running | must be a no-op at scale 1.0 |
+| 3 · transform safety | ✅ done | 27 fixed, **23 refuted**, 6 deferred |
+| 8 · port the shell | ✅ done | `atrium.js` + `atrium.css`, flag-gated, all 10 panels adopted |
 | 4 · the store | ⬜ | extend `status-store.js`, `stageXY` first |
 | 5 · pilot windows | ⬜ | `notebook.js`, `device-layer.js` |
 | 6 · pure projections | ⬜ | `campaigns.js` |
-| 7 · reconcile with subwindows | ⬜ | **new — see below** |
-| 8 · port the shell | ⬜ | #123 |
+| 7 · reconcile with subwindows | ⬜ | see below |
+
+**Phase 3's refutation rate was 46%** — higher than phase 2's 33%. The pattern in
+what got refuted is worth internalising, because it is the same mistake four
+times:
+
+- **viewBox units are not screen pixels.** `font-size="9"` inside
+  `viewBox="0 0 800 140"` already tracks container width and needs no fix. This
+  accounted for most false hazards in `embryos.js`, `campaigns.js` and
+  `temperature-graph.js`.
+- **`clientWidth`/`offsetWidth` are transform-blind**, so code using them is
+  already in the prescribed form. Only `getBoundingClientRect` mixes spaces.
+- **Unconditional `preventDefault` on a frame's inner wheel is what SPEC R3
+  requires**, not a bug — the frame owns its own zoom. I had this backwards in
+  the brief and the agents corrected it against the spec.
+- **A permanent rAF loop makes a transform-redraw hook unnecessary**;
+  `occupancy3d.js` and `projection-viewer.js` both already re-render every frame
+  and already listen for `gently:layout-changed`.
+
+Two groups report their fixes are *not bit-identical* at scale 1.0
+(`marking.js`, `operate.js`): where a flex layout yields a fractional width the
+old code divided by the truncated backing store and the new code divides by the
+measured rect — a sub-pixel shift, in the direction of the true displayed size.
+
+### Phase 8 — the shell, as built
+
+`gently/ui/web/static/js/atrium.js` + `static/css/atrium.css`, loaded from
+`index.html`, **off by default**. `?atrium=1` on, `?atrium=0` off, choice sticks
+in localStorage. With the flag off it registers nothing: no viewport, no body
+class, `switchTab` unwrapped.
+
+It **adopts** the ten existing `.tab-content` divs rather than rewriting them —
+the div is *moved* into a window frame, never cloned. That is what made the port
+cheap, and it works because all ten were already in the DOM simultaneously; tabs
+only hid them with a class. `switchTab(name)` is wrapped to mean `attend(name)`,
+still sets `.active` and still emits `TAB_CHANGED`, so the ux_v2 rail and every
+other listener keep working. The tab shell's lazy-init hooks (`HomeApp.init`,
+`renderCalibrationGallery`, `CampaignsApp.init`, `renderEventsTable`) now fire on
+first travel instead of first show.
+
+Verified live: all ten adopted with content intact, travel to each produces zero
+console errors, DEVICES pins to the rail, density folds the rest to gauges, and
+`gently:layout-changed` fires on unfold so the 3D viewers re-measure.
 
 **Verification standard for every phase.** CI runs no JavaScript, and the
 committed `tools/ui_crawler/baseline/status.json` was recorded in a *different*
