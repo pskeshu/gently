@@ -443,8 +443,6 @@ const KeyboardShortcuts = {
         '4': () => switchTab(TABS.CALIBRATION),  // Calibration
         '5': () => switchTab(TABS.DEVICES),      // Devices
         '6': () => switchTab(TABS.EXPERIMENT),   // Experiment
-        'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
-        'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
         't': () => ThemeManager.toggle(),
         'p': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('profile'); },
@@ -464,19 +462,6 @@ const KeyboardShortcuts = {
         if (handler) {
             e.preventDefault();
             handler();
-        }
-    },
-
-    adjustZSlider(direction) {
-        if (state.tab !== 'main' || !state.current3dVolume) return;
-
-        const slider = document.getElementById('z-slider');
-        if (!slider) return;
-
-        const newVal = parseInt(slider.value) + direction;
-        if (newVal >= parseInt(slider.min) && newVal <= parseInt(slider.max)) {
-            slider.value = newVal;
-            slider.dispatchEvent(new Event('input'));
         }
     },
 
@@ -634,17 +619,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
-
-    // Z-slider event listener (Live View)
-    const zSlider = document.getElementById('z-slider');
-    if (zSlider) {
-        zSlider.addEventListener('input', (e) => {
-            if (!state.current3dVolume) return;
-            state.currentZ = parseInt(e.target.value);
-            updateZSliderDisplay();
-            loadZSlice(state.current3dVolume.uid, state.currentZ);
-        });
-    }
 
     // Initialize events tab
     initEventsTab();

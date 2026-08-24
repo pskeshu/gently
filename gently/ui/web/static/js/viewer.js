@@ -62,66 +62,6 @@ function handleNew3DVolume(data) {
     if (state.tab === 'calibration') {
         CalibrationManager.render();
     }
-
-    // Auto-display the new 3D volume
-    if (state.tab === 'main') {
-        display3DVolume(data);
-    }
-}
-
-function display3DVolume(data) {
-    state.current3dVolume = data;
-    state.currentZ = Math.floor(data.num_slices / 2);  // Start in middle
-
-    // Setup slider
-    const slider = document.getElementById('z-slider');
-    const sliderContainer = document.getElementById('z-slider-container');
-
-    slider.min = 0;
-    slider.max = data.num_slices - 1;
-    slider.value = state.currentZ;
-
-    // Show slider
-    sliderContainer.classList.add('active');
-
-    // Update info
-    updateZSliderDisplay();
-
-    // Load the slice
-    loadZSlice(data.uid, state.currentZ);
-
-    // Show viewer info and update
-    const viewerInfo = document.getElementById('viewer-info');
-    if (viewerInfo) viewerInfo.style.display = 'flex';
-
-    const infoType = document.getElementById('info-type');
-    if (infoType) infoType.textContent = `3D Seg · ${data.num_cells} cells`;
-    const infoUid = document.getElementById('info-uid');
-    if (infoUid) infoUid.textContent = data.uid.slice(0, 12) + '...';
-    const infoEmbryo = document.getElementById('info-embryo');
-    if (infoEmbryo) infoEmbryo.textContent = data.metadata?.embryo_id || '-';
-    const imageTime = document.getElementById('image-time');
-    if (imageTime) imageTime.textContent = new Date(data.timestamp).toLocaleTimeString();
-}
-
-function loadZSlice(uid, z) {
-    const img = document.getElementById('main-image');
-    const placeholder = document.getElementById('placeholder');
-    if (!img || !placeholder) return;
-
-    // Add cache buster to force reload
-    img.src = `/api/volumes3d/${uid}/slice/${z}?t=${Date.now()}`;
-    img.style.display = 'block';
-    placeholder.style.display = 'none';
-}
-
-function updateZSliderDisplay() {
-    const data = state.current3dVolume;
-    if (!data) return;
-    const val = document.getElementById('z-slider-value');
-    const info = document.getElementById('z-slider-info');
-    if (val) val.textContent = state.currentZ;
-    if (info) info.textContent = `${state.currentZ + 1} / ${data.num_slices}`;
 }
 
 function hideZSlider() {
@@ -202,12 +142,4 @@ function displayImage(data) {
 
     // Update recent strip to show active state
     renderRecentList();
-}
-
-function show3DVolume(uid) {
-    const vol = state.volumes3d.find(v => v.uid === uid);
-    if (vol) {
-        display3DVolume(vol);
-        switchTab('main');
-    }
 }

@@ -1157,7 +1157,7 @@ const CalibrationManager = {
                     <div class="calibration-section-header">3D Segmentations</div>
                     <div class="calibration-3d-grid">
                         ${state.volumes3d.slice(-10).reverse().map(vol => `
-                            <div class="calibration-3d-card" onclick="show3DVolume('${vol.uid}')">
+                            <div class="calibration-3d-card">
                                 <div class="card-cells">${vol.num_cells} cells</div>
                                 <div class="card-slices">${vol.num_slices} slices</div>
                                 <div class="card-uid">${vol.uid.slice(0, 10)}...</div>

@@ -1779,59 +1779,6 @@ a.tab-link.active {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* Z-Slider for 3D volumes */
-.z-slider-container {
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    padding: 0.5rem;
-    background: var(--bg-card);
-    border-left: 1px solid var(--border);
-    min-width: 50px;
-    flex-shrink: 0;
-}
-
-.z-slider-container.active {
-    display: flex;
-}
-
-.z-slider-label {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-    text-transform: uppercase;
-}
-
-.z-slider-value {
-    font-size: 0.85rem;
-    color: var(--accent);
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-}
-
-.z-slider {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 20px;
-    flex: 1;
-    min-height: 200px;
-    cursor: pointer;
-}
-
-/* Firefox vertical slider */
-@-moz-document url-prefix() {
-    .z-slider {
-        width: 20px;
-    }
-}
-
-.z-slider-info {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-top: 0.5rem;
-    text-align: center;
-}
-
 /* Events Tab */
 #events-content {
     flex-direction: column;
