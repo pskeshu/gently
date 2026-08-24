@@ -10,6 +10,9 @@
 <body>
     <script>
         const savedTheme = localStorage.getItem('gently-theme') || 'light';
+        // Both, or <html> loads with no data-theme at all and every :root-scoped
+        // variable keeps its default until the toggle is pressed.
+        document.documentElement.setAttribute('data-theme', savedTheme);
         document.body.setAttribute('data-theme', savedTheme);
     </script>
 
@@ -324,8 +327,14 @@
         const toggle = document.getElementById('theme-toggle');
         if (toggle) {
             toggle.addEventListener('click', () => {
-                const current = document.body.getAttribute('data-theme') || 'dark';
+                // Set BOTH, as _header.html and ThemeManager.setTheme do. Setting
+                // only body left <html> holding a stale data-theme, so anything
+                // scoped to :root kept the previous theme on this page. This page
+                // does not load app.js, so ThemeManager is not available here.
+                const current = document.documentElement.getAttribute('data-theme')
+                    || document.body.getAttribute('data-theme') || 'dark';
                 const next = current === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
                 document.body.setAttribute('data-theme', next);
                 localStorage.setItem('gently-theme', next);
             });
