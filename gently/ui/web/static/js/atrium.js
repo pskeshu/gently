@@ -262,7 +262,34 @@ const Atrium = (() => {
         const w = wins.get(tab);
         const peek = w && w.frame.querySelector('.atr-peek');
         if (!peek) return;
-        SharedState.on(key, v => { peek.textContent = fmt(v); });   // sticky: paints now
+
+        SharedState.on(key, v => {                                   // sticky: paints now
+            const t = fmt(v);
+            peek.dataset.explicit = t ? '1' : '0';
+            if (t) peek.textContent = t;
+        });
+    }
+
+    /* R4's test: "every folded window carries a non-empty gauge." A bare title
+       reads as broken rather than folded — it already produced a false bug
+       report ("home, events, notebook, gallery render empty"). Two windows had
+       gauges from the store; the other eight had nothing.
+
+       One generic reading rather than eight bespoke ones: count the panel's own
+       primary rows, and say "empty" when there are none. Truthful in an empty
+       session, informative in a live one, and it needs no new state.
+       ponytail: generic row count, give a window an explicit gauge() when its
+       own noun matters more than the number. */
+    const ROWS = 'tr,li,[data-embryo],[data-session-id],.card,.note-card,.campaign-item';
+    function contentGauge(f) {
+        const peek = f.querySelector('.atr-peek');
+        const body = f.querySelector('.atr-body');
+        if (!peek || !body) return;
+        if (peek.dataset.explicit === '1') return;   // a store gauge has a value
+
+        const n = body.querySelectorAll(ROWS).length;
+        const txt = n ? String(n) : 'empty';
+        if (peek.textContent !== txt) peek.textContent = txt;
     }
 
     /* ── compatibility: the transform containing-block trap ──────────
@@ -334,6 +361,7 @@ const Atrium = (() => {
     /* R6: release at the lowest channel that will still be seen in time.
        A window only climbs — one release per rung, so nothing spams. */
     function pressTick() {
+        wins.forEach(({ frame: f }) => contentGauge(f));
         wins.forEach(({ frame: f, cfg }) => {
             if (!cfg.pressWhen) return;
             let pressing = false;
@@ -569,6 +597,7 @@ const Atrium = (() => {
             if (cfg.pin && wins.has(cfg.tab)) pin(wins.get(cfg.tab).frame, cfg.pin);
         }
 
+        wins.forEach(({ frame: f }) => contentGauge(f));   // never blank on arrival
         gauge('embryos', 'selectedEmbryoId', v => (v ? '◆ ' + v : ''));
         gauge('devices', 'stageXY', v => (v ? `${Math.round(v.x)}, ${Math.round(v.y)} µm` : ''));
 
