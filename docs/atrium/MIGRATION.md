@@ -116,6 +116,24 @@ uv run python tools/ui_crawler/run_stories.py --url http://localhost:8080
 and diff the two runs, not the run against the baseline. Phases 1 and 2 each
 produced **zero** story deltas by that measure.
 
+**Its limit, learned the hard way.** The crawler drives a LIVE app, so it is only
+deterministic while the store is empty. Every phase up to the seeding work ran
+against an empty store and held at exactly zero deltas. Once a session is active
+and events accumulate, the same code produces different results run to run — an
+attribution test (revert one change, re-run) showed seven stories flipping in
+both directions between two runs of *identical* code.
+
+So: for a change to production JS, run it against an EMPTY store. Once there is
+seeded data, the crawler tells you about the data, not about the diff. Two
+consequences worth knowing:
+
+- Seeding legitimately breaks the landing stories (US-01/03/04/08). `pages.py`
+  skips the v2 landing "when the live session already has work", by design. That
+  is not a regression, and it reproduces with any change reverted.
+- Direct verification (cold-start flow, console, measured geometry) is the
+  stronger signal for anything the stories do not cover — which is most of the
+  Atrium.
+
 **The audit's own error rate is about one in three.** Phase 1 overclaimed
 `viewer.js` by 27x; Phase 2 refuted 5 of 15 claims, including the one ranked
 most severe. Treat every table below as a hypothesis with a file:line to check.
