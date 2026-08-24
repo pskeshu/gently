@@ -1,7 +1,27 @@
-# View surface — ideation capture
+# The Atrium — ideation capture
 
 30 minutes of stream-of-consciousness design, 2026-08-24, pskeshu.
 Reference implementation: `canvas-surface.html` (self-testing, `?selftest`).
+
+> **The Atrium** is a spatial interface in which every capability permanently
+> exists as a framed window; the only thing that changes is attention —
+> allocated by pressure, bounded by a cap, and shared between an operator and
+> an agent that can point but never build.
+
+An atrium is an open middle you move through, ringed by fixed structure. That
+is the shape of the thing, and the vocabulary follows the architecture:
+
+| Term | Means |
+|---|---|
+| **atrium** | the whole surface |
+| **courtyard** | the fixed cloister of screen-bound edges |
+| **bench** | the canvas in the middle, where attention travels |
+| **window** | one capability, always present, always framed |
+| **gauge** | a window in its folded view |
+| **density** | how many windows are open at once |
+| **pressure** | what decides — at the window, the deck, and the human |
+| **release ladder** | the channels a fact can reach a human through |
+| **curator** | the agent that points at places, and never builds them |
 Screenshots: `../../screenshots/canvas-*.png`.
 
 Not a spec. A capture, so nothing from the session is lost. The spec is a
