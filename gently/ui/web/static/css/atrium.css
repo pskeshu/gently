@@ -1,0 +1,127 @@
+/* The Atrium — spatial shell. Spec: docs/atrium/SPEC.md.
+   Loaded always, inert unless <body> carries .atrium-on. */
+
+body.atrium-on { overflow: hidden; }
+/* the tab strip is a second navigation; the chip bar replaces it */
+body.atrium-on .tabs,
+body.atrium-on #tab-content > *:not(#atr-viewport):not(#atr-pinned) { display: none !important; }
+/* R2: adopted panels are always live — the tab shell's hiding no longer applies */
+body.atrium-on .atr-body > .tab-content { display: block !important; }
+
+/* ── the bench ───────────────────────────────────────────────────────── */
+#atr-viewport {
+    position: fixed; inset: 0; z-index: 40; cursor: grab;
+    overscroll-behavior: none; background: var(--bg, #0d1117);
+    overflow: hidden;
+}
+/* R3 one level up: a frame half off the viewport is as half-rendered as content
+   escaping its frame — fade the boundary, never slice a title. The mask lives on
+   an INNER layer so the viewport itself stays opaque; masking the viewport made
+   it see-through at the edges and the old chrome ghosted in. */
+#atr-masked {
+    position: absolute; inset: 0;
+    --atr-fade: 34px;
+    -webkit-mask-image:
+        linear-gradient(to right,  transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%),
+        linear-gradient(to bottom, transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+        linear-gradient(to right,  transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%),
+        linear-gradient(to bottom, transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%);
+    mask-composite: intersect;
+}
+#atr-viewport.panning { cursor: grabbing; }
+#atr-masked::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background-image:
+        linear-gradient(var(--border, #2b3440) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border, #2b3440) 1px, transparent 1px);
+    background-size: var(--atr-gs, 80px) var(--atr-gs, 80px);
+    background-position: var(--atr-gx, 0) var(--atr-gy, 0);
+}
+#atr-board { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+
+/* ── windows: R3 says every one is a bounded frame ───────────────────── */
+.atr-win {
+    position: absolute; display: flex; flex-direction: column;
+    background: var(--bg-card, #161b22); border: 1px solid var(--border, #2b3440);
+    border-radius: 10px; overflow: hidden;              /* the boundary */
+    box-shadow: 0 8px 30px #0009;
+    transition: opacity .32s ease, filter .32s ease, border-color .32s ease,
+                height .26s cubic-bezier(.3, .9, .3, 1);
+}
+body.atr-focused .atr-win { opacity: .18; filter: saturate(.2); }
+body.atr-focused .atr-win.atr-attend { opacity: 1; filter: none; border-color: var(--accent, #4ea3ff); }
+body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned never recedes */
+
+.atr-head {
+    display: flex; align-items: center; gap: .45rem; flex: 0 0 auto;
+    padding: .35rem .5rem; cursor: grab; user-select: none;
+    background: var(--bg-hover, #1b222c); border-bottom: 1px solid var(--border, #2b3440);
+}
+.atr-head:active { cursor: grabbing; }
+.atr-head b { font-size: .72rem; letter-spacing: .04em; font-weight: 600; flex: 1; }
+.atr-fold {
+    background: none; border: 0; color: var(--text-muted, #7d8998);
+    cursor: pointer; font-size: .58rem; width: 14px; padding: 0; transition: transform .2s;
+}
+.atr-win.atr-folded .atr-fold { transform: rotate(-90deg); }
+.atr-peek {
+    font-family: ui-monospace, monospace; font-size: .68rem;
+    color: var(--accent, #4ea3ff); font-variant-numeric: tabular-nums;
+}
+.atr-body {
+    flex: 1; min-height: 0; overflow: auto; position: relative;
+    /* R10: children size to the WINDOW, not the viewport */
+    container-type: inline-size; container-name: atrwin;
+}
+.atr-win.atr-folded .atr-body { display: none; }
+
+/* ── the courtyard ───────────────────────────────────────────────────── */
+#atr-pinned {
+    position: fixed; inset: 0; z-index: 41; pointer-events: none; display: grid;
+}
+.atr-slot { display: flex; gap: 7px; pointer-events: none; min-height: 0; }
+.atr-slot.vert { flex-direction: column; align-self: start; overflow: auto; }
+.atr-slot.horz { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+.atr-slot .atr-win {
+    pointer-events: auto; position: relative;
+    left: auto !important; top: auto !important;
+    width: var(--atr-pw, auto) !important; flex: 0 0 auto;
+}
+.atr-slot .atr-head { cursor: default; }
+
+/* ── chrome: lives in the FREE cell, so no edge can ever collide ─────── */
+#atr-chrome {
+    grid-area: free; pointer-events: none; display: grid; z-index: 2;
+    grid-template-columns: auto 1fr auto; grid-template-rows: auto 1fr auto;
+    grid-template-areas: "tl . tr" ". . ." "bl . br";
+}
+#atr-chrome > * { pointer-events: auto; }
+#atr-tl { grid-area: tl; display: flex; flex-direction: column; gap: 5px; align-self: start; }
+#atr-br { grid-area: br; align-self: end; justify-self: end; display: flex; gap: 6px; align-items: center; }
+#atr-hint, #atr-br > * {
+    font-size: .68rem; color: var(--text-muted, #7d8998);
+    background: color-mix(in srgb, var(--bg-card, #161b22) 92%, transparent);
+    border: 1px solid var(--border, #2b3440); border-radius: 6px; padding: .3rem .5rem;
+    backdrop-filter: blur(6px);
+}
+#atr-br label { display: flex; gap: .4rem; align-items: center; }
+#atr-br input[type=range] { width: 74px; accent-color: var(--accent, #4ea3ff); }
+#atr-off { color: var(--accent, #4ea3ff); margin-left: .4rem; }
+#atr-chips { display: flex; gap: 4px; flex-wrap: wrap; max-width: 46vw; }
+.atr-btn {
+    font-size: .68rem; padding: .26rem .5rem; border-radius: 6px; cursor: pointer;
+    color: var(--text, #d7e0ea); border: 1px solid var(--border, #2b3440);
+    background: color-mix(in srgb, var(--bg-card, #161b22) 92%, transparent);
+    backdrop-filter: blur(6px); white-space: nowrap;
+}
+.atr-btn:hover { border-color: var(--accent, #4ea3ff); }
+.atr-btn:disabled { opacity: .35; cursor: default; }
+.atr-btn:disabled:hover { border-color: var(--border, #2b3440); }
+
+/* R10 in practice: a window in a 300px rail is not the same window at 700px */
+@container atrwin (max-width: 320px) {
+    .atr-body .row, .atr-body .form-row { flex-direction: column; align-items: stretch; }
+    .atr-body table { font-size: .7rem; }
+}
