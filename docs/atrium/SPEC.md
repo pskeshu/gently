@@ -14,7 +14,10 @@ Two implementations, deliberately:
 - **Production** — `gently/ui/web/static/js/atrium.js` + `static/css/atrium.css`.
   Runs on the real UI behind `?atrium=1`, off by default. It adopts the ten
   existing `.tab-content` divs as windows rather than rewriting them. Carries
-  **all ten rules**. Pressure is wired to genuine signals — the microscope
+  **R1, R2, R4, R5, R6, R7 and R9 fully; R3 and R10 in mechanism only; R8 as
+  addressable children without detach or child-pressure.** An earlier version of
+  this line claimed all ten, which a spec-compliance review correctly called an
+  over-claim. Pressure is wired to genuine signals — the microscope
   dropping off `ConnectionStatus`, the telemetry socket going down — and its
   ladder is capped at `open` until an operator has seen it escalate. Adding a
   source is one line: give a window `tol` and `pressWhen`.
@@ -217,6 +220,12 @@ Container queries, not media queries. The same window renders differently at
 measurement settles over two passes, because a container query can reflow
 content in response to the width just set — one measurement is stale by
 definition.
+
+*State:* `container-type: inline-size` is live on every `.atr-body`, so the
+mechanism is in place and any panel can use it. No adopted panel does yet — the
+one demonstration rule that shipped here targeted classes present in no template
+and a breakpoint no window reaches, and was deleted rather than left looking
+implemented. This rule is *available*, not *exercised*.
 
 ---
 
