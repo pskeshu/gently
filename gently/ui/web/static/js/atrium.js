@@ -35,7 +35,7 @@ const Atrium = (() => {
         },
         // Windows are adopted from #<tab>-content. crit/tol drive SPEC R5.
         windows: [
-            { tab: 'home',        title: 'HOME',        x: 40,   y: 200, w: 460, h: 380, crit: 0.3 },
+            { tab: 'home',        title: 'HOME',        x: 40, y: 200, w: 460, h: 380, crit: 0.3 },
             { tab: 'embryos',     title: 'EMBRYOS',     x: 540,  y: 40,  w: 700, h: 620, crit: 0.8, children: [
                 { key: 'default',   title: 'default',   go: () => EmbryosManager.switchView('default') },
                 { key: 'board',     title: 'board',     go: () => EmbryosManager.switchView('board') },
@@ -45,7 +45,7 @@ const Atrium = (() => {
             { tab: 'devices',     title: 'DEVICES',     x: 1280, y: 40,  w: 700, h: 620, crit: 0.9, pin: 'rail',
               // a real fact that genuinely goes stale: the scope dropped off
               tol: 20, pressWhen: () => !ConnectionStatus.get().microscopeConnected },
-            { tab: 'calibration', title: 'CALIBRATION', x: 540,  y: 700, w: 700, h: 460, crit: 0.85, children: [
+            { tab: 'calibration', title: 'CALIBRATION', x: 540, y: 700, w: 700, h: 460, crit: 0.85, children: [
                 { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
                 { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
               ] },
@@ -53,7 +53,7 @@ const Atrium = (() => {
                 { key: 'overview', title: 'overview', go: () => ExperimentOverview.setView('overview') },
                 { key: 'rules',    title: 'rules',    go: () => ExperimentOverview.setView('rules') },
               ] },
-            { tab: 'events',      title: 'EVENTS',      x: 40,   y: 620, w: 460, h: 400, crit: 0.4,
+            { tab: 'events',      title: 'EVENTS',      x: 40, y: 620, w: 460, h: 400, crit: 0.4,
               tol: 45, pressWhen: () => !ConnectionStatus.get().gentlyConnected, children: [
                 { key: 'log',      title: 'log',      go: () => switchSystemView('log') },
                 { key: 'timeline', title: 'timeline', go: () => switchSystemView('timeline') },
@@ -68,8 +68,8 @@ const Atrium = (() => {
                 { key: 'timeline', title: 'timeline',  click: 'plan-view-switcher' },
               ] },
             { tab: 'sessions',    title: 'SESSIONS',    x: 2020, y: 700, w: 620, h: 300, crit: 0.3 },
-            { tab: 'notebook',    title: 'NOTEBOOK',    x: 40,   y: 1060, w: 460, h: 400, crit: 0.4 },
-            { tab: 'gallery',     title: 'GALLERY',     x: 540,  y: 1200, w: 700, h: 400, crit: 0.4 },
+            { tab: 'notebook',    title: 'NOTEBOOK',    x: 40, y: 1060, w: 460, h: 400, crit: 0.4 },
+            { tab: 'gallery',     title: 'GALLERY',     x: 540, y: 1200, w: 700, h: 400, crit: 0.4 },
         ],
         home: { cx: 940, cy: 560, scale: 0.58 },
 
@@ -95,6 +95,14 @@ const Atrium = (() => {
             gallery:     () => plural(state.snapshots?.length, 'image'),
             calibration: () => plural(state.calibration?.length, 'cal image'),
         },
+
+        /* Windows live in COLUMNS. Fit-to-content changes heights, and with
+           fixed y they collide — EVENTS grew to 784 and landed on NOTEBOOK.
+           R2 wants a fixed geography for muscle memory, but what muscle memory
+           actually uses is WHICH COLUMN a thing is in ("calibration is over
+           to the right"), not its exact y. So the column is the fixed fact and
+           vertical position follows from the heights above it. */
+        columnGap: 26,
 
         /* R5/R6. urgency = crit x overdue, zero when fresh; the ladder is a
            threshold on that one number, not an authored policy table. The cap
@@ -275,6 +283,7 @@ const Atrium = (() => {
     function setDensity(n) {
         const ranked = onBench().sort((a, b) => salience(b) - salience(a));
         ranked.forEach((f, i) => fold(f, i >= n));
+        setTimeout(packColumns, 300);          // after the height transition
         const l = document.getElementById('atr-density-n');
         if (l) l.textContent = n;
         save();
@@ -334,6 +343,48 @@ const Atrium = (() => {
             txt = n ? `${n} rows` : 'empty';
         }
         if (peek.textContent !== txt) peek.textContent = txt;
+    }
+
+    /* Stack each column top-down so honest heights cannot overlap. The column
+       is derived from the authored x, so nothing extra has to be declared. */
+    function packColumns() {
+        const cols = new Map();
+        for (const { frame: f, cfg } of wins.values()) {
+            if (f.dataset.slot) continue;                  // pinned windows are not on the bench
+            if (!cols.has(cfg.x)) cols.set(cfg.x, []);
+            cols.get(cfg.x).push({ f, cfg });
+        }
+        for (const [, list] of cols) {
+            list.sort((a, b) => a.cfg.y - b.cfg.y);        // authored order within the column
+            let y = list[0].cfg.y;
+            for (const { f } of list) {
+                if (Math.abs(f.offsetTop - y) > 1) f.style.top = y + 'px';
+                y += f.offsetHeight + CONFIG.columnGap;
+            }
+        }
+    }
+
+    /* ── R5 at the window scale: strain = content vs frame ───────────
+       Hard-coded heights are wrong in both directions and it shows: EMBRYOS was
+       a 620px frame holding 274px of content while EVENTS was a 400px frame
+       holding 1198px. Vast empty interiors next to clipped ones.
+
+       So fit the frame to what it holds, bounded by a fraction of the viewport
+       — the cap from R5, which is what stops one window eating the bench.
+       Hysteresis keeps it from oscillating against its own height transition.
+       ponytail: measured per tick, O(open windows). */
+    const FIT = { min: 110, maxFrac: 0.82, slack: 10 };
+    function fitToContent(f) {
+        if (f.classList.contains('atr-folded') || f.dataset.slot) return;
+        const body = f.querySelector('.atr-body');
+        const child = body && body.firstElementChild;
+        if (!child) return;
+        const chrome = f.offsetHeight - body.clientHeight;      // head + child strip
+        const want = clamp(child.scrollHeight + chrome + 2,
+                           FIT.min, Math.round(innerHeight * FIT.maxFrac));
+        if (Math.abs(want - f.offsetHeight) <= FIT.slack) return;
+        f.style.height = want + 'px';
+        f.dataset.h = want;               // so fold/unfold restores to the fitted size
     }
 
     /* ── compatibility: the transform containing-block trap ──────────
@@ -405,7 +456,8 @@ const Atrium = (() => {
     /* R6: release at the lowest channel that will still be seen in time.
        A window only climbs — one release per rung, so nothing spams. */
     function pressTick() {
-        wins.forEach(({ frame: f }) => contentGauge(f));
+        wins.forEach(({ frame: f }) => { contentGauge(f); fitToContent(f); });
+        packColumns();
         wins.forEach(({ frame: f, cfg }) => {
             if (!cfg.pressWhen) return;
             let pressing = false;
@@ -641,7 +693,8 @@ const Atrium = (() => {
             if (cfg.pin && wins.has(cfg.tab)) pin(wins.get(cfg.tab).frame, cfg.pin);
         }
 
-        wins.forEach(({ frame: f }) => contentGauge(f));   // never blank on arrival
+        wins.forEach(({ frame: f }) => { contentGauge(f); fitToContent(f); });
+        packColumns();
 
         vp.addEventListener('wheel', e => {
             if (e.target.closest('.atr-body')) return;      // frames own their own zoom
@@ -723,7 +776,8 @@ const Atrium = (() => {
     }
 
     return { init, enable, disable, attend, bench, home: goHome, back, setDensity,
-             urgency, channelFor, pressTick, RELEASES, dropStaleTooltips,
+             urgency, channelFor, pressTick, RELEASES, dropStaleTooltips, fitToContent,
+             packColumns,
              fold, pin, unpin, buildCourtyard, CONFIG,
              get on() { return on; }, get windows() { return wins; }, _trail: TRAIL };
 })();
