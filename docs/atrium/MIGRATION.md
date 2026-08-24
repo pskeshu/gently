@@ -65,6 +65,43 @@ Verified live: all ten adopted with content intact, travel to each produces zero
 console errors, DEVICES pins to the rail, density folds the rest to gauges, and
 `gently:layout-changed` fires on unfold so the 3D viewers re-measure.
 
+## Compatibility audit — panels inside windows
+
+Verified live, with the shell on. "No console errors" does not answer this;
+these are different questions.
+
+**The transform containing-block trap — the one real hazard.** A CSS transform
+makes an ancestor the containing block for `position:fixed` descendants, so a
+"full-screen" overlay created *inside* a window is not viewport-fixed: it is
+scaled, offset by the pan, then clipped by `overflow:hidden`. Measured in situ —
+a fixed 50px box at (0,0) rendered at **(20,53), 33px wide**.
+
+All ten `position:fixed` overlays in `main.css` (lightbox, three modals, detail
+panel, video context panel, tooltip, toast, ambient pulse) happen to live in
+`<body>` or `#app-main`, so nothing is broken today. **That is luck, not
+design.** A MutationObserver now portals any offender out to `<body>` and warns
+with the reason — a detector as much as a fix.
+
+**Panels reflow into windows.** No panel overflows its window horizontally at
+700px. Two inner containers do and scroll internally: `devices-container`
+(+262px in a 291px rail) and `events-container` (+369px in 451px).
+
+**No viewport-sized element inside any window.** The 25 `vh`/`vw` usages in
+`main.css` all sit outside the adopted panels.
+
+**Tooltips go stale on bench move.** Their only dismissal triggers are
+`mouseleave` and a capturing `scroll` listener, and a transform change is
+neither. Dropped 60ms after the bench settles — once per travel, not per frame.
+
+**A bug the audit found in the Atrium itself.** The release ladder's `open` rung
+called `fold(f, false)` unconditionally, so a pressing *pinned* window unfolded
+in place — cramming a 553px device console into a 300px rail. Corrected to a
+rule: **the courtyard is for gauges; working on something brings it to the
+bench.** Travel and `open` both unpin first. Verified: DEVICES starts pinned and
+folded, and on release lands on the bench at 691px with zero inner overflow.
+
+---
+
 **Verification standard for every phase.** CI runs no JavaScript, and the
 committed `tools/ui_crawler/baseline/status.json` was recorded in a *different*
 environment (it expects an account server), so diffing against it produces

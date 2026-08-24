@@ -177,7 +177,13 @@ const Atrium = (() => {
         wins.forEach((v, t) => {
             const hit = t === tab;
             v.frame.classList.toggle('atr-attend', hit);
-            if (hit && !v.frame.dataset.slot) fold(v.frame, false);   // R4
+            if (hit) {
+                // R4 says travelling opens what you land on — but a pinned
+                // window cannot be worked in at rail width, so travel brings
+                // it home to the bench first.
+                if (v.frame.dataset.slot) unpin(v.frame);
+                fold(v.frame, false);
+            }
         });
         // keep the legacy chokepoint honest: .active and TAB_CHANGED still fire
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
@@ -343,7 +349,15 @@ const Atrium = (() => {
             const ch = CONFIG.release.ladder[rung].channel;
             RELEASES.unshift({ t: new Date().toLocaleTimeString(), tab: cfg.tab, u: u.toFixed(2), ch });
             if (ch === 'chip') f.classList.add('atr-calling');
-            if (ch === 'open') { fold(f, false); f.classList.add('atr-calling'); }
+            if (ch === 'open') {
+                // The courtyard is for gauges. A rail is 300px and DEVICES wants
+                // 553px, so unfolding a pinned window IN PLACE just cramps it —
+                // measured: devices-container overflowing its rail by 262px.
+                // Working on something means bringing it to the bench.
+                if (f.dataset.slot) unpin(f);
+                fold(f, false);
+                f.classList.add('atr-calling');
+            }
             if (ch === 'offer' || ch === 'seize') attend(cfg.tab);
             paintReleases();
         });
