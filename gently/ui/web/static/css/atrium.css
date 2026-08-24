@@ -225,3 +225,33 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
         box-shadow: var(--atr-shadow-lift), 0 0 0 3px var(--warn);
     }
 }
+
+/* Focus was invisible everywhere — tabbing the chrome showed nothing at all.
+   A lab screen is shared, often at an angle, sometimes operated with gloves;
+   the caret has to be findable without hunting. */
+#atr-chrome :focus-visible,
+.atr-win :focus-visible {
+    outline: 2px solid var(--accent, #4ea3ff);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Child destinations are real buttons now, not spans with onclick. Keep them
+   looking identical while giving them a keyboard-sized target. */
+.atr-kid {
+    font: inherit; font-size: .64rem; background: none;
+    min-height: 24px; display: inline-flex; align-items: center;
+}
+/* 14px was an unhittable target; missing it dragged the window instead. */
+.atr-fold {
+    width: 24px; height: 24px; display: grid; place-items: center;
+    flex: 0 0 auto; border-radius: 4px;
+}
+.atr-fold:hover { background: var(--bg-hover, #212a35); }
+
+/* The chip holding attention now says so, rather than all ten looking alike. */
+.atr-btn[aria-current="true"] {
+    border-color: var(--accent, #4ea3ff);
+    color: var(--accent, #4ea3ff);
+    font-weight: 600;
+}

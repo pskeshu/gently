@@ -219,6 +219,11 @@ const Atrium = (() => {
         });
         // keep the legacy chokepoint honest: .active and TAB_CHANGED still fire
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        document.querySelectorAll('[data-atr-go]').forEach(b => {
+            const on = b.dataset.atrGo === tab;
+            b.classList.toggle('here', on);
+            if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+        });
         if (typeof state !== 'undefined') state.tab = tab;
         if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('TAB_CHANGED', tab);
         lazyInit(tab);
@@ -279,6 +284,7 @@ const Atrium = (() => {
         const was = frame.classList.contains('atr-folded');
         if (!on_) lazyInit(frame.dataset.tab);   // opened by density or the ladder
         frame.classList.toggle('atr-folded', on_);
+        frame.querySelector('.atr-fold')?.setAttribute('aria-expanded', String(!on_));
         frame.style.height = (on_ ? FOLDED_H : +frame.dataset.h) + 'px';
         // Unfolding gives a window a box it did not have. occupancy3d.js and
         // projection-viewer.js already listen for gently:layout-changed to
@@ -567,7 +573,9 @@ const Atrium = (() => {
         if (cfg.tol) f.dataset.tol = cfg.tol;
         f._since = 0; f._rung = 0;
         f.style.cssText = `left:${cfg.x}px;top:${cfg.y}px;width:${cfg.w}px;height:${cfg.h}px`;
-        f.innerHTML = `<div class="atr-head"><button class="atr-fold" title="fold / open">▼</button>`
+        f.innerHTML = `<div class="atr-head">`
+                    + `<button class="atr-fold" type="button" aria-label="Fold or open ${cfg.title}"`
+                    + ` aria-expanded="true">▼</button>`
                     + `<b>${cfg.title}</b><span class="atr-peek"></span></div>`
                     + (cfg.children ? `<div class="atr-kids"></div>` : '')
                     + `<div class="atr-body"></div>`;
@@ -607,7 +615,8 @@ const Atrium = (() => {
         const strip = f.querySelector('.atr-kids');
         if (!strip) return;
         strip.innerHTML = f._kids.map(k =>
-            `<span class="atr-kid ${k.key === f._active ? 'on' : ''}" data-kid="${k.key}">${k.title}</span>`
+            `<button type="button" class="atr-kid ${k.key === f._active ? 'on' : ''}"`
+            + ` data-kid="${k.key}" aria-pressed="${k.key === f._active}">${k.title}</button>`
         ).join('');
         strip.querySelectorAll('[data-kid]').forEach(n => n.onclick = () => activateChild(f, n.dataset.kid));
     }
@@ -702,8 +711,18 @@ const Atrium = (() => {
         board = document.createElement('div'); board.id = 'atr-board';
         host = document.createElement('div'); host.id = 'atr-pinned';
         masked.appendChild(board); vp.appendChild(masked);
-        document.body.appendChild(vp); document.body.appendChild(host);
+        // The chrome carries the only navigation, so it must come FIRST in tab
+        // order — it previously sat after all ten adopted panels. Both layers
+        // are position:fixed with explicit z-index (40/41), so DOM order does
+        // not affect painting.
+        document.body.appendChild(host); document.body.appendChild(vp);
         document.body.classList.add('atrium-on');
+        // The legacy header and log console sit OUTSIDE #tab-content, so the
+        // stylesheet never hid them — the bench just paints over them at z-40.
+        // Invisible but still in the tab order and the accessibility tree, which
+        // is the worst combination: a keyboard operator lands on controls they
+        // cannot see. `inert` is the native answer and removes both at once.
+        legacyChrome().forEach(el => el.setAttribute('inert', ''));
 
         buildCourtyard(CONFIG.courtyard);
         buildChrome();
@@ -777,7 +796,19 @@ const Atrium = (() => {
         console.info('[atrium] on —', wins.size, 'windows adopted. ?atrium=0 to leave.');
     }
 
+    /* Everything screen-visible that the bench covers but does not own. */
+    function legacyChrome() {
+        // Measured: 39 covered focusables live in header (7), #logc (7) and
+        // .app-shell (19). The adopted panels were MOVED out of .app-shell into
+        // the bench, so inerting it does not touch them. projection-viewer-modal
+        // is deliberately excluded — it is a real overlay that opens above the
+        // bench and must stay operable.
+        return ['.header', '#logc', '.app-shell']
+            .flatMap(sel => [...document.querySelectorAll(sel)]);
+    }
+
     function disable() {
+        legacyChrome().forEach(el => el.removeAttribute('inert'));
         try { localStorage.setItem(FLAG_KEY, '0'); } catch (_) {}
         location.href = location.pathname + '?atrium=0';
     }
@@ -785,7 +816,11 @@ const Atrium = (() => {
     function onKey(e) {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const t = e.target;
-        if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)) return;
+        // BUTTON was in this list, so every travel key went dead as soon as the
+        // operator clicked a chip — the chip keeps focus. Only real text entry
+        // should swallow keys.
+        if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+        if (e.key === 'Escape') { e.preventDefault(); t.blur?.(); return; }
         if (e.key === 'Backspace') { e.preventDefault(); back(); return; }
         if (e.key === '0') { e.preventDefault(); goHome(); return; }
         if (e.key === '`') { e.preventDefault(); bench(); return; }
