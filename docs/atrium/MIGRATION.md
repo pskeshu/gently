@@ -22,6 +22,8 @@
 | 7 · children | ✅ done | 17 addressable children across 5 windows |
 | 5 · pilot windows | ⛔ superseded | the port adopted all ten at once; no pilot needed |
 | 6 · pure projections | ✅ done | campaigns' six projections are children of PLANS |
+| 9 · run it against real data | ✅ done | `tools/seed_demo_session.py` — nothing could be judged empty |
+| 10 · critique and repair | ✅ done | 5 lenses, 37 findings → 10 fixed, 8 escalated to [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md) |
 
 **Phase 3's refutation rate was 46%** — higher than phase 2's 33%. The pattern in
 what got refuted is worth internalising, because it is the same mistake four
