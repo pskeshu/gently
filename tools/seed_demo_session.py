@@ -63,7 +63,10 @@ def synthetic_volume(
     vol = rng.normal(180, 25, (z, h, w)).astype(np.float32)
     zz, yy, xx = np.mgrid[0:z, 0:h, 0:w]
     for _ in range(n_cells):
-        cz, cy, cx = rng.uniform(2, z - 2), rng.uniform(20, h - 20), rng.uniform(20, w - 20)
+        # clamp so a thin stack (z=1 for a 2D calibration frame) stays valid
+        cz = rng.uniform(0, max(z - 1, 1e-3))
+        cy = rng.uniform(min(20, h / 4), max(h - 20, h * 3 / 4))
+        cx = rng.uniform(min(20, w / 4), max(w - 20, w * 3 / 4))
         r = rng.uniform(8, 18)
         d2 = ((zz - cz) * 2.5) ** 2 + (yy - cy) ** 2 + (xx - cx) ** 2
         vol += 900 * np.exp(-d2 / (2 * r * r))
@@ -228,11 +231,74 @@ def seed_context(root: Path, session_id: str) -> None:
     print("  campaign: 1")
 
 
+# The ImageStore is IN-MEMORY — the viz server's runtime cache, not the file
+# store — so calibration images cannot be written to disk. They arrive over the
+# wire during a session. This pushes them to a RUNNING server instead, which is
+# the same path the device layer uses.
+CAL_TYPES = [
+    ("edge_detection", "edge map at galvo {g:+.3f}"),
+    ("focus_sweep", "focus sweep, piezo {g:+.1f} um"),
+    ("focus_plot", "focus score vs piezo"),
+    ("calibration_summary", "two-point transform solved"),
+]
+
+
+def seed_calibration(url: str, embryo_ids: list[str], rng) -> None:
+    """Push calibration images to a running server. Best-effort."""
+    import base64
+    import json
+    import urllib.error
+    import urllib.request
+
+    pushed = 0
+    for eid in embryo_ids:
+        for i, (dtype, note) in enumerate(CAL_TYPES):
+            g = float(rng.uniform(-0.4, 0.4))
+            img = synthetic_volume(rng, z=1, h=96, w=96, n_cells=3)[0].astype("uint8")
+            body = json.dumps(
+                {
+                    "image_b64": base64.b64encode(img.tobytes()).decode(),
+                    "uid": f"seed-cal-{eid}-{i}",
+                    "shape": list(img.shape),
+                    "dtype": "uint8",
+                    "data_type": dtype,
+                    "metadata": {
+                        "embryo_id": eid,
+                        "galvo": g,
+                        "piezo": float(rng.uniform(-20, 20)),
+                        "feature_score": round(float(rng.uniform(0.3, 0.95)), 3),
+                        "note": note.format(g=g),
+                        "seeded": True,
+                    },
+                }
+            ).encode()
+            req = urllib.request.Request(
+                f"{url}/api/images",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    if r.status == 200:
+                        pushed += 1
+            except (urllib.error.URLError, OSError) as exc:
+                print(f"  calibration push skipped ({exc}); is the server running at {url}?")
+                return
+    print(f"  calibration: {pushed} images pushed to {url}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--embryos", type=int, default=4)
     ap.add_argument("--timepoints", type=int, default=12)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument(
+        "--url",
+        default="http://localhost:8080",
+        help="running server, for calibration images (in-memory only)",
+    )
+    ap.add_argument("--no-calibration", action="store_true", help="skip the live calibration push")
     args = ap.parse_args()
 
     root = Path(settings.storage.base_path)
@@ -247,6 +313,12 @@ def main() -> int:
     store = FileStore(root)
     sid = seed(store, n_embryos=args.embryos, n_timepoints=args.timepoints, seed_val=args.seed)
     seed_context(root, sid)
+    if not args.no_calibration:
+        seed_calibration(
+            args.url,
+            [f"e{i + 1:02d}" for i in range(args.embryos)],
+            np.random.default_rng(args.seed + 1),
+        )
     print(f"\nseeded {args.embryos} embryos x {args.timepoints} timepoints into {root}")
     print(f"resume it at http://localhost:8080/?atrium=1  (session {sid})")
     return 0

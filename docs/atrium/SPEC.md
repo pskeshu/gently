@@ -221,11 +221,17 @@ measurement settles over two passes, because a container query can reflow
 content in response to the width just set — one measurement is stale by
 definition.
 
-*State:* `container-type: inline-size` is live on every `.atr-body`, so the
-mechanism is in place and any panel can use it. No adopted panel does yet — the
-one demonstration rule that shipped here targeted classes present in no template
-and a breakpoint no window reaches, and was deleted rather than left looking
-implemented. This rule is *available*, not *exercised*.
+*State:* exercised. `container-type: inline-size` is live on every `.atr-body`,
+and the calibration metrics strip uses it: seven `flex: 1; min-width: 0` metrics
+fit at full page width and crushed in a 699px window — measured 4px of content
+against a 19px `scrollWidth`, so every value rendered as one clipped character.
+A media query cannot reach that, because the viewport was 1829px wide and it was
+the *window* that was short. Wrapping at `@container atrwin (max-width: 900px)`
+took all seven back to full width.
+
+An earlier demonstration rule here targeted classes present in no template at a
+breakpoint no window reaches; it was deleted rather than left looking
+implemented.
 
 ---
 

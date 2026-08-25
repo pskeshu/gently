@@ -277,3 +277,16 @@ body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) {
 body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) .op-cam-ph {
     color: var(--text-muted, #7d8998);
 }
+
+/* R10, exercised. The calibration metrics strip is `display:flex` with
+   `.cal-metric { flex:1; min-width:0 }`, which fits at full page width and
+   crushes in a window: measured 4px of content against a 19px scrollWidth, so
+   every value rendered as a single clipped character.
+
+   A media query cannot fix this — the viewport is 1829px wide; it is the
+   699px WINDOW that is short. That is precisely what container queries are for,
+   and `.atr-body` is already the container. Wrap instead of crush. */
+@container atrwin (max-width: 900px) {
+    .cal-metrics-strip { flex-wrap: wrap; }
+    .cal-metric { flex: 1 1 auto; min-width: 96px; }
+}
