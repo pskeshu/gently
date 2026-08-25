@@ -110,9 +110,22 @@ environment (it expects an account server), so diffing against it produces
 false regressions. The only sound check is same-environment before/after:
 
 ```bash
-GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser
+# 1. an EMPTY store (see the determinism note below)
+GENTLY_STORAGE_PATH=/tmp/gently-clean uv run python launch_gently.py --no-api --no-auth --no-browser
+
+# 2. pass the launch gate — `server.gate_passed` is IN-MEMORY and starts false,
+#    so on a fresh backend every request to / 302s to /launch and all 38 stories
+#    fail as `gap`. Two runs were thrown away learning this.
+curl -sX POST localhost:8080/api/launch/go -H 'Content-Type: application/json' \
+     -d '{"hardware":false,"assistant":false}'
+
+# 3. then, and only then
 uv run python tools/ui_crawler/run_stories.py --url http://localhost:8080
 ```
+
+Both preconditions matter and neither is obvious from a failing run: an
+un-gated backend and a seeded store produce the *same* symptom — a wall of
+`gap` — for completely different reasons.
 
 38 stories. Capture `tools/ui_crawler/out/stories/status.json` before and after
 and diff the two runs, not the run against the baseline. Phases 1 and 2 each
