@@ -131,7 +131,7 @@ const ExperimentOverview = {
     },
 
     // Debounced plan refetch — coalesces rapid tactic-event bursts into a single
-    // fetch+render.  500 ms window matches experiment-strip.js convention.
+    // fetch+render.  500 ms debounce window.
     // D2: also re-fetches the embryo roster so the lens stays current.
     _debouncedRefresh() {
         if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);

@@ -339,37 +339,6 @@ body {
     border: 1px solid var(--border);
 }
 
-.header-alert {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    background: var(--accent-purple);
-    color: white;
-    border-radius: 20px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    font-weight: 500;
-    animation: alertPulse 1.5s infinite;
-}
-
-.header-alert.hidden {
-    display: none;
-}
-
-.header-alert .alert-badge {
-    background: white;
-    color: var(--accent-purple);
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.7rem;
-    font-weight: 700;
-}
-
 @keyframes alertPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }
@@ -6204,24 +6173,6 @@ kbd {
 .strip-alert.success:hover {
     background: rgba(74, 222, 128, 0.25);
     border-color: var(--accent-green);
-}
-
-.alert-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    background: var(--accent-purple);
-    color: white;
-    font-size: 0.75rem;
-    font-weight: 700;
-    border-radius: 50%;
-    animation: alertBounce 2s ease-in-out infinite;
-}
-
-.strip-alert.success .alert-badge {
-    background: var(--accent-green);
 }
 
 @keyframes alertBounce {
