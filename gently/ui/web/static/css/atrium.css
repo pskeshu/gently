@@ -259,3 +259,21 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
     color: var(--accent, #4ea3ff);
     font-weight: 600;
 }
+
+/* A camera with no signal was the loudest object on the bench: a 471x471
+   rectangle at rgb(30,41,59) on a rgb(221,227,236) surface — maximum contrast
+   on the whole surface, spent announcing the absence of information. And it
+   appeared in whichever window the release ladder opened, not one the operator
+   asked for.
+
+   Video genuinely wants a dark surround, so this only quiets the EMPTY state,
+   keyed on the .has-frame class operate.js sets when a frame arrives. Scoped to
+   .atrium-on so the tabbed UI is untouched. */
+body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) {
+    background: var(--bg-hover, #1b222c);
+    border-style: dashed;
+    border-color: var(--atr-win-border);
+}
+body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) .op-cam-ph {
+    color: var(--text-muted, #7d8998);
+}
