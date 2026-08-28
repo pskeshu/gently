@@ -218,7 +218,12 @@
     font-weight: 600;
     color: var(--op-warn);
 }
-.op-lock-txt i { font-style: normal; color: var(--op-ink-dim); }
+/* text-transform on the parent would uppercase the unit too, and Unicode maps
+   µ (U+00B5 MICRO SIGN) to Μ (U+039C GREEK CAPITAL MU) — glyph-identical to M.
+   The banner then reads "1970 MM TO FLOOR" for 1970 µm: 1000x, on the one
+   warning that stands between the objective and the coverslip. Units stay as
+   authored. Guarded by tests/test_units_not_uppercased.py. */
+.op-lock-txt i { font-style: normal; text-transform: none; color: var(--op-ink-dim); }
 
 /* ── viewport ───────────────────────────────────────────────────────────── */
 /* The viewport is a centering box; the frame chrome (border, background,
