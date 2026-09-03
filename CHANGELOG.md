@@ -440,6 +440,64 @@ campaigns, learnings, agent memory, all YAML/JSONL/TIFF.
 
 ---
 
+## v1.0.0.dev1
+
+The first build cut for someone else to use. Ryan is the reader; everything
+here exists so his feedback lands on something specific.
+
+**The Atrium**
+
+The canvas surface is now a real view in the web UI behind `?atrium=1`, not a
+prototype in a docs folder. Windows on a pannable bench, gauges in a
+screen-fixed courtyard, and one pressure primitive driving an information
+release ladder across all three scales. The tabbed UI stays the default and is
+untouched with the flag off.
+
+It also arrived with a list of things that are not ours to settle —
+`docs/atrium/OPEN-DECISIONS.md` is eight judgement calls found by an
+adversarial critique, written down rather than guessed at. The startup warning
+that EVENTS can never reach its `open` rung is one of them, left deliberately
+audible.
+
+**You can tell which build you are running**
+
+The version was written in two places and reached the browser through exactly
+one path — the agent-chat socket — so without an API key there was no version
+on screen anywhere. Now `gently/_version.py` is the only literal, pyproject
+derives it, and `build_id()` reports `1.0.0.dev1+g92816ea`, with `-dirty` when
+the tree has uncommitted changes. It shows on the launch gate, in Settings and
+at `/openapi.json`.
+
+That suffix is the point. A bare version names every commit between two tags,
+which is the whole window a reviewer works in; the commit names one tree, and
+`-dirty` separates a real bug from a half-finished local edit.
+
+**Four bugs from the walkthrough**
+
+All four came out of frame-by-frame review of the 2026-08-07 recording rather
+than from anyone in the room, and each one was a case of two things that should
+have agreed and had nothing making them agree.
+
+- Every failure message rendered in success green. `Delete failed (405)` looked
+  exactly like `Volume acquired`.
+- `operate.js` and `devices.js` held the same mutable roster array, so a push
+  in one became a phantom row in the other — with no id, and a delete that
+  405'd.
+- Selecting a different embryo on the SPIM head changed the caption and left
+  the previous embryo's pixels on screen. Caption and frame are now gated on
+  the stage actually being there.
+- The click target for a registered embryo was smaller than the ring it was
+  drawn as, so aiming at an embryo and missing by a few pixels created a marker
+  that Register turned into a duplicate.
+
+**Known**
+
+Three milestone issues need the microscope and are not done: camera ROI
+readout, two-point calibration, and the SPIM laser/exposure controls. The
+`pytest` suite has 17 pre-existing failures that no CI job has ever run (#143).
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:
