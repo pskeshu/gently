@@ -22,10 +22,26 @@
  */
 const OperateManager = (function () {
     const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
-    // Canvas CSS pixels, matching the drawn glyph radii — NOT screen pixels.
-    // onCanvasClick divides the ancestor scale out first, so a click stays on
-    // the same embryo whatever the bench is zoomed to.
+    // Canvas CSS pixels — NOT screen pixels. onCanvasClick divides the ancestor
+    // scale out first, so a click stays on the same embryo whatever the bench is
+    // zoomed to.
     const MARK_HIT_PX = 14;
+    // The radius a registered embryo is DRAWN at. One symbol feeds the arc and
+    // the hit test below, so the click target cannot drift away from the glyph
+    // again.
+    const EMB_R = 13;
+    // A registered embryo is hit anywhere on its ring plus the same slop every
+    // other target gets. Testing it against MARK_HIT_PX alone made the target
+    // (14) smaller than the glyph (13 plus a label at +16): an operator aiming
+    // at an embryo, missing by ~18 canvas px but still visually on the ring, got
+    // a pending marker they never asked for — and Register turned it into a
+    // duplicate embryo ~30 µm from the original.
+    //
+    // ponytail: the cost is that two embryos cannot be hand-marked within 27
+    // canvas px of each other. If operators need that, the honest fix is to stop
+    // overloading the click — delete the centre-on-embryo branch and let the
+    // roster's Centre button own that verb.
+    const EMB_HIT_PX = EMB_R + MARK_HIT_PX;
 
     let _wired = false, _active = false;
 
@@ -534,11 +550,11 @@ const OperateManager = (function () {
             ctx.fillStyle = ctx.strokeStyle;
             ctx.lineWidth = sel ? 2 : 1.2;
             if (isEngaged()) ctx.setLineDash([4, 3]);
-            ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, EMB_R, 0, Math.PI * 2); ctx.stroke();
             ctx.setLineDash([]);
             ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
             ctx.font = '600 11px Inter Tight, sans-serif';
-            ctx.fillText(labelFor(emb), cx + 16, cy + 4);
+            ctx.fillText(labelFor(emb), cx + EMB_R + 3, cy + 4);
             ctx.restore();
         });
         const locked = isEngaged();
@@ -588,7 +604,7 @@ const OperateManager = (function () {
         // Click a registered embryo to select it and centre the stage on it.
         // Always available — the interlock lives in moveStageTo, not here.
         for (const p of embryoPoints(r)) {
-            if (Math.hypot(cxv - p.cx, cyv - p.cy) <= MARK_HIT_PX) {
+            if (Math.hypot(cxv - p.cx, cyv - p.cy) <= EMB_HIT_PX) {
                 centerOnEmbryo(p.emb);
                 return;
             }
