@@ -11231,6 +11231,12 @@ body.modal-open {
     pointer-events: auto;
 }
 
+/* Doubled class (0,2,0): a single .gently-toast--error would tie with
+   .gently-toast and depend on source order. */
+.gently-toast.gently-toast--error {
+    border-color: var(--accent-red, #ef4444);
+}
+
 .gently-toast.visible {
     opacity: 1;
     transform: translateX(-50%) translateY(0);

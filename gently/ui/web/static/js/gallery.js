@@ -1478,13 +1478,15 @@ const GalleryTab = {
  * @param {string|null} actionLabel - Label for the action button (null = no button)
  * @param {Function|null} actionFn - Callback invoked when the action is clicked
  * @param {number} [duration=6000] - Auto-dismiss delay in ms
+ * @param {'success'|'error'} [level='success'] - Failure toasts must not read as confirmations
  */
-function showGentlyToast(message, actionLabel, actionFn, duration = 6000) {
+function showGentlyToast(message, actionLabel, actionFn, duration = 6000, level = 'success') {
     // Remove any existing gently-toast
     document.querySelectorAll('.gently-toast').forEach(t => t.remove());
 
     const toast = document.createElement('div');
-    toast.className = 'gently-toast';
+    toast.className = level === 'error' ? 'gently-toast gently-toast--error' : 'gently-toast';
+    if (level === 'error') toast.setAttribute('role', 'alert');
 
     const msgSpan = document.createElement('span');
     msgSpan.className = 'gently-toast-msg';

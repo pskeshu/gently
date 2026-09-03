@@ -86,6 +86,8 @@ const OperateManager = (function () {
     // ── primitives ──────────────────────────────────────────────────────────
     function $(id) { return document.getElementById(id); }
     function toast(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m); }
+    // Same funnel, error styling — a failure must not read as a confirmation.
+    function toastFail(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, 6000, 'error'); }
     function escapeHtml(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -140,7 +142,7 @@ const OperateManager = (function () {
     // touching XY motion.
     async function moveStageTo(x, y, why) {
         if (isEngaged()) {
-            toast('Sample is at the objective — back it off before moving XY');
+            toastFail('Sample is at the objective — back it off before moving XY');
             return false;
         }
         try {
@@ -148,7 +150,7 @@ const OperateManager = (function () {
             if (why) toast(why);
             return true;
         } catch (e) {
-            toast(`Move failed (${e.status || e.message})`);
+            toastFail(`Move failed (${e.status || e.message})`);
             return false;
         }
     }
@@ -290,7 +292,7 @@ const OperateManager = (function () {
 
         async function nudge(delta) {
             if (M && !M.stepAllowed(delta, st.floor)) {
-                toast('Too close to the floor for that step');
+                toastFail('Too close to the floor for that step');
                 return;
             }
             busy = true; renderNudges();
@@ -301,7 +303,7 @@ const OperateManager = (function () {
             } catch (e) {
                 // Even a refused nudge reports the real position — take it.
                 if (e && e.data && e.data.position != null) absorb(e.data);
-                toast(`${cfg.label} nudge blocked (${e.status || e.message})`);
+                toastFail(`${cfg.label} nudge blocked (${e.status || e.message})`);
             } finally { busy = false; renderNudges(); }
         }
 
@@ -381,7 +383,7 @@ const OperateManager = (function () {
             toast('Backed off 100 µm');
         } catch (e) {
             if (e && e.data && e.data.position != null) fd.absorb(e.data);
-            toast(`Back-off failed (${e.status || e.message}) — head still down`);
+            toastFail(`Back-off failed (${e.status || e.message}) — head still down`);
         }
     }
 
@@ -578,22 +580,22 @@ const OperateManager = (function () {
         if (cxv < r.x || cxv > r.x + r.w || cyv < r.y || cyv > r.y + r.h) return;
 
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
-        if (!f) { toast('Start the camera first'); return; }
+        if (!f) { toastFail('Start the camera first'); return; }
         // NEVER default the capture position to [0,0]: that silently converts
         // clicks into offsets from stage origin, so embryos land hundreds of µm
         // away and calibration images empty field. Refuse to mark instead.
-        if (!cap) { toast('Stage position unknown — wait for the readout, then mark'); return; }
+        if (!cap) { toastFail('Stage position unknown — wait for the readout, then mark'); return; }
 
         const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh;
         const s = M && M.frameToStage(fx, fy, f, cap);
-        if (!s) { toast('Cannot place a marker without a stage position'); return; }
+        if (!s) { toastFail('Cannot place a marker without a stage position'); return; }
         _markers.push({ stageX: s[0], stageY: s[1], source: 'manual' });
         drawMarkers(); renderMarkCount();
     }
 
     async function centerOnEmbryo(emb) {
         const xy = resolveXY(emb);
-        if (!xy) { toast('That embryo has no recorded position'); return; }
+        if (!xy) { toastFail('That embryo has no recorded position'); return; }
         selectEmbryo(emb.id);
         await moveStageTo(xy.x, xy.y, `Centred on embryo ${labelFor(emb)}`);
     }
@@ -617,7 +619,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applyBottomCam(!!d.streaming);
             _bottomWasOn = _bottomOn;
-        } catch (e) { toast(`Camera toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Camera toggle failed (${e.status || e.message})`); }
         finally { if (b) b.disabled = false; }
     }
     function applyBottomCam(on) {
@@ -686,7 +688,7 @@ const OperateManager = (function () {
             if (e.status === 503) {
                 if (note) note.textContent = 'Automatic detection is unavailable on this rig — mark by clicking the image.';
             } else {
-                toast(`Detect failed (${e.status || e.message})`);
+                toastFail(`Detect failed (${e.status || e.message})`);
             }
         } finally {
             if (b) { b.disabled = false; b.textContent = 'Detect automatically'; }
@@ -697,7 +699,7 @@ const OperateManager = (function () {
     async function confirmMarks() {
         if (!_markers.length) return;
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
-        if (!cap) { toast('Stage position unknown — cannot register markers'); return; }
+        if (!cap) { toastFail('Stage position unknown — cannot register markers'); return; }
         const b = $('op-confirm'); if (b) b.disabled = true;
         try {
             // The payload shape is a hard contract with _persist_detection_labels
@@ -724,7 +726,7 @@ const OperateManager = (function () {
             setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
-            toast(`Register failed (${e.status || e.message})`);
+            toastFail(`Register failed (${e.status || e.message})`);
             if (b) b.disabled = false;
         }
     }
@@ -737,7 +739,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applySpim(!!d.streaming);
             _spimWasOn = _spimOn;
-        } catch (e) { toast(`SPIM view toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`SPIM view toggle failed (${e.status || e.message})`); }
         finally { if (b) b.disabled = false; }
     }
     function applySpim(on) {
@@ -770,7 +772,7 @@ const OperateManager = (function () {
         _ledOn = !_ledOn;
         applyLed();
         try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
-        catch (e) { toast(`LED failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`LED failed (${e.status || e.message})`); }
     }
     function applyLed() {
         const b = $('op-led');
@@ -787,7 +789,7 @@ const OperateManager = (function () {
     }
 
     async function calibrateSelected() {
-        if (!_selected) { toast('Select an embryo first'); return; }
+        if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-calibrate'), out = $('op-cal-result');
         if (b) { b.disabled = true; b.textContent = 'Calibrating…'; }
         if (out) out.textContent = 'sweeping…';
@@ -802,7 +804,7 @@ const OperateManager = (function () {
             }
         } catch (e) {
             if (out) out.textContent = 'failed';
-            toast(`Calibrate failed (${e.status || e.message})`);
+            toastFail(`Calibrate failed (${e.status || e.message})`);
         } finally { if (b) { b.disabled = false; b.textContent = 'Calibrate piezo–galvo'; } }
     }
 
@@ -871,7 +873,7 @@ const OperateManager = (function () {
             }
             renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
-            toast(`Delete failed (${e.status || e.message})`);
+            toastFail(`Delete failed (${e.status || e.message})`);
         }
     }
 
@@ -920,7 +922,7 @@ const OperateManager = (function () {
         const roles = {};
         _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
         try { await postJSON('/api/embryos/roles', { roles }); }
-        catch (e) { toast(`Roles failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Roles failed (${e.status || e.message})`); }
     }
 
     function setMode(m) {
@@ -973,7 +975,7 @@ const OperateManager = (function () {
         if (b) { b.disabled = true; b.textContent = 'Starting…'; }
         try {
             if (_mode === 'single') {
-                if (!_selected) { toast('Select an embryo first'); return; }
+                if (!_selected) { toastFail('Select an embryo first'); return; }
                 _acquiring = true; renderSubnavMeta();
                 try {
                     await postJSON('/api/devices/acquire/volume', {
@@ -1005,11 +1007,11 @@ const OperateManager = (function () {
                 return;
             }
             if (_mode === 'library') {
-                if (!_selectedLib) { toast('Pick a saved tactic'); return; }
+                if (!_selectedLib) { toastFail('Pick a saved tactic'); return; }
                 const d = await postJSON('/api/operate/run-tactic',
                     { library_id: _selectedLib, embryo_ids: subjectIds() });
                 if (d.success) { toast('Tactic started'); renderRun(); }
-                else toast(`Run failed: ${(d.result && d.result.message) || '?'}`);
+                else toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`);
                 return;
             }
             if (_mode === 'agent') {
@@ -1023,10 +1025,10 @@ const OperateManager = (function () {
                 if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
                     AgentChat.togglePanel(true);
                     if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
-                } else toast('Agent chat unavailable');
+                } else toastFail('Agent chat unavailable');
             }
         } catch (e) {
-            toast(`Start failed (${e.status || e.message})`);
+            toastFail(`Start failed (${e.status || e.message})`);
         } finally { done(); }
     }
 
@@ -1072,13 +1074,13 @@ const OperateManager = (function () {
         try {
             await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
             toast(_runPaused ? 'Resumed' : 'Paused');
-        } catch (e) { toast(`Pause/resume failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Pause/resume failed (${e.status || e.message})`); }
         renderRun();
     }
     async function stopRun() {
         if (!window.confirm('Stop the run?')) return;
         try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); toast('Run stopped'); }
-        catch (e) { toast(`Stop failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Stop failed (${e.status || e.message})`); }
         renderRun();
     }
 
