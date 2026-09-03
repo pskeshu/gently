@@ -861,6 +861,10 @@ const OperateManager = (function () {
     }
 
     async function deleteEmbryo(id) {
+        // An empty id builds `/api/embryos/`, which 307s to a GET-only route
+        // and comes back 405 — a confusing failure for a row that should
+        // never have had a delete button. Refuse it here, at the funnel.
+        if (!id) { toastFail('That row has no id — refresh the roster'); return; }
         try {
             const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, { method: 'DELETE' });
             if (!res.ok) throw Object.assign(new Error('delete failed'), { status: res.status });
@@ -1167,7 +1171,7 @@ const OperateManager = (function () {
         setImg('op-img-spim', 'op-ph-spim', p);
     }
     function onEmbryosUpdate(p) {
-        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
+        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos.slice() : [];
         if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
         // The embryo list is shared across all three panes; keep a live
         // selection whenever it is non-empty so SPIM/Acquire aren't a dead-end

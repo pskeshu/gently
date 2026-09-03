@@ -40,7 +40,7 @@ const DevicesManager = (function () {
     // EmbryoState.to_dict() (id, position_coarse, position_fine,
     // has_fine_position, nickname, role, ...). Role drives marker color
     // (mirrors the marking-window legend: magenta=test, cyan=calibration,
-    // grey=unassigned). EMBRYO_DETECTED / STATUS_CHANGED listeners stay
+    // grey=unassigned). The STATUS_CHANGED listener stays
     // hooked as a belt-and-braces refresh path.
     let _embryos = [];
 
@@ -436,7 +436,9 @@ const DevicesManager = (function () {
     }
 
     function handleEmbryosUpdate(payload) {
-        _embryos = (payload && Array.isArray(payload.embryos)) ? payload.embryos : [];
+        // .slice(): operate.js is handed the same payload.embryos object, so
+        // assigning by reference let a write here appear in its roster.
+        _embryos = (payload && Array.isArray(payload.embryos)) ? payload.embryos.slice() : [];
         // Recompute the frame so newly-arrived embryos are always in view.
         // computeViewBox() returns true when the bounds shifted (incl. the
         // first-ever compute); a wider frame needs a full redraw so grid/zones/
@@ -584,37 +586,6 @@ const DevicesManager = (function () {
         renderEmbryos();
         updateMapMarker();
         updateScalebar();
-    }
-
-    // EMBRYO_DETECTED / STATUS_CHANGED carry the flat legacy record
-    // ({embryo_id, x, y, role}); _embryos holds the EmbryoState.to_dict()
-    // shape (id, position_coarse, ...) the renderer reads. Normalise here,
-    // at the boundary, so both feeds land in one shape.
-    function _upsertEmbryo(payload) {
-        const eid = payload && payload.embryo_id;
-        if (!eid) return false;
-        const idx = _embryos.findIndex(e => e.id === eid);
-        const existing = idx >= 0 ? _embryos[idx] : null;
-        const merged = Object.assign({}, existing || {}, {
-            id: eid,
-            role: payload.role || (existing && existing.role) || 'test',
-        });
-        if (payload.x != null && payload.y != null) {
-            merged.position_coarse = { x: payload.x, y: payload.y };
-        }
-        if (payload.user_label !== undefined) merged.user_label = payload.user_label;
-        if (payload.confidence !== undefined) merged.confidence = payload.confidence;
-        if (payload.cadence_phase !== undefined) merged.cadence_phase = payload.cadence_phase;
-        if (idx >= 0) {
-            _embryos[idx] = merged;
-        } else {
-            _embryos.push(merged);
-        }
-        return true;
-    }
-
-    function handleEmbryoDetected(payload) {
-        if (_upsertEmbryo(payload)) renderEmbryos();
     }
 
     function handleStatusChanged(payload) {
@@ -2491,9 +2462,6 @@ const DevicesManager = (function () {
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
             ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', handleAvailability);
             ClientEventBus.on('EMBRYOS_UPDATE', handleEmbryosUpdate);
-            // Belt-and-braces: also listen for the fine-grained events that
-            // existed before EMBRYOS_UPDATE so direct emitters still refresh.
-            ClientEventBus.on('EMBRYO_DETECTED', handleEmbryoDetected);
             ClientEventBus.on('STATUS_CHANGED', handleStatusChanged);
         }
         // Map-side edit handlers. Pointer events on the SVG cover both
