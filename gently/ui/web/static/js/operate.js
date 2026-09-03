@@ -134,6 +134,22 @@ const OperateManager = (function () {
         return null;
     }
 
+    // Is the light-sheet frame on screen actually the selected embryo's?
+    //
+    // The caption and the pixels are two independent channels: selecting a
+    // different embryo rewrote the caption and left the previous embryo's frame
+    // in place, so the view claimed embryo 3 while showing embryo 1. Both facts
+    // needed to answer this were already in hand — _xy and the embryo position.
+    //
+    // "No embryo selected" is not a claim about an embryo, so the frame stands.
+    // Anything else must be confirmable, or the caller blanks it.
+    function atSelected() {
+        if (!_selected) return true;
+        const emb = _embryos.find(e => e.id === _selected);
+        const xy = emb ? resolveXY(emb) : null;
+        return M ? M.atPosition(_xy, xy) : true;
+    }
+
     // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
     // The ONLY caller of /api/devices/stage/move in this file. The server does
     // NOT interlock XY against the F-drive — routes/data.py validates that x and
@@ -810,9 +826,17 @@ const OperateManager = (function () {
 
     function renderSpimTarget() {
         const el = $('op-spim-target');
-        if (!el) return;
         const emb = _embryos.find(e => e.id === _selected);
-        el.textContent = emb ? `Selected: embryo ${labelFor(emb)}` : 'No embryo selected';
+        const here = atSelected();
+        if (el) {
+            el.textContent = !emb ? 'No embryo selected'
+                : here ? `Selected: embryo ${labelFor(emb)}`
+                : `Selected: embryo ${labelFor(emb)} — stage is elsewhere`;
+        }
+        // Drop the frame here as well as in onSpimFrame: with the stream off, no
+        // frame arrives to be refused and the previous embryo's would just sit
+        // there. Every path that changes the selection calls this.
+        if (!here) clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo');
     }
 
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
@@ -1168,6 +1192,9 @@ const OperateManager = (function () {
             const el = $('op-spim-score');
             if (el) el.textContent = Number(p.focus_score).toFixed(3);
         }
+        // The frame is of wherever the stage is, which is not necessarily the
+        // embryo the caption names. Showing it there would be a false claim.
+        if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
         setImg('op-img-spim', 'op-ph-spim', p);
     }
     function onEmbryosUpdate(p) {
@@ -1306,7 +1333,13 @@ const OperateManager = (function () {
         // change what is drawn today. What it buys is fan-IN — when another
         // surface moves the stage or the cursor, these locals follow instead of
         // going stale.
-        SharedState.on('stageXY', v => { if (v) _xy = v; });
+        SharedState.on('stageXY', v => {
+            if (!v) return;
+            _xy = v;
+            // Arrival is a stage event, not a selection event: without this the
+            // caption would still read "stage is elsewhere" after the move landed.
+            renderSpimTarget();
+        });
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;

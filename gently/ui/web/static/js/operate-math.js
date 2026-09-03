@@ -1,8 +1,9 @@
 /**
  * Operate — pure geometry, banding and interlock logic.
  *
- * These four functions decide where an embryo is, how far the F-drive may move,
- * where the gauge marker sits, and whether XY motion is safe. They take explicit
+ * These functions decide where an embryo is, how far the F-drive may move,
+ * where the gauge marker sits, whether XY motion is safe, and whether the
+ * stage is actually at the embryo a caption claims it is at. They take explicit
  * arguments and touch no DOM, so they can be unit-tested (tests/js/operate-math.test.mjs)
  * — which the rest of the surface, being wiring over already-covered endpoints,
  * does not need.
@@ -146,9 +147,36 @@ const OperateMath = (function () {
         return !!latch;
     }
 
+    // RIG-NOTE: 50 µm is a guess at stage repeatability against embryo spacing —
+    // wide enough that arriving at an embryo counts as arrived, tight enough that
+    // the neighbour does not. Tune against the real scope; it is not derived.
+    const AT_TOL_UM = 50;
+
+    /**
+     * Is the stage at this target, within tolerance?
+     *
+     * Used to decide whether a light-sheet frame may be presented as belonging
+     * to the selected embryo. Caption and pixels are otherwise independent
+     * channels that can disagree indefinitely — the view kept showing embryo 1
+     * while the caption read embryo 3.
+     *
+     * Returns false when either position is missing, because the question asked
+     * is "can we confirm we are there", and an unknown position is not a yes.
+     * The caller blanks rather than captions a frame it cannot vouch for.
+     */
+    function atPosition(xy, target, tol) {
+        const t = (tol == null) ? AT_TOL_UM : tol;
+        if (!xy || !target) return false;
+        if (!Number.isFinite(xy.x) || !Number.isFinite(xy.y)) return false;
+        if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false;
+        if (!Number.isFinite(t) || t < 0) return false;
+        return Math.hypot(target.x - xy.x, target.y - xy.y) <= t;
+    }
+
     return {
-        BASE_UM_PER_PX, ENGAGED_WITHIN_UM, FD_BANDS,
+        BASE_UM_PER_PX, ENGAGED_WITHIN_UM, AT_TOL_UM, FD_BANDS,
         umPerPx, frameToStage, stageToFrame, fdBand, stepAllowed, gaugeFraction, isEngaged,
+        atPosition,
     };
 })();
 

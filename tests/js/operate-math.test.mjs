@@ -1,7 +1,10 @@
 /**
  * Unit tests for the Operate surface's pure logic.
  *
- *   node --test tests/js/
+ *   node --test tests/js/operate-math.test.mjs
+ *
+ * (Pass the file, not the directory: node 26's --test resolves a bare
+ * directory as a module and fails with MODULE_NOT_FOUND.)
  *
  * Zero dependencies — Node's built-in runner. There is no root package.json, so
  * operate-math.js resolves as CJS and is pulled in with createRequire.
@@ -213,4 +216,45 @@ test('isEngaged: the lock is monotone in proximity for a given latch', () => {
             prev = now;
         }
     }
+});
+
+// ── atPosition: may this frame be presented as the selected embryo's? ────────
+// The bug it exists for: selecting a different embryo rewrote the caption and
+// left the previous embryo's pixels on screen, three times in a row at
+// 18:45-19:45 in the walkthrough.
+
+test('atPosition: at the target is at the target', () => {
+    assert.equal(M.atPosition({ x: 1000, y: 2000 }, { x: 1000, y: 2000 }), true);
+});
+
+test('atPosition: tolerance is radial, not per-axis', () => {
+    // 40 µm on each axis is 56.6 µm away — outside a 50 µm circle, even though
+    // neither axis alone exceeds it. Comparing axes independently would pass
+    // this and show a neighbouring embryo's frame.
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 40, y: 40 }), false);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 40, y: 0 }), true);
+});
+
+test('atPosition: the boundary is inclusive', () => {
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: M.AT_TOL_UM, y: 0 }), true);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: M.AT_TOL_UM + 0.001, y: 0 }), false);
+});
+
+test('atPosition: a neighbouring embryo is not this embryo', () => {
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 203, y: -4 }), false);
+});
+
+test('atPosition: an unknown position is not a yes', () => {
+    // "Can we confirm we are there?" — missing data is no. The caller blanks
+    // rather than captioning a frame it cannot vouch for.
+    assert.equal(M.atPosition(null, { x: 0, y: 0 }), false);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, null), false);
+    assert.equal(M.atPosition({ x: NaN, y: 0 }, { x: 0, y: 0 }), false);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 0, y: undefined }), false);
+});
+
+test('atPosition: the tolerance is overridable and a bad one fails closed', () => {
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 300, y: 0 }, 500), true);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 0, y: 0 }, -1), false);
+    assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 0, y: 0 }, NaN), false);
 });
