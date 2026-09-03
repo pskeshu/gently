@@ -491,7 +491,7 @@ async def hybrid_focus_selection(
         (best_idx, method, confidence_ratio)
         method is 'fft' or 'vision'
     """
-    from gently.analysis.core import calculate_focus_score
+    from gently.analysis.core import calculate_focus_score, create_focus_montage
 
     # Stage 1: FFT scoring (instant)
     scores = [calculate_focus_score(img, "fft_bandpass") for img in images]
@@ -504,6 +504,40 @@ async def hybrid_focus_selection(
     second_best_ratio = sorted_ratios[1] if len(sorted_ratios) > 1 else 0
 
     confidence_ratio = 1.0 / second_best_ratio if second_best_ratio > 0 else float("inf")
+
+    # The montage is built on EVERY run, not only the ambiguous one.
+    #
+    # It used to be created inside Stage 2 purely as an input to the Vision call,
+    # so a calibration that went well produced no picture at all and the only run
+    # an operator could see was one where the algorithm had already lost
+    # confidence. It is the sweep made legible — every offset side by side,
+    # labelled — which is exactly what someone watching the scope needs, and the
+    # cost next to a laser sweep is nothing.
+    labels = [chr(ord("A") + i) for i in range(len(images))]
+    montage = create_focus_montage(images, labels=labels, offsets=offsets)
+
+    def _push_montage(pick: str, method: str, reasoning: str | None = None) -> None:
+        if not getattr(agent, "viz_server", None):
+            return
+        agent.push_viz(
+            array=montage,
+            uid=f"focus_montage_{embryo_id}",
+            data_type="focus_montage",
+            metadata={
+                "embryo_id": embryo_id,
+                "offsets": offsets,
+                "fft_scores": scores,
+                "labels": labels,
+                "pick": pick,
+                "method": method,
+                "confidence_ratio": None if confidence_ratio == float("inf") else confidence_ratio,
+                "reasoning": reasoning,
+            },
+        )
+
+    # Push the FFT read immediately — before any Vision round trip, which can
+    # take seconds. Same uid, so a later Vision push replaces this one in place.
+    _push_montage(labels[best_idx], "fft")
 
     if second_best_ratio < fft_confidence_threshold:
         # FFT is confident - best is >15% better than second
@@ -518,13 +552,7 @@ async def hybrid_focus_selection(
 
     from PIL import Image
 
-    from gently.analysis.core import create_focus_montage
-
-    # Create montage
-    labels = [chr(ord("A") + i) for i in range(len(images))]
-    montage = create_focus_montage(images, labels=labels, offsets=offsets)
-
-    # Save to temp file
+    # Vision takes a file, so the montage is only written to disk on this path.
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         montage_path = Path(f.name)
         Image.fromarray(montage).save(montage_path)
@@ -537,19 +565,7 @@ async def hybrid_focus_selection(
         logger.info("Vision selected: %s (%s)", vision_label, reasoning)
 
         # Push montage to viz server
-        if agent.viz_server:
-            agent.push_viz(
-                array=montage,
-                uid=f"focus_montage_{embryo_id}",
-                data_type="focus_montage",
-                metadata={
-                    "embryo_id": embryo_id,
-                    "offsets": offsets,
-                    "fft_scores": scores,
-                    "vision_pick": vision_label,
-                    "reasoning": reasoning,
-                },
-            )
+        _push_montage(vision_label, "vision", reasoning)
 
         return vision_idx, "vision", None
 

@@ -641,6 +641,16 @@
                         <button class="op-btn" id="op-calibrate" type="button">Calibrate</button>
                       </span>
                     </div>
+                    <!-- Seats itself while a routine is producing images and retires
+                         when they stop. No open or close control on purpose: an
+                         operator watching the scope should not have to ask for it. -->
+                    <figure class="op-preview" id="op-preview" hidden>
+                      <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
+                      <figcaption class="op-preview-cap">
+                        <span class="op-preview-title" id="op-preview-title"></span>
+                        <span class="op-preview-meta" id="op-preview-meta"></span>
+                      </figcaption>
+                    </figure>
                   </div>
 
                   <aside class="op-inst">

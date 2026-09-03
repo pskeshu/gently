@@ -319,6 +319,63 @@
 }
 
 /* Action bar beneath a viewport: what you do TO the image lives next to it. */
+/* ── Reactive preview ─────────────────────────────────────────────────────
+   Seats itself while a routine is producing images, retires when they stop.
+   No open/close affordance by design — see operate.js PREVIEW_IDLE_MS.
+   Transitioning opacity and translate (not height) keeps it off the layout's
+   critical path, so its arrival cannot reflow the camera above it. */
+.op-preview {
+    margin: 8px 0 0;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.op-preview.is-live {
+    opacity: 1;
+    transform: none;
+}
+
+.op-preview[hidden] {
+    display: none;
+}
+
+.op-preview-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    background: var(--img-bg, #000);
+}
+
+.op-preview-cap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+    margin-top: 6px;
+}
+
+.op-preview-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.op-preview-meta {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+/* A reader mid-sentence should not lose the panel to a fade. */
+@media (prefers-reduced-motion: reduce) {
+    .op-preview { transition: none; }
+}
+
 .op-bar {
     display: flex;
     align-items: center;
