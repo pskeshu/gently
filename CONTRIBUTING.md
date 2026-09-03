@@ -67,3 +67,53 @@ request, and it changes — read it rather than trusting a summary here.
 `pre-commit run --all-files` reproduces the ruff checks and the deps-less
 `mypy .` locally, but **not** the deps-installed run; reproduce that with
 `uv run mypy .` after `uv sync`.
+
+## Releasing
+
+Feedback is only actionable if it names a build. Keep that true.
+
+### Where the version lives
+
+`gently/_version.py` — **one literal, nowhere else.** `pyproject.toml` derives
+it via `[tool.setuptools.dynamic]`, `gently/__init__.py` re-exports it, and the
+web server renders it. `tests/test_version_is_single_sourced.py` fails if a
+second copy reappears.
+
+### What the UI shows
+
+`build_id()` — the version plus the commit, e.g. `1.0.0.dev1+g92816ea`, and
+`-dirty` when the tree had uncommitted tracked changes. It appears on the
+launch gate footer, on the Settings page, and as the OpenAPI version at
+`/openapi.json`. Outside a git checkout the bare version is shown.
+
+**Ask for the string from the launch gate in every bug report.** `1.0.0.dev1`
+alone names every commit between two tags; the suffix names exactly one, and
+`-dirty` distinguishes a real bug from someone's half-finished edit.
+
+### Cutting a release
+
+```bash
+# 1. Bump the one literal
+$EDITOR gently/_version.py           # e.g. 1.0.0.dev1 -> 1.0.0.dev2
+
+# 2. Prove the package agrees with the module
+uv build --wheel --out-dir /tmp/gently-build
+ls /tmp/gently-build                 # filename must carry the new version
+
+# 3. Land it through a PR like anything else, then tag the merge commit
+git tag -a v1.0.0.dev2 -m "gently 1.0.0.dev2"
+git push upstream v1.0.0.dev2
+gh release create v1.0.0.dev2 --repo gently-project/gently \
+    --target development --title "gently 1.0.0.dev2" --notes-file <notes>
+```
+
+Tag names are `v` + the literal, so `git tag` and `_version.py` read the same.
+Tag the commit that is actually on `development` after the merge — not the tip
+of the feature branch, which nobody else will ever check out.
+
+### Version numbers
+
+`1.0.0.devN` while 1.0.0 is being iterated with a reviewer; `1.0.0rcN` once the
+milestone is empty and only regressions are being fixed; `1.0.0` at release.
+Bump `devN` for each build handed to someone else, so their feedback has a
+distinct number to attach to.
