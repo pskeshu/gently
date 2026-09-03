@@ -81,8 +81,14 @@ try:
 except ImportError:
     _VISUALIZATION_AVAILABLE = False
 
-__version__ = "1.0.0.dev0"
+# Single source of truth — see gently/_version.py. pyproject.toml reads the
+# same literal, so the package and the UI cannot disagree.
+from gently._version import __version__, build_id
+
 __all__ = [
+    # Version — single-sourced from gently/_version.py
+    "__version__",
+    "build_id",
     # Main entry point
     "Gently",
     "create_gently",

@@ -27,7 +27,7 @@
         lastHintAt = now;
         const msg = 'Control required — you are in view-only mode.';
         if (typeof showGentlyToast === 'function') {
-            showGentlyToast(msg, 'Log in', () => { window.location.href = '/login'; }, 7000);
+            showGentlyToast(msg, 'Log in', () => { window.location.href = '/login'; }, 7000, 'error');
         } else {
             console.warn(msg + ' Log in at /login to drive hardware.');
         }

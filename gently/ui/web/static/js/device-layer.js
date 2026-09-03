@@ -237,7 +237,7 @@ const DeviceLayerCard = (function () {
             toast('Device layer starting…');
         } catch (e) {
             // 403 already surfaced by control-auth.js; don't double-toast.
-            if (e.status !== 403) toast('Start failed: ' + e.message);
+            if (e.status !== 403) toastFail('Start failed: ' + e.message);
         } finally {
             _busy = false;
             // The layer takes a moment to bind its port; re-poll shortly.
@@ -262,11 +262,11 @@ const DeviceLayerCard = (function () {
                         await postJSON('/api/device-layer/stop', { confirm: true, force: true });
                         toast('Force-stopping…');
                     } catch (e2) {
-                        if (e2.status !== 403) toast('Force-stop failed: ' + e2.message);
+                        if (e2.status !== 403) toastFail('Force-stop failed: ' + e2.message);
                     }
                 }
             } else if (e.status !== 403) {
-                toast('Stop failed: ' + e.message);
+                toastFail('Stop failed: ' + e.message);
             }
         } finally {
             _busy = false;
@@ -325,6 +325,11 @@ const DeviceLayerCard = (function () {
 
     function toast(msg) {
         if (typeof showGentlyToast === 'function') showGentlyToast(msg);
+    }
+
+    // Same funnel, error styling — a failure must not read as a confirmation.
+    function toastFail(msg) {
+        if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 6000, 'error');
     }
 
     return { init };

@@ -11,7 +11,7 @@
 set -u
 REPS="${1:-3}"
 PORT="${PORT:-8090}"
-PY="${PY:-/home/dna/lab/projects/gently/.venv/bin/python}"
+PY="${PY:-/home/dna/work/lab/projects/gently/.venv/bin/python}"
 OUT_ROOT="tools/ui_crawler/out/ab"
 WORK="${TMPDIR:-/tmp}/gently-replay-ab"
 

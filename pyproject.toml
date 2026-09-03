@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gently"
-version = "1.0.0.dev0"
+# Single source of truth: gently/_version.py. Never hardcode it here.
+dynamic = ["version"]
 description = "Agentic harnessing for microscopy"
 readme = "docs/README.md"
 license = {text = "GPL-3.0-or-later"}
@@ -140,6 +141,9 @@ conflicts = [
 # as a sibling of this repo and it is installed editable from there — so your edits
 # are live immediately. A missing sibling makes `uv sync` fail by design; clone it.
 # torch/torchvision are routed to a CUDA or CPU index depending on the extra.
+[tool.setuptools.dynamic]
+version = {attr = "gently._version.__version__"}
+
 [tool.uv.sources]
 gently-perception = { path = "../gently-perception", editable = true }
 torch = [

@@ -182,14 +182,19 @@ class VisualizationServer(Service):
         self.timelapse_tracker = TimelapseStateTracker()
 
         # Create FastAPI app
+        import gently
+
         self.app = FastAPI(
             title="Gently Visualization Server",
             description="Real-time microscopy visualization",
-            version="2.0.0",
+            version=gently.__version__,
         )
 
         # Setup templates and static files
         self.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+        # A global rather than a key threaded through each route's context, so a
+        # new template gets the version without anyone remembering to pass it.
+        self.templates.env.globals["gently_version"] = gently.build_id()
         self.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
         # Static assets are served live (CLAUDE.md: "refresh the window — served

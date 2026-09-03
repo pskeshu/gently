@@ -22,10 +22,26 @@
  */
 const OperateManager = (function () {
     const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
-    // Canvas CSS pixels, matching the drawn glyph radii — NOT screen pixels.
-    // onCanvasClick divides the ancestor scale out first, so a click stays on
-    // the same embryo whatever the bench is zoomed to.
+    // Canvas CSS pixels — NOT screen pixels. onCanvasClick divides the ancestor
+    // scale out first, so a click stays on the same embryo whatever the bench is
+    // zoomed to.
     const MARK_HIT_PX = 14;
+    // The radius a registered embryo is DRAWN at. One symbol feeds the arc and
+    // the hit test below, so the click target cannot drift away from the glyph
+    // again.
+    const EMB_R = 13;
+    // A registered embryo is hit anywhere on its ring plus the same slop every
+    // other target gets. Testing it against MARK_HIT_PX alone made the target
+    // (14) smaller than the glyph (13 plus a label at +16): an operator aiming
+    // at an embryo, missing by ~18 canvas px but still visually on the ring, got
+    // a pending marker they never asked for — and Register turned it into a
+    // duplicate embryo ~30 µm from the original.
+    //
+    // ponytail: the cost is that two embryos cannot be hand-marked within 27
+    // canvas px of each other. If operators need that, the honest fix is to stop
+    // overloading the click — delete the centre-on-embryo branch and let the
+    // roster's Centre button own that verb.
+    const EMB_HIT_PX = EMB_R + MARK_HIT_PX;
 
     let _wired = false, _active = false;
 
@@ -86,6 +102,8 @@ const OperateManager = (function () {
     // ── primitives ──────────────────────────────────────────────────────────
     function $(id) { return document.getElementById(id); }
     function toast(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m); }
+    // Same funnel, error styling — a failure must not read as a confirmation.
+    function toastFail(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, 6000, 'error'); }
     function escapeHtml(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -132,6 +150,22 @@ const OperateManager = (function () {
         return null;
     }
 
+    // Is the light-sheet frame on screen actually the selected embryo's?
+    //
+    // The caption and the pixels are two independent channels: selecting a
+    // different embryo rewrote the caption and left the previous embryo's frame
+    // in place, so the view claimed embryo 3 while showing embryo 1. Both facts
+    // needed to answer this were already in hand — _xy and the embryo position.
+    //
+    // "No embryo selected" is not a claim about an embryo, so the frame stands.
+    // Anything else must be confirmable, or the caller blanks it.
+    function atSelected() {
+        if (!_selected) return true;
+        const emb = _embryos.find(e => e.id === _selected);
+        const xy = emb ? resolveXY(emb) : null;
+        return M ? M.atPosition(_xy, xy) : true;
+    }
+
     // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
     // The ONLY caller of /api/devices/stage/move in this file. The server does
     // NOT interlock XY against the F-drive — routes/data.py validates that x and
@@ -140,7 +174,7 @@ const OperateManager = (function () {
     // touching XY motion.
     async function moveStageTo(x, y, why) {
         if (isEngaged()) {
-            toast('Sample is at the objective — back it off before moving XY');
+            toastFail('Sample is at the objective — back it off before moving XY');
             return false;
         }
         try {
@@ -148,7 +182,7 @@ const OperateManager = (function () {
             if (why) toast(why);
             return true;
         } catch (e) {
-            toast(`Move failed (${e.status || e.message})`);
+            toastFail(`Move failed (${e.status || e.message})`);
             return false;
         }
     }
@@ -290,7 +324,7 @@ const OperateManager = (function () {
 
         async function nudge(delta) {
             if (M && !M.stepAllowed(delta, st.floor)) {
-                toast('Too close to the floor for that step');
+                toastFail('Too close to the floor for that step');
                 return;
             }
             busy = true; renderNudges();
@@ -301,7 +335,7 @@ const OperateManager = (function () {
             } catch (e) {
                 // Even a refused nudge reports the real position — take it.
                 if (e && e.data && e.data.position != null) absorb(e.data);
-                toast(`${cfg.label} nudge blocked (${e.status || e.message})`);
+                toastFail(`${cfg.label} nudge blocked (${e.status || e.message})`);
             } finally { busy = false; renderNudges(); }
         }
 
@@ -381,7 +415,7 @@ const OperateManager = (function () {
             toast('Backed off 100 µm');
         } catch (e) {
             if (e && e.data && e.data.position != null) fd.absorb(e.data);
-            toast(`Back-off failed (${e.status || e.message}) — head still down`);
+            toastFail(`Back-off failed (${e.status || e.message}) — head still down`);
         }
     }
 
@@ -516,11 +550,11 @@ const OperateManager = (function () {
             ctx.fillStyle = ctx.strokeStyle;
             ctx.lineWidth = sel ? 2 : 1.2;
             if (isEngaged()) ctx.setLineDash([4, 3]);
-            ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, EMB_R, 0, Math.PI * 2); ctx.stroke();
             ctx.setLineDash([]);
             ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
             ctx.font = '600 11px Inter Tight, sans-serif';
-            ctx.fillText(labelFor(emb), cx + 16, cy + 4);
+            ctx.fillText(labelFor(emb), cx + EMB_R + 3, cy + 4);
             ctx.restore();
         });
         const locked = isEngaged();
@@ -570,7 +604,7 @@ const OperateManager = (function () {
         // Click a registered embryo to select it and centre the stage on it.
         // Always available — the interlock lives in moveStageTo, not here.
         for (const p of embryoPoints(r)) {
-            if (Math.hypot(cxv - p.cx, cyv - p.cy) <= MARK_HIT_PX) {
+            if (Math.hypot(cxv - p.cx, cyv - p.cy) <= EMB_HIT_PX) {
                 centerOnEmbryo(p.emb);
                 return;
             }
@@ -578,22 +612,22 @@ const OperateManager = (function () {
         if (cxv < r.x || cxv > r.x + r.w || cyv < r.y || cyv > r.y + r.h) return;
 
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
-        if (!f) { toast('Start the camera first'); return; }
+        if (!f) { toastFail('Start the camera first'); return; }
         // NEVER default the capture position to [0,0]: that silently converts
         // clicks into offsets from stage origin, so embryos land hundreds of µm
         // away and calibration images empty field. Refuse to mark instead.
-        if (!cap) { toast('Stage position unknown — wait for the readout, then mark'); return; }
+        if (!cap) { toastFail('Stage position unknown — wait for the readout, then mark'); return; }
 
         const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh;
         const s = M && M.frameToStage(fx, fy, f, cap);
-        if (!s) { toast('Cannot place a marker without a stage position'); return; }
+        if (!s) { toastFail('Cannot place a marker without a stage position'); return; }
         _markers.push({ stageX: s[0], stageY: s[1], source: 'manual' });
         drawMarkers(); renderMarkCount();
     }
 
     async function centerOnEmbryo(emb) {
         const xy = resolveXY(emb);
-        if (!xy) { toast('That embryo has no recorded position'); return; }
+        if (!xy) { toastFail('That embryo has no recorded position'); return; }
         selectEmbryo(emb.id);
         await moveStageTo(xy.x, xy.y, `Centred on embryo ${labelFor(emb)}`);
     }
@@ -617,7 +651,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applyBottomCam(!!d.streaming);
             _bottomWasOn = _bottomOn;
-        } catch (e) { toast(`Camera toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Camera toggle failed (${e.status || e.message})`); }
         finally { if (b) b.disabled = false; }
     }
     function applyBottomCam(on) {
@@ -686,7 +720,7 @@ const OperateManager = (function () {
             if (e.status === 503) {
                 if (note) note.textContent = 'Automatic detection is unavailable on this rig — mark by clicking the image.';
             } else {
-                toast(`Detect failed (${e.status || e.message})`);
+                toastFail(`Detect failed (${e.status || e.message})`);
             }
         } finally {
             if (b) { b.disabled = false; b.textContent = 'Detect automatically'; }
@@ -697,7 +731,7 @@ const OperateManager = (function () {
     async function confirmMarks() {
         if (!_markers.length) return;
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
-        if (!cap) { toast('Stage position unknown — cannot register markers'); return; }
+        if (!cap) { toastFail('Stage position unknown — cannot register markers'); return; }
         const b = $('op-confirm'); if (b) b.disabled = true;
         try {
             // The payload shape is a hard contract with _persist_detection_labels
@@ -724,7 +758,7 @@ const OperateManager = (function () {
             setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
-            toast(`Register failed (${e.status || e.message})`);
+            toastFail(`Register failed (${e.status || e.message})`);
             if (b) b.disabled = false;
         }
     }
@@ -737,7 +771,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applySpim(!!d.streaming);
             _spimWasOn = _spimOn;
-        } catch (e) { toast(`SPIM view toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`SPIM view toggle failed (${e.status || e.message})`); }
         finally { if (b) b.disabled = false; }
     }
     function applySpim(on) {
@@ -770,7 +804,7 @@ const OperateManager = (function () {
         _ledOn = !_ledOn;
         applyLed();
         try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
-        catch (e) { toast(`LED failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`LED failed (${e.status || e.message})`); }
     }
     function applyLed() {
         const b = $('op-led');
@@ -787,7 +821,7 @@ const OperateManager = (function () {
     }
 
     async function calibrateSelected() {
-        if (!_selected) { toast('Select an embryo first'); return; }
+        if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-calibrate'), out = $('op-cal-result');
         if (b) { b.disabled = true; b.textContent = 'Calibrating…'; }
         if (out) out.textContent = 'sweeping…';
@@ -802,15 +836,23 @@ const OperateManager = (function () {
             }
         } catch (e) {
             if (out) out.textContent = 'failed';
-            toast(`Calibrate failed (${e.status || e.message})`);
+            toastFail(`Calibrate failed (${e.status || e.message})`);
         } finally { if (b) { b.disabled = false; b.textContent = 'Calibrate piezo–galvo'; } }
     }
 
     function renderSpimTarget() {
         const el = $('op-spim-target');
-        if (!el) return;
         const emb = _embryos.find(e => e.id === _selected);
-        el.textContent = emb ? `Selected: embryo ${labelFor(emb)}` : 'No embryo selected';
+        const here = atSelected();
+        if (el) {
+            el.textContent = !emb ? 'No embryo selected'
+                : here ? `Selected: embryo ${labelFor(emb)}`
+                : `Selected: embryo ${labelFor(emb)} — stage is elsewhere`;
+        }
+        // Drop the frame here as well as in onSpimFrame: with the stream off, no
+        // frame arrives to be refused and the previous embryo's would just sit
+        // there. Every path that changes the selection calls this.
+        if (!here) clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo');
     }
 
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
@@ -859,6 +901,10 @@ const OperateManager = (function () {
     }
 
     async function deleteEmbryo(id) {
+        // An empty id builds `/api/embryos/`, which 307s to a GET-only route
+        // and comes back 405 — a confusing failure for a row that should
+        // never have had a delete button. Refuse it here, at the funnel.
+        if (!id) { toastFail('That row has no id — refresh the roster'); return; }
         try {
             const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, { method: 'DELETE' });
             if (!res.ok) throw Object.assign(new Error('delete failed'), { status: res.status });
@@ -871,7 +917,7 @@ const OperateManager = (function () {
             }
             renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
-            toast(`Delete failed (${e.status || e.message})`);
+            toastFail(`Delete failed (${e.status || e.message})`);
         }
     }
 
@@ -920,7 +966,7 @@ const OperateManager = (function () {
         const roles = {};
         _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
         try { await postJSON('/api/embryos/roles', { roles }); }
-        catch (e) { toast(`Roles failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Roles failed (${e.status || e.message})`); }
     }
 
     function setMode(m) {
@@ -973,7 +1019,7 @@ const OperateManager = (function () {
         if (b) { b.disabled = true; b.textContent = 'Starting…'; }
         try {
             if (_mode === 'single') {
-                if (!_selected) { toast('Select an embryo first'); return; }
+                if (!_selected) { toastFail('Select an embryo first'); return; }
                 _acquiring = true; renderSubnavMeta();
                 try {
                     await postJSON('/api/devices/acquire/volume', {
@@ -1005,11 +1051,11 @@ const OperateManager = (function () {
                 return;
             }
             if (_mode === 'library') {
-                if (!_selectedLib) { toast('Pick a saved tactic'); return; }
+                if (!_selectedLib) { toastFail('Pick a saved tactic'); return; }
                 const d = await postJSON('/api/operate/run-tactic',
                     { library_id: _selectedLib, embryo_ids: subjectIds() });
                 if (d.success) { toast('Tactic started'); renderRun(); }
-                else toast(`Run failed: ${(d.result && d.result.message) || '?'}`);
+                else toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`);
                 return;
             }
             if (_mode === 'agent') {
@@ -1023,10 +1069,10 @@ const OperateManager = (function () {
                 if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
                     AgentChat.togglePanel(true);
                     if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
-                } else toast('Agent chat unavailable');
+                } else toastFail('Agent chat unavailable');
             }
         } catch (e) {
-            toast(`Start failed (${e.status || e.message})`);
+            toastFail(`Start failed (${e.status || e.message})`);
         } finally { done(); }
     }
 
@@ -1072,13 +1118,13 @@ const OperateManager = (function () {
         try {
             await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
             toast(_runPaused ? 'Resumed' : 'Paused');
-        } catch (e) { toast(`Pause/resume failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Pause/resume failed (${e.status || e.message})`); }
         renderRun();
     }
     async function stopRun() {
         if (!window.confirm('Stop the run?')) return;
         try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); toast('Run stopped'); }
-        catch (e) { toast(`Stop failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Stop failed (${e.status || e.message})`); }
         renderRun();
     }
 
@@ -1162,10 +1208,13 @@ const OperateManager = (function () {
             const el = $('op-spim-score');
             if (el) el.textContent = Number(p.focus_score).toFixed(3);
         }
+        // The frame is of wherever the stage is, which is not necessarily the
+        // embryo the caption names. Showing it there would be a false claim.
+        if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
         setImg('op-img-spim', 'op-ph-spim', p);
     }
     function onEmbryosUpdate(p) {
-        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
+        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos.slice() : [];
         if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
         // The embryo list is shared across all three panes; keep a live
         // selection whenever it is non-empty so SPIM/Acquire aren't a dead-end
@@ -1300,7 +1349,13 @@ const OperateManager = (function () {
         // change what is drawn today. What it buys is fan-IN — when another
         // surface moves the stage or the cursor, these locals follow instead of
         // going stale.
-        SharedState.on('stageXY', v => { if (v) _xy = v; });
+        SharedState.on('stageXY', v => {
+            if (!v) return;
+            _xy = v;
+            // Arrival is a stage event, not a selection event: without this the
+            // caption would still read "stage is elsewhere" after the move landed.
+            renderSpimTarget();
+        });
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;
