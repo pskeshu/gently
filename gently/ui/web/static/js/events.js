@@ -132,7 +132,7 @@ function findImageByUid(uid) {
 
     // Search in all image stores
     const allImages = [
-        ...(state.volumes || []),
+        ...(state.volumes3d || []),
         ...(state.calibration || []),
         ...(state.snapshots || [])
     ];
@@ -152,9 +152,9 @@ function showEventImage(uid) {
     let source = 'snapshots';
     let list = state.snapshots || [];
 
-    if (state.volumes?.find(i => i.uid === uid)) {
+    if (state.volumes3d?.find(i => i.uid === uid)) {
         source = 'volumes';
-        list = state.volumes;
+        list = state.volumes3d;
     } else if (state.calibration?.find(i => i.uid === uid)) {
         source = 'calibration';
         list = state.calibration;
@@ -204,9 +204,11 @@ function addEventToTable(event, prepend = true) {
     // Store event
     if (prepend) {
         state.allEvents.unshift(event);
-        // Trim to max
+        // Trim to max. The dropped event may have matched the filters, so the
+        // cached count can no longer be maintained incrementally.
         if (state.allEvents.length > MAX_EVENTS) {
             state.allEvents.pop();
+            _filteredCountDirty = true;
         }
     }
 
@@ -226,10 +228,6 @@ function addEventToTable(event, prepend = true) {
     // Incrementally update filtered count for newly prepended events
     if (prepend && matchesFilter && !_filteredCountDirty) {
         _filteredCount++;
-        // If we trimmed an event, we can't know if it was filtered — mark dirty
-        if (state.allEvents.length > MAX_EVENTS) {
-            _filteredCountDirty = true;
-        }
     }
 
     if (!matchesFilter) {

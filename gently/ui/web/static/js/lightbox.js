@@ -428,8 +428,21 @@ const Lightbox = {
             this.els.image.classList.add('transitioning');
 
             setTimeout(() => {
+                // A record without base64_png used to leave the PREVIOUS image on
+                // screen while the title and metadata updated to the new item —
+                // you saw image A captioned as item B, which is worse than
+                // seeing nothing. Volume3DData.to_info_dict carries no
+                // base64_png, and events.js:155 opens volumes through here.
                 if (img.base64_png) {
                     this.els.image.src = 'data:image/png;base64,' + img.base64_png;
+                } else if (img.num_slices) {
+                    // a 3D volume: show its middle slice, which the API renders
+                    const mid = Math.floor(img.num_slices / 2);
+                    this.els.image.src = `/api/volumes3d/${img.uid}/slice/${mid}`;
+                } else if (img.uid) {
+                    this.els.image.src = `/api/images/${img.uid}/png`;
+                } else {
+                    this.els.image.removeAttribute('src');   // never a stale frame
                 }
                 this.els.image.classList.remove('transitioning');
             }, 150);

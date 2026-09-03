@@ -339,37 +339,6 @@ body {
     border: 1px solid var(--border);
 }
 
-.header-alert {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    background: var(--accent-purple);
-    color: white;
-    border-radius: 20px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    font-weight: 500;
-    animation: alertPulse 1.5s infinite;
-}
-
-.header-alert.hidden {
-    display: none;
-}
-
-.header-alert .alert-badge {
-    background: white;
-    color: var(--accent-purple);
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.7rem;
-    font-weight: 700;
-}
-
 @keyframes alertPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }
@@ -1367,18 +1336,6 @@ a.tab-link.active {
     min-height: 0;
 }
 
-.cal-profile-detail {
-    flex: 2;
-    overflow-y: auto;
-    display: block;
-    min-width: 250px;
-    max-height: calc(100vh - 160px);
-}
-
-.cal-profile-detail > * + * {
-    margin-top: 12px;
-}
-
 /* SVG slice line interactions */
 .cal-slice-line {
     transition: opacity 0.15s ease, stroke-width 0.15s ease;
@@ -1638,194 +1595,6 @@ a.tab-link.active {
     opacity: 1;
 }
 
-/* Thumb wrapped in a button so click pops out a larger live view.
-   Sized to match the thumb so it remains clickable even before the
-   first frame arrives. */
-.cal-spim-thumb-btn {
-    position: relative;
-    padding: 0;
-    background: none;
-    border: 0;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    line-height: 0;
-    color: inherit;
-    width: 96px;
-    height: 72px;
-}
-
-.cal-spim-thumb-btn:focus-visible {
-    outline: 2px solid var(--accent, #4f8cff);
-    outline-offset: 2px;
-    border-radius: 4px;
-}
-
-.cal-spim-expand-icon {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    font-size: 11px;
-    line-height: 1;
-    padding: 2px 4px;
-    border-radius: 3px;
-    opacity: 0;
-    transition: opacity 0.12s ease;
-    pointer-events: none;
-}
-
-.cal-spim-thumb-btn:hover .cal-spim-expand-icon,
-.cal-spim-thumb-btn:focus-visible .cal-spim-expand-icon {
-    opacity: 1;
-}
-
-/* Hide the expand chip when the thumb has no frame yet — nothing to expand. */
-.cal-spim-thumb-btn:has(.cal-spim-thumb:not(.has-frame)) .cal-spim-expand-icon {
-    display: none;
-}
-
-/* ---------- Floating SPIM popout ---------- */
-.cal-spim-popout {
-    position: fixed;
-    top: 80px;
-    right: 24px;
-    width: 560px;
-    height: 480px;
-    min-width: 320px;
-    min-height: 260px;
-    z-index: 9000;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45),
-                0 2px 8px rgba(0, 0, 0, 0.25);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    resize: both;
-}
-
-.cal-spim-popout[hidden] {
-    display: none;
-}
-
-.cal-spim-popout.dragging {
-    user-select: none;
-    cursor: grabbing;
-}
-
-.cal-spim-popout-header {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: var(--bg-elevated, var(--bg-card));
-    border-bottom: 1px solid var(--border);
-    cursor: grab;
-    touch-action: none;
-}
-
-.cal-spim-popout.dragging .cal-spim-popout-header {
-    cursor: grabbing;
-}
-
-.cal-spim-popout-led {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4ade80;
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
-    animation: cal-spim-led-blink 1.6s ease-in-out infinite;
-}
-
-.cal-spim-popout-led.idle {
-    background: var(--text-muted, #666);
-    box-shadow: none;
-    animation: none;
-}
-
-.cal-spim-popout-title {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--text);
-}
-
-.cal-spim-popout-embryo {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-.cal-spim-popout-spacer {
-    flex: 1;
-}
-
-.cal-spim-popout-close {
-    background: transparent;
-    border: 0;
-    color: var(--text-muted);
-    font-size: 20px;
-    line-height: 1;
-    padding: 0 6px;
-    cursor: pointer;
-    border-radius: 4px;
-}
-
-.cal-spim-popout-close:hover {
-    color: var(--text);
-    background: var(--border);
-}
-
-.cal-spim-popout-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000;
-    overflow: hidden;
-    padding: 4px;
-}
-
-.cal-spim-popout-img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    display: none;
-}
-
-.cal-spim-popout-img.has-frame {
-    display: block;
-}
-
-.cal-spim-popout-placeholder {
-    color: var(--text-muted);
-    font-size: 12px;
-    letter-spacing: 0.4px;
-}
-
-.cal-spim-popout-placeholder[hidden] {
-    display: none;
-}
-
-.cal-spim-popout-footer {
-    flex: 0 0 auto;
-    padding: 6px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-elevated, var(--bg-card));
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
 /* When a live frame is active, let the SPIM cell breathe a bit so the
    thumb and meta have room. */
 .cal-spim-indicator:has(.cal-spim-thumb.has-frame) {
@@ -1978,59 +1747,6 @@ a.tab-link.active {
 ::-webkit-scrollbar-track { background: var(--bg-dark); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-/* Z-Slider for 3D volumes */
-.z-slider-container {
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    padding: 0.5rem;
-    background: var(--bg-card);
-    border-left: 1px solid var(--border);
-    min-width: 50px;
-    flex-shrink: 0;
-}
-
-.z-slider-container.active {
-    display: flex;
-}
-
-.z-slider-label {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-    text-transform: uppercase;
-}
-
-.z-slider-value {
-    font-size: 0.85rem;
-    color: var(--accent);
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-}
-
-.z-slider {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 20px;
-    flex: 1;
-    min-height: 200px;
-    cursor: pointer;
-}
-
-/* Firefox vertical slider */
-@-moz-document url-prefix() {
-    .z-slider {
-        width: 20px;
-    }
-}
-
-.z-slider-info {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-top: 0.5rem;
-    text-align: center;
-}
 
 /* Events Tab */
 #events-content {
@@ -6457,24 +6173,6 @@ kbd {
 .strip-alert.success:hover {
     background: rgba(74, 222, 128, 0.25);
     border-color: var(--accent-green);
-}
-
-.alert-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    background: var(--accent-purple);
-    color: white;
-    font-size: 0.75rem;
-    font-weight: 700;
-    border-radius: 50%;
-    animation: alertBounce 2s ease-in-out infinite;
-}
-
-.strip-alert.success .alert-badge {
-    background: var(--accent-green);
 }
 
 @keyframes alertBounce {

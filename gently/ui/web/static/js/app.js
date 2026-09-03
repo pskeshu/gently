@@ -123,7 +123,16 @@ function copySessionId() {
 
     if (!sessionLink || !sessionLink.textContent) return;
 
-    const sessionId = sessionLink.textContent;
+    // The header link (written by embryos.js) is the only place app.js learns a
+    // session id — the DOM-as-IPC read MIGRATION.md flagged. Publish it here,
+    // the one moment app.js legitimately has it, then consume the shared value
+    // rather than the element. Publish-before-read on purpose: a cached id read
+    // first could be older than the id the user is looking at, and copy must
+    // yield what the header shows. set() is deep-equal guarded, so a repeat
+    // click notifies nobody, and once another writer publishes on session
+    // change this line is a no-op and the DOM read can go.
+    SharedState.set('sessionId', sessionLink.textContent);
+    const sessionId = SharedState.get('sessionId');
 
     function onCopied() {
         copyBtn.classList.add('copied');
@@ -230,6 +239,11 @@ const Tooltips = {
         }
     }
 };
+
+// The tooltip is body-parented at viewport coords, so it goes stale whenever an
+// ancestor transform moves its anchor. A CSS transform fires neither scroll nor
+// resize, so the bench must dismiss it explicitly: Tooltips.hide().
+window.Tooltips = Tooltips;
 
 /**
  * Presence Manager - Collaborative presence like Google Docs
@@ -402,6 +416,7 @@ const ThemeManager = {
 
     setTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
+        document.body.setAttribute('data-theme', theme);
         localStorage.setItem(this.storageKey, theme);
     },
 
@@ -425,12 +440,9 @@ const KeyboardShortcuts = {
     shortcuts: {
         '1': () => switchTab(TABS.EMBRYOS),     // Embryos
         '2': () => switchTab(TABS.EVENTS),      // System
-        '3': () => switchTab('main'),            // Live View
         '4': () => switchTab(TABS.CALIBRATION),  // Calibration
         '5': () => switchTab(TABS.DEVICES),      // Devices
         '6': () => switchTab(TABS.EXPERIMENT),   // Experiment
-        'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
-        'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
         't': () => ThemeManager.toggle(),
         'p': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('profile'); },
@@ -453,19 +465,6 @@ const KeyboardShortcuts = {
         }
     },
 
-    adjustZSlider(direction) {
-        if (state.tab !== 'main' || !state.current3dVolume) return;
-
-        const slider = document.getElementById('z-slider');
-        if (!slider) return;
-
-        const newVal = parseInt(slider.value) + direction;
-        if (newVal >= parseInt(slider.min) && newVal <= parseInt(slider.max)) {
-            slider.value = newVal;
-            slider.dispatchEvent(new Event('input'));
-        }
-    },
-
     showHelp() {
         // Create help modal if it doesn't exist
         let modal = document.getElementById('shortcuts-modal');
@@ -484,7 +483,6 @@ const KeyboardShortcuts = {
                             <h4>Navigation</h4>
                             <div class="shortcut"><kbd>1</kbd> Embryos tab</div>
                             <div class="shortcut"><kbd>2</kbd> System tab</div>
-                            <div class="shortcut"><kbd>3</kbd> Live View tab</div>
                             <div class="shortcut"><kbd>4</kbd> Calibration tab</div>
                             <div class="shortcut"><kbd>5</kbd> Devices tab</div>
                         </div>
@@ -621,17 +619,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
-
-    // Z-slider event listener (Live View)
-    const zSlider = document.getElementById('z-slider');
-    if (zSlider) {
-        zSlider.addEventListener('input', (e) => {
-            if (!state.current3dVolume) return;
-            state.currentZ = parseInt(e.target.value);
-            updateZSliderDisplay();
-            loadZSlice(state.current3dVolume.uid, state.currentZ);
-        });
-    }
 
     // Initialize events tab
     initEventsTab();

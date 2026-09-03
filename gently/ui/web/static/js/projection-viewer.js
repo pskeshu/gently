@@ -400,11 +400,21 @@ const ProjectionViewer = {
 
         this.renderer3d.domElement.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
+            // clientX/Y deltas are in screen px; if an ancestor is CSS-scaled
+            // (the Atrium bench) the canvas is drawn bigger/smaller than its
+            // layout size, so the same gesture across the canvas would rotate
+            // by a different amount. Divide by the live scale. Unscaled,
+            // rect.width === offsetWidth, so this is exactly 1.
+            const canvas = this.renderer3d.domElement;
+            const rect = canvas.getBoundingClientRect();
+            const scale = canvas.offsetWidth ? rect.width / canvas.offsetWidth : 1;
+            const dx = (e.clientX - this.prevMouse.x) / scale;
+            const dy = (e.clientY - this.prevMouse.y) / scale;
             if (e.shiftKey) {
-                this.sliceGroup.rotation.z += (e.clientX - this.prevMouse.x) * 0.01;
+                this.sliceGroup.rotation.z += dx * 0.01;
             } else {
-                this.sliceGroup.rotation.y += (e.clientX - this.prevMouse.x) * 0.01;
-                this.sliceGroup.rotation.x += (e.clientY - this.prevMouse.y) * 0.01;
+                this.sliceGroup.rotation.y += dx * 0.01;
+                this.sliceGroup.rotation.x += dy * 0.01;
             }
             this.savedRotation.x = this.sliceGroup.rotation.x;
             this.savedRotation.y = this.sliceGroup.rotation.y;

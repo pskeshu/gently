@@ -21,6 +21,8 @@ const DevicesManager = (function () {
     let _statusPill, _statusMeta, _statusDot;
     let _posX, _posY, _piezoZ, _galvoA, _galvoB;
     let _tbody, _filter;
+    // Nodes cacheDom() has already wired one-shot listeners to (see cacheDom).
+    let _observedSvg = null, _wiredFilter = null;
 
     // Map DOM
     let _mapSvg, _mapBg, _mapGridMinor, _mapGridMajor, _mapAxisEmphasis;
@@ -30,7 +32,7 @@ const DevicesManager = (function () {
     let _mapMarker, _mapMarkerPulse, _mapMarkerRing, _mapMarkerDot;
     let _mapReadoutX, _mapReadoutY;
     let _mapWrap;
-    let _scalebarLabel;
+    let _scalebarLabel, _scalebarTrack;
 
     // Embryo waypoints — driven by EMBRYOS_UPDATE events (the canonical bulk
     // mutation broadcast added by the embryos-broadcast commit) and the
@@ -41,11 +43,6 @@ const DevicesManager = (function () {
     // grey=unassigned). EMBRYO_DETECTED / STATUS_CHANGED listeners stay
     // hooked as a belt-and-braces refresh path.
     let _embryos = [];
-    const _ROLE_COLOR = {
-        test: '#ff66cc',
-        calibration: '#00cccc',
-        unassigned: '#888888',
-    };
 
     // Map-side edit state. _selectedEmbryoId means "picked up": the next
     // click on empty map space drops it there (with a confirm), Delete /
@@ -158,111 +155,125 @@ const DevicesManager = (function () {
     let _coverslip = null;
     let _viewBox = null;
 
+    // Resolve a cached node, re-querying when it was never found or has been
+    // detached. Replaces the old `if (_statusPill) return;` latch, which made
+    // the FIRST caller's snapshot permanent: anything mounted afterwards kept
+    // a null ref forever, silently. Cost when everything is already mounted is
+    // one `.isConnected` read per ref, so the hot handlePayload() path is
+    // unchanged in practice.
+    const alive = (node) => (node && node.isConnected) ? node : null;
+    const grab = (node, elemId) => alive(node) || document.getElementById(elemId);
+
     function cacheDom() {
-        if (_statusPill) return;
-        _statusPill = document.getElementById('devices-stream-pill');
-        _statusMeta = document.getElementById('devices-status-meta');
-        _statusDot  = document.getElementById('devices-status-dot');
-        _posX       = document.getElementById('dev-pos-x');
-        _posY       = document.getElementById('dev-pos-y');
-        _piezoZ     = document.getElementById('dev-pos-piezo');
-        _galvoA     = document.getElementById('dev-pos-galvo-a');
-        _galvoB     = document.getElementById('dev-pos-galvo-b');
-        _tbody      = document.getElementById('devices-tbody');
-        _filter     = document.getElementById('devices-filter');
+        _statusPill = grab(_statusPill, 'devices-stream-pill');
+        _statusMeta = grab(_statusMeta, 'devices-status-meta');
+        _statusDot  = grab(_statusDot, 'devices-status-dot');
+        _posX       = grab(_posX, 'dev-pos-x');
+        _posY       = grab(_posY, 'dev-pos-y');
+        _piezoZ     = grab(_piezoZ, 'dev-pos-piezo');
+        _galvoA     = grab(_galvoA, 'dev-pos-galvo-a');
+        _galvoB     = grab(_galvoB, 'dev-pos-galvo-b');
+        _tbody      = grab(_tbody, 'devices-tbody');
+        _filter     = grab(_filter, 'devices-filter');
 
-        _mapSvg           = document.getElementById('devices-map-svg');
-        _mapBg            = document.getElementById('devices-map-bg');
-        _mapBeyond        = document.getElementById('devices-map-beyond');
-        _mapGridMinor     = document.getElementById('devices-map-grid-minor');
-        _mapGridMajor     = document.getElementById('devices-map-grid-major');
-        _mapAxisEmphasis  = document.getElementById('devices-map-axis-emphasis');
-        _mapCoverslip     = document.getElementById('devices-map-coverslip');
-        _mapZones         = document.getElementById('devices-map-zones');
-        _mapZoneLabels    = document.getElementById('devices-map-zone-labels');
-        _mapOrigin        = document.getElementById('devices-map-origin');
-        _mapAxes          = document.getElementById('devices-map-axes');
-        _mapEmbryos       = document.getElementById('devices-map-embryos');
-        _mapMarker        = document.getElementById('devices-map-marker');
-        _mapMarkerPulse   = document.getElementById('devices-map-marker-pulse');
-        _mapMarkerRing    = document.getElementById('devices-map-marker-ring');
-        _mapMarkerDot     = document.getElementById('devices-map-marker-dot');
-        _mapReadoutX      = document.getElementById('devices-map-x');
-        _mapReadoutY      = document.getElementById('devices-map-y');
-        _mapWrap          = document.getElementById('devices-map-wrap');
-        _scalebarLabel    = document.getElementById('devices-scalebar-value');
+        _mapSvg           = grab(_mapSvg, 'devices-map-svg');
+        _mapBg            = grab(_mapBg, 'devices-map-bg');
+        _mapBeyond        = grab(_mapBeyond, 'devices-map-beyond');
+        _mapGridMinor     = grab(_mapGridMinor, 'devices-map-grid-minor');
+        _mapGridMajor     = grab(_mapGridMajor, 'devices-map-grid-major');
+        _mapAxisEmphasis  = grab(_mapAxisEmphasis, 'devices-map-axis-emphasis');
+        _mapCoverslip     = grab(_mapCoverslip, 'devices-map-coverslip');
+        _mapZones         = grab(_mapZones, 'devices-map-zones');
+        _mapZoneLabels    = grab(_mapZoneLabels, 'devices-map-zone-labels');
+        _mapOrigin        = grab(_mapOrigin, 'devices-map-origin');
+        _mapAxes          = grab(_mapAxes, 'devices-map-axes');
+        _mapEmbryos       = grab(_mapEmbryos, 'devices-map-embryos');
+        _mapMarker        = grab(_mapMarker, 'devices-map-marker');
+        _mapMarkerPulse   = grab(_mapMarkerPulse, 'devices-map-marker-pulse');
+        _mapMarkerRing    = grab(_mapMarkerRing, 'devices-map-marker-ring');
+        _mapMarkerDot     = grab(_mapMarkerDot, 'devices-map-marker-dot');
+        _mapReadoutX      = grab(_mapReadoutX, 'devices-map-x');
+        _mapReadoutY      = grab(_mapReadoutY, 'devices-map-y');
+        _mapWrap          = grab(_mapWrap, 'devices-map-wrap');
+        _scalebarLabel    = grab(_scalebarLabel, 'devices-scalebar-value');
+        _scalebarTrack    = alive(_scalebarTrack) || document.querySelector('#devices-scalebar .devices-scalebar-track');
 
-        _camPanel        = document.getElementById('devices-camera-panel');
-        _camToggle       = document.getElementById('devices-camera-toggle');
-        _camExpand       = document.getElementById('devices-camera-expand');
-        _camImg          = document.getElementById('devices-camera-img');
-        _camPlaceholder  = document.getElementById('devices-camera-placeholder');
-        _camStage        = _camPanel ? _camPanel.querySelector('.devices-camera-stage') : null;
-        _camCrosshair    = document.getElementById('devices-camera-crosshair');
-        _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
-        _camLed          = document.getElementById('devices-camera-led');
-        _camMeta         = document.getElementById('devices-camera-meta');
+        _camPanel        = grab(_camPanel, 'devices-camera-panel');
+        _camToggle       = grab(_camToggle, 'devices-camera-toggle');
+        _camExpand       = grab(_camExpand, 'devices-camera-expand');
+        _camImg          = grab(_camImg, 'devices-camera-img');
+        _camPlaceholder  = grab(_camPlaceholder, 'devices-camera-placeholder');
+        _camStage        = alive(_camStage) || (_camPanel ? _camPanel.querySelector('.devices-camera-stage') : null);
+        _camCrosshair    = grab(_camCrosshair, 'devices-camera-crosshair');
+        _camCrosshairGroup = grab(_camCrosshairGroup, 'devices-camera-crosshair-group');
+        _camLed          = grab(_camLed, 'devices-camera-led');
+        _camMeta         = grab(_camMeta, 'devices-camera-meta');
 
         // Manual / lightsheet panel
-        _lsToggle        = document.getElementById('devices-ls-toggle');
-        _lsImg           = document.getElementById('devices-ls-img');
-        _lsPlaceholder   = document.getElementById('devices-ls-placeholder');
-        _lsStage         = document.getElementById('devices-ls-stage');
-        _lsLed           = document.getElementById('devices-ls-led');
-        _lsMeta          = document.getElementById('devices-ls-meta');
-        _lsGalvoSlider   = document.getElementById('devices-ls-galvo-slider');
-        _lsGalvoNum      = document.getElementById('devices-ls-galvo');
-        _lsPiezoSlider   = document.getElementById('devices-ls-piezo-slider');
-        _lsPiezoNum      = document.getElementById('devices-ls-piezo');
-        _lsExposureNum   = document.getElementById('devices-ls-exposure');
-        _lsLedToggle     = document.getElementById('devices-ls-led-toggle');
-        _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
-        _lsLaserToggle   = document.getElementById('devices-ls-laser-toggle');
-        _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
-        _lsBurstBtn      = document.getElementById('devices-ls-burst');
-        _lsLastcap       = document.getElementById('devices-ls-lastcap');
-        _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
-        _lsLaserStatus   = document.getElementById('devices-ls-laser-status');
-        _lsLaserPreset   = document.getElementById('devices-laser-preset');
-        _lsSideSelect    = document.getElementById('devices-ls-side');
-        _lsTempInput     = document.getElementById('devices-ls-temp-input');
-        _lsTempSet       = document.getElementById('devices-ls-temp-set');
+        _lsToggle        = grab(_lsToggle, 'devices-ls-toggle');
+        _lsImg           = grab(_lsImg, 'devices-ls-img');
+        _lsPlaceholder   = grab(_lsPlaceholder, 'devices-ls-placeholder');
+        _lsStage         = grab(_lsStage, 'devices-ls-stage');
+        _lsLed           = grab(_lsLed, 'devices-ls-led');
+        _lsMeta          = grab(_lsMeta, 'devices-ls-meta');
+        _lsGalvoSlider   = grab(_lsGalvoSlider, 'devices-ls-galvo-slider');
+        _lsGalvoNum      = grab(_lsGalvoNum, 'devices-ls-galvo');
+        _lsPiezoSlider   = grab(_lsPiezoSlider, 'devices-ls-piezo-slider');
+        _lsPiezoNum      = grab(_lsPiezoNum, 'devices-ls-piezo');
+        _lsExposureNum   = grab(_lsExposureNum, 'devices-ls-exposure');
+        _lsLedToggle     = grab(_lsLedToggle, 'devices-ls-led-toggle');
+        _lsRoomLightBtn  = grab(_lsRoomLightBtn, 'devices-ls-room-light-btn');
+        _lsLaserToggle   = grab(_lsLaserToggle, 'devices-ls-laser-toggle');
+        _lsSnapVolBtn    = grab(_lsSnapVolBtn, 'devices-ls-snap-volume');
+        _lsBurstBtn      = grab(_lsBurstBtn, 'devices-ls-burst');
+        _lsLastcap       = grab(_lsLastcap, 'devices-ls-lastcap');
+        _lsLastcapRef    = grab(_lsLastcapRef, 'devices-ls-lastcap-ref');
+        _lsLaserStatus   = grab(_lsLaserStatus, 'devices-ls-laser-status');
+        _lsLaserPreset   = grab(_lsLaserPreset, 'devices-laser-preset');
+        _lsSideSelect    = grab(_lsSideSelect, 'devices-ls-side');
+        _lsTempInput     = grab(_lsTempInput, 'devices-ls-temp-input');
+        _lsTempSet       = grab(_lsTempSet, 'devices-ls-temp-set');
 
         // Timelapse form
-        _tlToggle     = document.getElementById('devices-tl-toggle');
-        _tlBody       = document.getElementById('devices-tl-body');
-        _tlInterval   = document.getElementById('devices-tl-interval');
-        _tlStop       = document.getElementById('devices-tl-stop');
-        _tlCondRow    = document.getElementById('devices-tl-cond-row');
-        _tlCondLabel  = document.getElementById('devices-tl-cond-label');
-        _tlCondVal    = document.getElementById('devices-tl-cond-val');
-        _tlEmbryos    = document.getElementById('devices-tl-embryos');
-        _tlMode       = document.getElementById('devices-tl-mode');
-        _tlSlices     = document.getElementById('devices-tl-slices');
-        _tlExposure   = document.getElementById('devices-tl-exposure');
-        _tlGalvoAmp   = document.getElementById('devices-tl-galvo-amp');
-        _tlGalvoCtr   = document.getElementById('devices-tl-galvo-ctr');
-        _tlPiezoAmp   = document.getElementById('devices-tl-piezo-amp');
-        _tlPiezoCtr   = document.getElementById('devices-tl-piezo-ctr');
-        _tlLaser      = document.getElementById('devices-tl-laser');
-        _tlStart      = document.getElementById('devices-tl-start');
-        _tlStatus     = document.getElementById('devices-tl-status');
-        _tlStatusText = document.getElementById('devices-tl-status-text');
+        _tlToggle     = grab(_tlToggle, 'devices-tl-toggle');
+        _tlBody       = grab(_tlBody, 'devices-tl-body');
+        _tlInterval   = grab(_tlInterval, 'devices-tl-interval');
+        _tlStop       = grab(_tlStop, 'devices-tl-stop');
+        _tlCondRow    = grab(_tlCondRow, 'devices-tl-cond-row');
+        _tlCondLabel  = grab(_tlCondLabel, 'devices-tl-cond-label');
+        _tlCondVal    = grab(_tlCondVal, 'devices-tl-cond-val');
+        _tlEmbryos    = grab(_tlEmbryos, 'devices-tl-embryos');
+        _tlMode       = grab(_tlMode, 'devices-tl-mode');
+        _tlSlices     = grab(_tlSlices, 'devices-tl-slices');
+        _tlExposure   = grab(_tlExposure, 'devices-tl-exposure');
+        _tlGalvoAmp   = grab(_tlGalvoAmp, 'devices-tl-galvo-amp');
+        _tlGalvoCtr   = grab(_tlGalvoCtr, 'devices-tl-galvo-ctr');
+        _tlPiezoAmp   = grab(_tlPiezoAmp, 'devices-tl-piezo-amp');
+        _tlPiezoCtr   = grab(_tlPiezoCtr, 'devices-tl-piezo-ctr');
+        _tlLaser      = grab(_tlLaser, 'devices-tl-laser');
+        _tlStart      = grab(_tlStart, 'devices-tl-start');
+        _tlStatus     = grab(_tlStatus, 'devices-tl-status');
+        _tlStatusText = grab(_tlStatusText, 'devices-tl-status-text');
 
-        _roomLightToggle = document.getElementById('devices-room-light-toggle');
-        _roomLightLabel  = document.getElementById('devices-room-light-label');
+        _roomLightToggle = grab(_roomLightToggle, 'devices-room-light-toggle');
+        _roomLightLabel  = grab(_roomLightLabel, 'devices-room-light-label');
 
-        _tempEl      = document.getElementById('devices-temp');
-        _tempReadout = document.getElementById('devices-temp-readout');
-        _tempInput   = document.getElementById('devices-temp-input');
-        _tempSet     = document.getElementById('devices-temp-set');
+        _tempEl      = grab(_tempEl, 'devices-temp');
+        _tempReadout = grab(_tempReadout, 'devices-temp-readout');
+        _tempInput   = grab(_tempInput, 'devices-temp-input');
+        _tempSet     = grab(_tempSet, 'devices-temp-set');
 
         // Recompute the scale bar caption whenever the canvas resizes.
-        if (_mapSvg && window.ResizeObserver) {
+        // Keyed on the node, not on a run-once flag: one observer per SVG that
+        // actually gets cached, so a re-resolved node is re-observed and the
+        // same node is never observed twice.
+        if (_mapSvg && _mapSvg !== _observedSvg && window.ResizeObserver) {
+            _observedSvg = _mapSvg;
             new ResizeObserver(() => updateScalebar()).observe(_mapSvg);
         }
 
-        if (_filter) {
+        if (_filter && _filter !== _wiredFilter) {
+            _wiredFilter = _filter;
             _filter.addEventListener('input', () => {
                 _filterText = _filter.value.trim().toLowerCase();
                 renderPropertiesTable(_lastPropertyMap);
@@ -328,6 +339,15 @@ const DevicesManager = (function () {
                     setAxis(_posX, entry.X, 2);
                     setAxis(_posY, entry.Y, 2);
                     _lastXY = { X: entry.X, Y: entry.Y };
+                    // Publish for the other surfaces that keep their own copy
+                    // (operate.js, occupancy3d.js, marking.js). devices.js stays
+                    // the canonical owner; this is a broadcast, not a rewire.
+                    // Non-finite readings are not published — they would render
+                    // as NaN in a subscriber; here they already fall back to the
+                    // neutral frame via computeViewBox().
+                    if (Number.isFinite(entry.X) && Number.isFinite(entry.Y)) {
+                        SharedState.set('stageXY', { x: entry.X, y: entry.Y });
+                    }
                     if (computeViewBox()) renderMap();
                     else updateMapMarker();
                     if (_mapReadoutX) _mapReadoutX.textContent = fmtNumber(entry.X, 1);
@@ -566,96 +586,22 @@ const DevicesManager = (function () {
         updateScalebar();
     }
 
-    function renderEmbryos() {
-        if (!_mapEmbryos || !_viewBox) return;
-        _mapEmbryos.innerHTML = '';
-        if (!_embryos || _embryos.length === 0) return;
-
-        const { xMin, xMax, yMin, yMax } = _viewBox;
-        const span = Math.max(xMax - xMin, yMax - yMin);
-        const r = span * 0.006;              // embryo dot radius (stage µm)
-        const ringR = r * 1.9;               // accent ring
-        const labelFontSize = span * 0.012;
-
-        for (const emb of _embryos) {
-            if (emb.x == null || emb.y == null) continue;
-            const color = _ROLE_COLOR[emb.role] || _ROLE_COLOR.test;
-            // Group so we can attach the title (tooltip).
-            const g = document.createElementNS(SVG_NS, 'g');
-            g.setAttribute('class', `devices-embryo devices-embryo-${emb.role || 'test'}`);
-
-            // Soft outer ring — makes the marker visible even on dense
-            // background grids without overpowering the position marker.
-            const ring = document.createElementNS(SVG_NS, 'circle');
-            ring.setAttribute('cx', emb.x);
-            ring.setAttribute('cy', svgY(emb.y));
-            ring.setAttribute('r', ringR);
-            ring.setAttribute('fill', 'none');
-            ring.setAttribute('stroke', color);
-            ring.setAttribute('stroke-opacity', '0.45');
-            ring.setAttribute('stroke-width', r * 0.35);
-            g.appendChild(ring);
-
-            const dot = document.createElementNS(SVG_NS, 'circle');
-            dot.setAttribute('cx', emb.x);
-            dot.setAttribute('cy', svgY(emb.y));
-            dot.setAttribute('r', r);
-            dot.setAttribute('fill', color);
-            dot.setAttribute('fill-opacity', '0.9');
-            dot.setAttribute('stroke', '#000');
-            dot.setAttribute('stroke-opacity', '0.5');
-            dot.setAttribute('stroke-width', r * 0.18);
-            g.appendChild(dot);
-
-            // Label — embryo id, small, just above the dot.
-            const label = document.createElementNS(SVG_NS, 'text');
-            label.setAttribute('x', emb.x);
-            label.setAttribute('y', svgY(emb.y + r * 2.2));
-            label.setAttribute('font-size', labelFontSize);
-            label.setAttribute('text-anchor', 'middle');
-            label.setAttribute('class', 'devices-embryo-label');
-            label.setAttribute('fill', color);
-            label.textContent = emb.user_label || emb.embryo_id || '';
-            g.appendChild(label);
-
-            const title = document.createElementNS(SVG_NS, 'title');
-            const role = emb.role || 'test';
-            const parts = [
-                `${emb.user_label || emb.embryo_id}`,
-                `role: ${role}`,
-                `(${emb.x.toFixed(1)}, ${emb.y.toFixed(1)}) µm`,
-            ];
-            if (emb.cadence_phase) parts.push(`phase: ${emb.cadence_phase}`);
-            title.textContent = parts.join('\n');
-            g.appendChild(title);
-
-            _mapEmbryos.appendChild(g);
-        }
-    }
-
-    async function loadEmbryos() {
-        try {
-            const res = await fetch('/api/embryos/positions');
-            if (!res.ok) return;
-            const data = await res.json();
-            _embryos = Array.isArray(data.embryos) ? data.embryos : [];
-            renderEmbryos();
-        } catch (err) {
-            console.debug('embryo positions fetch failed:', err);
-        }
-    }
-
+    // EMBRYO_DETECTED / STATUS_CHANGED carry the flat legacy record
+    // ({embryo_id, x, y, role}); _embryos holds the EmbryoState.to_dict()
+    // shape (id, position_coarse, ...) the renderer reads. Normalise here,
+    // at the boundary, so both feeds land in one shape.
     function _upsertEmbryo(payload) {
         const eid = payload && payload.embryo_id;
         if (!eid) return false;
-        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        const idx = _embryos.findIndex(e => e.id === eid);
         const existing = idx >= 0 ? _embryos[idx] : null;
         const merged = Object.assign({}, existing || {}, {
-            embryo_id: eid,
+            id: eid,
             role: payload.role || (existing && existing.role) || 'test',
         });
-        if (payload.x != null) merged.x = payload.x;
-        if (payload.y != null) merged.y = payload.y;
+        if (payload.x != null && payload.y != null) {
+            merged.position_coarse = { x: payload.x, y: payload.y };
+        }
         if (payload.user_label !== undefined) merged.user_label = payload.user_label;
         if (payload.confidence !== undefined) merged.confidence = payload.confidence;
         if (payload.cadence_phase !== undefined) merged.cadence_phase = payload.cadence_phase;
@@ -677,13 +623,13 @@ const DevicesManager = (function () {
         const eid = payload.embryo_id;
         const newRole = payload.new_role;
         if (!eid || !newRole) return;
-        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        const idx = _embryos.findIndex(e => e.id === eid);
         if (idx >= 0) {
             _embryos[idx] = Object.assign({}, _embryos[idx], { role: newRole });
             renderEmbryos();
         } else {
             // Embryo we haven't seen yet — refetch to be safe.
-            loadEmbryos();
+            loadEmbryosSnapshot();
         }
     }
 
@@ -1161,7 +1107,11 @@ const DevicesManager = (function () {
         const h = _viewBox.yMax - _viewBox.yMin;
         const scale = Math.min(rect.width / w, rect.height / h);
         if (!isFinite(scale) || scale <= 0) return;
-        const targetPx = 120;
+        // Measure the bar the caption describes rather than assuming its CSS
+        // width: both rects carry any ancestor CSS transform, so the zoom
+        // cancels out and the caption stays true under a scaled bench.
+        const barRect = _scalebarTrack && _scalebarTrack.getBoundingClientRect();
+        const targetPx = barRect && barRect.width ? barRect.width : 120;
         const rawUm = targetPx / scale;
         const pow = Math.pow(10, Math.floor(Math.log10(rawUm)));
         const norm = rawUm / pow;
@@ -1293,11 +1243,14 @@ const DevicesManager = (function () {
         // but the SVG renderer re-rasterises at the new zoom so the 1px
         // strokes stay crisp instead of getting bitmap-scaled.
         if (_camCrosshairGroup && _camStage) {
-            const rect = _camStage.getBoundingClientRect();
             // Convert pixel-space translation to viewBox units (viewBox is
-            // 0..100 in both axes, preserveAspectRatio=none).
-            const txV = rect.width  > 0 ? (_camTx * 100) / rect.width  : 0;
-            const tyV = rect.height > 0 ? (_camTy * 100) / rect.height : 0;
+            // 0..100 in both axes, preserveAspectRatio=none). Use the layout
+            // size, not getBoundingClientRect: _camTx is in the stage's own
+            // px, so a CSS transform on an ancestor must not enter here.
+            const stageW = _camStage.offsetWidth;
+            const stageH = _camStage.offsetHeight;
+            const txV = stageW > 0 ? (_camTx * 100) / stageW : 0;
+            const tyV = stageH > 0 ? (_camTy * 100) / stageH : 0;
             // translate(50+tx, 50+ty) scale(zoom) translate(-50, -50) keeps
             // the viewBox centre (50, 50) as the zoom anchor and offsets by
             // the converted pixel translation.
@@ -1323,9 +1276,10 @@ const DevicesManager = (function () {
     // zoom 1 this collapses to (0, 0).
     function clampCameraPan() {
         if (!_camStage) return;
-        const rect = _camStage.getBoundingClientRect();
-        const maxX = (rect.width  * (_camZoom - 1)) / 2;
-        const maxY = (rect.height * (_camZoom - 1)) / 2;
+        // Layout size, not the client rect: the bounds are compared against
+        // _camTx/_camTy, which live in the stage's own untransformed px.
+        const maxX = (_camStage.offsetWidth  * (_camZoom - 1)) / 2;
+        const maxY = (_camStage.offsetHeight * (_camZoom - 1)) / 2;
         _camTx = Math.max(-maxX, Math.min(maxX, _camTx));
         _camTy = Math.max(-maxY, Math.min(maxY, _camTy));
     }
@@ -1336,8 +1290,12 @@ const DevicesManager = (function () {
         // operator while they're framing a sample.
         event.preventDefault();
         const rect = _camStage.getBoundingClientRect();
-        const cx = event.clientX - rect.left - rect.width  / 2;
-        const cy = event.clientY - rect.top  - rect.height / 2;
+        // rect carries any ancestor CSS transform; _camTx/_camTy do not, so
+        // divide the cursor offset by the live scale before anchoring.
+        const sx = _camStage.offsetWidth  ? rect.width  / _camStage.offsetWidth  : 1;
+        const sy = _camStage.offsetHeight ? rect.height / _camStage.offsetHeight : 1;
+        const cx = (event.clientX - rect.left - rect.width  / 2) / sx;
+        const cy = (event.clientY - rect.top  - rect.height / 2) / sy;
         const oldZoom = _camZoom;
         const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
         const newZoom = Math.max(_CAM_ZOOM_MIN,
@@ -1372,8 +1330,13 @@ const DevicesManager = (function () {
 
     function onCameraPointerMove(event) {
         if (!_camPanLast) return;
-        _camTx += event.clientX - _camPanLast.x;
-        _camTy += event.clientY - _camPanLast.y;
+        // Pointer deltas are screen px; the translate they feed is in the
+        // stage's own px, so divide out any ancestor CSS transform scale.
+        const rect = _camStage.getBoundingClientRect();
+        const sx = _camStage.offsetWidth  ? rect.width  / _camStage.offsetWidth  : 1;
+        const sy = _camStage.offsetHeight ? rect.height / _camStage.offsetHeight : 1;
+        _camTx += (event.clientX - _camPanLast.x) / sx;
+        _camTy += (event.clientY - _camPanLast.y) / sy;
         _camPanLast = { x: event.clientX, y: event.clientY };
         clampCameraPan();
         applyCameraTransform();
@@ -1919,9 +1882,9 @@ const DevicesManager = (function () {
 
     function clampLightsheetPan() {
         if (!_lsStage) return;
-        const rect = _lsStage.getBoundingClientRect();
-        const maxX = (rect.width  * (_lsZoom - 1)) / 2;
-        const maxY = (rect.height * (_lsZoom - 1)) / 2;
+        // Layout size — the bounds are in the stage's own untransformed px.
+        const maxX = (_lsStage.offsetWidth  * (_lsZoom - 1)) / 2;
+        const maxY = (_lsStage.offsetHeight * (_lsZoom - 1)) / 2;
         _lsTx = Math.max(-maxX, Math.min(maxX, _lsTx));
         _lsTy = Math.max(-maxY, Math.min(maxY, _lsTy));
     }
@@ -1930,8 +1893,11 @@ const DevicesManager = (function () {
         if (!_lsStage) return;
         event.preventDefault();
         const rect = _lsStage.getBoundingClientRect();
-        const cx = event.clientX - rect.left - rect.width  / 2;
-        const cy = event.clientY - rect.top  - rect.height / 2;
+        // See onCameraWheel: strip any ancestor CSS transform scale.
+        const sx = _lsStage.offsetWidth  ? rect.width  / _lsStage.offsetWidth  : 1;
+        const sy = _lsStage.offsetHeight ? rect.height / _lsStage.offsetHeight : 1;
+        const cx = (event.clientX - rect.left - rect.width  / 2) / sx;
+        const cy = (event.clientY - rect.top  - rect.height / 2) / sy;
         const oldZoom = _lsZoom;
         const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
         const newZoom = Math.max(_CAM_ZOOM_MIN, Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
@@ -1957,8 +1923,12 @@ const DevicesManager = (function () {
 
     function onLightsheetPointerMove(event) {
         if (!_lsPanLast) return;
-        _lsTx += event.clientX - _lsPanLast.x;
-        _lsTy += event.clientY - _lsPanLast.y;
+        // See onCameraPointerMove: screen-px deltas -> stage-local px.
+        const rect = _lsStage.getBoundingClientRect();
+        const sx = _lsStage.offsetWidth  ? rect.width  / _lsStage.offsetWidth  : 1;
+        const sy = _lsStage.offsetHeight ? rect.height / _lsStage.offsetHeight : 1;
+        _lsTx += (event.clientX - _lsPanLast.x) / sx;
+        _lsTy += (event.clientY - _lsPanLast.y) / sy;
         _lsPanLast = { x: event.clientX, y: event.clientY };
         clampLightsheetPan();
         applyLightsheetTransform();

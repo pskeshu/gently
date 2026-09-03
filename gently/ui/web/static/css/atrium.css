@@ -1,0 +1,292 @@
+/* The Atrium — spatial shell. Spec: docs/atrium/SPEC.md.
+   Loaded always, inert unless <body> carries .atrium-on. */
+
+body.atrium-on { overflow: hidden; }
+/* the tab strip is a second navigation; the chip bar replaces it */
+body.atrium-on .tabs,
+body.atrium-on #tab-content > *:not(#atr-viewport):not(#atr-pinned) { display: none !important; }
+/* R2: adopted panels are always live — the tab shell's hiding no longer applies */
+body.atrium-on .atr-body > .tab-content { display: block !important; }
+
+/* ── theme ───────────────────────────────────────────────────────────
+   The Atrium was first written with dark literals behind var(…, fallback),
+   so light mode was never actually designed: the bench resolved to #f8fafc
+   against #ffffff windows — seven units of lightness apart, so nothing looked
+   like it was sitting ON anything — and the shadow was rgba(0,0,0,.6), which
+   on white is a smudge rather than depth.
+
+   A bench must read as a surface. That means it is always DARKER than the
+   windows resting on it, in either theme, and the shadow is tinted with the
+   surface colour rather than pure black. */
+:root {
+    --atr-bench:       #0b0f15;   /* darker than --bg-card, so windows lift off it */
+    --atr-grid:        #1b2430;
+    --atr-shadow:      0 6px 20px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .4);
+    --atr-shadow-lift: 0 14px 40px rgba(0, 0, 0, .6), 0 2px 4px rgba(0, 0, 0, .45);
+    --atr-win-border:  #2b3440;
+    --atr-chrome-bg:   rgba(22, 27, 34, .92);
+    --warn:            #d29922;   /* consumed by .atr-calling and #atr-releases */
+}
+[data-theme="light"] {
+    --atr-bench:       #dde3ec;   /* a real surface, not almost-white */
+    --atr-grid:        #c3ccda;
+    --atr-shadow:      0 4px 14px rgba(15, 23, 42, .10), 0 1px 2px rgba(15, 23, 42, .06);
+    --atr-shadow-lift: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 4px rgba(15, 23, 42, .08);
+    --atr-win-border:  #cbd5e1;
+    --atr-chrome-bg:   rgba(255, 255, 255, .92);
+    --warn:            #b45309;   /* darker: the light chrome is nearly white */
+}
+
+/* ── the bench ───────────────────────────────────────────────────────── */
+#atr-viewport {
+    position: fixed; inset: 0; z-index: 40; cursor: grab;
+    overscroll-behavior: none; background: var(--atr-bench);
+    overflow: hidden;
+}
+/* R3 one level up: a frame half off the viewport is as half-rendered as content
+   escaping its frame — fade the boundary, never slice a title. The mask lives on
+   an INNER layer so the viewport itself stays opaque; masking the viewport made
+   it see-through at the edges and the old chrome ghosted in. */
+#atr-masked {
+    position: absolute; inset: 0;
+    --atr-fade: 34px;
+    -webkit-mask-image:
+        linear-gradient(to right,  transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%),
+        linear-gradient(to bottom, transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+        linear-gradient(to right,  transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%),
+        linear-gradient(to bottom, transparent 0, #000 var(--atr-fade), #000 calc(100% - var(--atr-fade)), transparent 100%);
+    mask-composite: intersect;
+}
+#atr-viewport.panning { cursor: grabbing; }
+#atr-masked::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .65;
+    background-image:
+        linear-gradient(var(--atr-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--atr-grid) 1px, transparent 1px);
+    background-size: var(--atr-gs, 80px) var(--atr-gs, 80px);
+    background-position: var(--atr-gx, 0) var(--atr-gy, 0);
+}
+#atr-board { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+
+/* ── windows: R3 says every one is a bounded frame ───────────────────── */
+.atr-win {
+    position: absolute; display: flex; flex-direction: column;
+    background: var(--bg-card, #161b22); border: 1px solid var(--atr-win-border);
+    border-radius: 10px; overflow: hidden;              /* the boundary */
+    box-shadow: var(--atr-shadow);
+    transition: opacity .32s ease, filter .32s ease, border-color .32s ease,
+                height .26s cubic-bezier(.3, .9, .3, 1);
+}
+body.atr-focused .atr-win { opacity: .18; filter: saturate(.2); }
+body.atr-focused .atr-win.atr-attend {
+    opacity: 1; filter: none; border-color: var(--accent, #4ea3ff);
+    box-shadow: var(--atr-shadow-lift);                 /* attention lifts it */
+}
+body.atr-focused .atr-slot .atr-win { opacity: 1; filter: none; }   /* pinned never recedes */
+/* Nor does one that is calling. `body.atr-focused .atr-win` is specificity
+   (0,2,1) and `.atr-win.atr-calling` is (0,2,0), so an escalating window was
+   drawn at 18% opacity with its amber ring desaturated to grey — for the whole
+   time the operator was attending anything, which is the normal working state.
+   R6 escalated, the log recorded it, and nothing was visible. */
+body.atr-focused .atr-win.atr-calling { opacity: 1; filter: none; }
+
+.atr-head {
+    display: flex; align-items: center; gap: .45rem; flex: 0 0 auto;
+    padding: .35rem .5rem; cursor: grab; user-select: none;
+    background: var(--bg-hover, #1b222c); border-bottom: 1px solid var(--border, #2b3440);
+}
+.atr-head:active { cursor: grabbing; }
+.atr-head b { font-size: .72rem; letter-spacing: .04em; font-weight: 600; flex: 1; }
+.atr-fold {
+    background: none; border: 0; color: var(--text-muted, #7d8998);
+    cursor: pointer; font-size: .58rem; width: 14px; padding: 0; transition: transform .2s;
+}
+.atr-win.atr-folded .atr-fold { transform: rotate(-90deg); }
+.atr-peek {
+    font-family: ui-monospace, monospace; font-size: .68rem;
+    color: var(--accent, #4ea3ff); font-variant-numeric: tabular-nums;
+}
+.atr-body {
+    flex: 1; min-height: 0; overflow: auto; position: relative;
+    /* R10: children size to the WINDOW, not the viewport */
+    container-type: inline-size; container-name: atrwin;
+}
+.atr-win.atr-folded .atr-body { display: none; }
+
+/* ── the courtyard ───────────────────────────────────────────────────── */
+#atr-pinned {
+    position: fixed; inset: 0; z-index: 41; pointer-events: none; display: grid;
+}
+.atr-slot { display: flex; gap: 7px; pointer-events: none; min-height: 0; }
+.atr-slot.vert { flex-direction: column; align-self: start; overflow: auto; }
+.atr-slot.horz { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+.atr-slot .atr-win {
+    pointer-events: auto; position: relative;
+    left: auto !important; top: auto !important;
+    width: var(--atr-pw, auto) !important; flex: 0 0 auto;
+    box-shadow: var(--atr-shadow);
+}
+.atr-slot .atr-head { cursor: default; }
+
+/* ── chrome: lives in the FREE cell, so no edge can ever collide ─────── */
+#atr-chrome {
+    grid-area: free; pointer-events: none; display: grid; z-index: 2;
+    grid-template-columns: auto 1fr auto; grid-template-rows: auto 1fr auto;
+    grid-template-areas: "tl . tr" ". . ." "bl . br";
+}
+#atr-chrome > * { pointer-events: auto; }
+#atr-tl { grid-area: tl; display: flex; flex-direction: column; gap: 5px; align-self: start; }
+#atr-br { grid-area: br; align-self: end; justify-self: end; display: flex; gap: 6px; align-items: center; }
+#atr-hint, #atr-br > * {
+    font-size: .68rem; color: var(--text-muted, #7d8998);
+    background: var(--atr-chrome-bg);
+    border: 1px solid var(--atr-win-border); border-radius: 6px; padding: .3rem .5rem;
+    backdrop-filter: blur(8px); box-shadow: var(--atr-shadow);
+}
+#atr-br label { display: flex; gap: .4rem; align-items: center; }
+#atr-br input[type=range] { width: 74px; accent-color: var(--accent, #4ea3ff); }
+#atr-off { color: var(--accent, #4ea3ff); margin-left: .4rem; }
+#atr-chips { display: flex; gap: 4px; flex-wrap: wrap; max-width: 46vw; }
+.atr-btn {
+    font-size: .68rem; padding: .26rem .5rem; border-radius: 6px; cursor: pointer;
+    color: var(--text, #d7e0ea); border: 1px solid var(--atr-win-border);
+    background: var(--atr-chrome-bg);
+    backdrop-filter: blur(8px); white-space: nowrap; box-shadow: var(--atr-shadow);
+}
+.atr-btn:hover { border-color: var(--accent, #4ea3ff); }
+.atr-btn:disabled { opacity: .35; cursor: default; }
+.atr-btn:disabled:hover { border-color: var(--border, #2b3440); }
+
+/* R10's mechanism is `container-type: inline-size` on .atr-body above — that is
+   live, and it lets any panel size to its window instead of the viewport.
+   What used to sit here was a demonstration rule targeting `.row`/`.form-row`
+   at 320px. Measured: those classes exist in no template (zero matches) and no
+   bench window is narrower than 451px, so it never applied to anything.
+   SPEC.md's own closing rule says a rule that cannot name the failure it
+   prevents is decoration — deleted rather than left looking implemented.
+   A panel that needs to reflow narrow should add its own @container atrwin
+   rule against classes it actually has. */
+
+/* ── R8: addressable children ────────────────────────────────────────── */
+.atr-kids {
+    display: flex; gap: 3px; flex-wrap: wrap; flex: 0 0 auto;
+    padding: .25rem .4rem;
+    background: color-mix(in srgb, var(--bg-hover, #1b222c) 60%, transparent);
+    border-bottom: 1px solid var(--border, #2b3440);
+}
+.atr-win.atr-folded .atr-kids { display: none; }
+.atr-kid {
+    font-size: .64rem; padding: .12rem .38rem; border-radius: 4px; cursor: pointer;
+    color: var(--text-muted, #7d8998); border: 1px solid transparent; white-space: nowrap;
+}
+.atr-kid:hover { background: var(--bg-hover, #212a35); color: var(--text, #d7e0ea); }
+.atr-kid.on {
+    background: color-mix(in srgb, var(--accent, #4ea3ff) 22%, transparent);
+    color: var(--text, #d7e0ea); border-color: var(--accent, #4ea3ff);
+}
+
+/* R1: a UI with nowhere to put things grows internal switchers. The child strip
+   IS that switcher, promoted to an address — so hide the native one in the
+   windows the Atrium gives children, or the operator sees the same control
+   twice. Windows without children keep theirs; it is still the only way in. */
+body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important; }
+
+/* R6: a window that has released above the gauge says so */
+.atr-win.atr-calling { animation: atr-call 1.7s ease-in-out infinite; }
+@keyframes atr-call {
+    50% { box-shadow: 0 8px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--warn, #d29922) 55%, transparent); }
+}
+#atr-releases { color: var(--warn, #d29922); cursor: help; }
+
+/* The chrome is screen-fixed and the bench pans beneath it, so a window WILL
+   slide under the chip bar. It cannot be prevented by layout — only made
+   legible. Give the chrome a real surface and a hairline so it reads as an
+   overlay sitting above the bench rather than as text tangled with a window
+   header. */
+#atr-tl, #atr-br {
+    background: var(--atr-chrome-bg);
+    border: 1px solid var(--atr-win-border);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: var(--atr-shadow-lift);
+    backdrop-filter: blur(10px);
+}
+/* the children already carry their own chip styling; drop the doubled frame */
+#atr-tl > #atr-hint, #atr-br > * {
+    background: none; border: 0; box-shadow: none; backdrop-filter: none; padding: .1rem .3rem;
+}
+#atr-chips .atr-btn { box-shadow: none; }
+
+/* main.css forces animation-iteration-count:1 and duration:.01ms on * under
+   prefers-reduced-motion, which snaps .atr-calling past its 50% keyframe and
+   leaves NO ring — deleting the alarm while the 420ms bench glide, being rAF
+   and not CSS, was untouched. Give reduced-motion a static ring instead. */
+@media (prefers-reduced-motion: reduce) {
+    .atr-win.atr-calling {
+        animation: none;
+        box-shadow: var(--atr-shadow-lift), 0 0 0 3px var(--warn);
+    }
+}
+
+/* Focus was invisible everywhere — tabbing the chrome showed nothing at all.
+   A lab screen is shared, often at an angle, sometimes operated with gloves;
+   the caret has to be findable without hunting. */
+#atr-chrome :focus-visible,
+.atr-win :focus-visible {
+    outline: 2px solid var(--accent, #4ea3ff);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Child destinations are real buttons now, not spans with onclick. Keep them
+   looking identical while giving them a keyboard-sized target. */
+.atr-kid {
+    font: inherit; font-size: .64rem; background: none;
+    min-height: 24px; display: inline-flex; align-items: center;
+}
+/* 14px was an unhittable target; missing it dragged the window instead. */
+.atr-fold {
+    width: 24px; height: 24px; display: grid; place-items: center;
+    flex: 0 0 auto; border-radius: 4px;
+}
+.atr-fold:hover { background: var(--bg-hover, #212a35); }
+
+/* The chip holding attention now says so, rather than all ten looking alike. */
+.atr-btn[aria-current="true"] {
+    border-color: var(--accent, #4ea3ff);
+    color: var(--accent, #4ea3ff);
+    font-weight: 600;
+}
+
+/* A camera with no signal was the loudest object on the bench: a 471x471
+   rectangle at rgb(30,41,59) on a rgb(221,227,236) surface — maximum contrast
+   on the whole surface, spent announcing the absence of information. And it
+   appeared in whichever window the release ladder opened, not one the operator
+   asked for.
+
+   Video genuinely wants a dark surround, so this only quiets the EMPTY state,
+   keyed on the .has-frame class operate.js sets when a frame arrives. Scoped to
+   .atrium-on so the tabbed UI is untouched. */
+body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) {
+    background: var(--bg-hover, #1b222c);
+    border-style: dashed;
+    border-color: var(--atr-win-border);
+}
+body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) .op-cam-ph {
+    color: var(--text-muted, #7d8998);
+}
+
+/* R10, exercised. The calibration metrics strip is `display:flex` with
+   `.cal-metric { flex:1; min-width:0 }`, which fits at full page width and
+   crushes in a window: measured 4px of content against a 19px scrollWidth, so
+   every value rendered as a single clipped character.
+
+   A media query cannot fix this — the viewport is 1829px wide; it is the
+   699px WINDOW that is short. That is precisely what container queries are for,
+   and `.atr-body` is already the container. Wrap instead of crush. */
+@container atrwin (max-width: 900px) {
+    .cal-metrics-strip { flex-wrap: wrap; }
+    .cal-metric { flex: 1 1 auto; min-width: 96px; }
+}

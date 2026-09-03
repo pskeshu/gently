@@ -74,13 +74,19 @@ class _MeshProtocol(asyncio.DatagramProtocol):
         self._pairing_manager = pairing_manager
         self._audit_log = audit_log
         self._known_ids: set = set()
-        self.transport: asyncio.DatagramTransport | None = None
 
-    def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        # DatagramProtocol always receives a DatagramTransport here; narrow for
-        # the typed attribute (and matches the asyncio.BaseProtocol signature).
-        assert isinstance(transport, asyncio.DatagramTransport)
-        self.transport = transport
+    # No connection_made override. The premise of the one that used to live
+    # here — "DatagramProtocol always receives a DatagramTransport" — is false
+    # in CPython: _SelectorDatagramTransport inherits from Transport, not from
+    # DatagramTransport, so `isinstance(transport, asyncio.DatagramTransport)`
+    # is False on every selector event loop. The assert therefore raised on
+    # Linux and macOS on every startup, printing a traceback, while passing on
+    # Windows where _ProactorDatagramTransport *is* a subclass — which is why
+    # it survived: the microscope PCs are Windows.
+    #
+    # It guarded a write-only attribute. Sending goes through the service's own
+    # self._transport, the value create_datagram_endpoint returns; nothing ever
+    # read the protocol's copy. So the field is gone with the assertion.
 
     def datagram_received(self, data: bytes, addr: tuple):
         try:

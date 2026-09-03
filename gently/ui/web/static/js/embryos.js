@@ -133,7 +133,6 @@ const EmbryosManager = {
         // Restore state from localStorage
         this.loadState();
         // Load detection agreements
-        this.loadAgreements();
         // Load badge state (new detection count)
         this.loadBadgeState();
         // Start countdown update timer
@@ -157,7 +156,27 @@ const EmbryosManager = {
         this._subscribeToEvents();
     },
 
+    // Publishes an OPERATOR-CHOSEN embryo (MIGRATION.md: this id had 7 writers
+    // here and a private copy in three other files). The local property stays —
+    // ~20 readers below use it directly.
+    //
+    // Deliberately not used by the derived/clearing writers (loadState,
+    // reconcileWithServerState, clearAllState, handleAcquisitionStarted): those
+    // publish a null or an auto-picked first embryo, and operate.js follows this
+    // key, so they would blank or hijack its acquisition target.
+    //
+    // Deliberately no subscription either: operate.js re-publishes
+    // ``_embryos[0].id`` on every EMBRYOS_UPDATE even when its tab is hidden,
+    // so following this key would move the reasoning panel off the embryo the
+    // operator is reading. Fan-IN needs a selection event that means "the
+    // operator chose this", which this key does not yet carry.
+    _setSelectedEmbryo(id) {
+        this.selectedEmbryoId = id;
+        SharedState.set('selectedEmbryoId', id);
+    },
+
     _subscribeToEvents() {
+        // No SharedState.on('selectedEmbryoId') here — see _setSelectedEmbryo.
         ClientEventBus.on('ACQUISITION_STARTED', (data) => this.handleAcquisitionStarted(data));
         ClientEventBus.on('ACQUISITION_COMPLETED', (data) => this.handleAcquisitionCompleted(data));
         ClientEventBus.on('VOLUME_ACQUIRED', (data) => this.handleVolumeAcquired(data));
@@ -288,14 +307,6 @@ const EmbryosManager = {
         }
     },
 
-    saveDashboardConfig() {
-        try {
-            localStorage.setItem('gently-dashboard-config', JSON.stringify(this.dashboardConfig));
-        } catch (e) {
-            console.warn('Failed to save dashboard config:', e);
-        }
-    },
-
     _deepMerge(target, source) {
         const result = { ...target };
         for (const key of Object.keys(source)) {
@@ -410,7 +421,7 @@ const EmbryosManager = {
         container.querySelectorAll('.board-row').forEach(row => {
             row.addEventListener('click', () => {
                 const eid = row.dataset.embryoId;
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 // Toggle expansion
                 const detail = document.getElementById('board-detail');
                 const wasOpen = row.classList.contains('expanded');
@@ -604,6 +615,7 @@ const EmbryosManager = {
         const latest = sorted[0];
         this.currentDetailItem = latest;
         container.innerHTML = `<div class="board-detail-content">${this.renderDetailPanel(latest)}</div>`;
+        this.initChatPanel(container, embryoId, latest.timepoint);
     },
 
     // ==========================================
@@ -707,7 +719,7 @@ const EmbryosManager = {
             cell.addEventListener('click', () => {
                 const eid = cell.dataset.embryoId;
                 const tp = parseInt(cell.dataset.timepoint);
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 // Find the matching item
                 const reasoning = this.detectionReasoning[eid] || [];
                 const item = reasoning.find(r => r.timepoint === tp);
@@ -718,7 +730,7 @@ const EmbryosManager = {
                     const detail = document.getElementById('filmstrip-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
-                        this.initChatPanel(eid, tp);
+                        this.initChatPanel(detail, eid, tp);
                     }
                 }
             });
@@ -744,7 +756,14 @@ const EmbryosManager = {
                     return;
                 }
                 e.preventDefault();
-                scrollContainer.scrollLeft += e.deltaY;
+                // deltaY is screen px; scrollLeft is layout px. Under a bench
+                // transform they differ by the live scale — measured box over
+                // layout box. Snap to 1 when untransformed (offsetWidth is an
+                // integer, so the ratio only lands near 1) to keep this a
+                // no-op on the tabbed UI.
+                const measured = scrollContainer.getBoundingClientRect().width / scrollContainer.offsetWidth;
+                const scale = measured > 0 && Math.abs(measured - 1) >= 0.01 ? measured : 1;
+                scrollContainer.scrollLeft += e.deltaY / scale;
             }, { passive: false });
         }
 
@@ -760,7 +779,7 @@ const EmbryosManager = {
             const detail = document.getElementById('filmstrip-detail');
             if (detail) {
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, tp);
+                this.initChatPanel(detail, this.selectedEmbryoId, tp);
             }
         }
 
@@ -806,7 +825,7 @@ const EmbryosManager = {
                 e.stopPropagation();
                 const eid = pt.dataset.embryoId;
                 const tp = parseInt(pt.dataset.timepoint);
-                this.selectedEmbryoId = eid;
+                this._setSelectedEmbryo(eid);
                 const reasoning = this.detectionReasoning[eid] || [];
                 const item = reasoning.find(r => r.timepoint === tp);
                 if (item) {
@@ -816,7 +835,7 @@ const EmbryosManager = {
                     const detail = document.getElementById('vitals-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
-                        this.initChatPanel(eid, tp);
+                        this.initChatPanel(detail, eid, tp);
                     }
                 }
             });
@@ -833,7 +852,7 @@ const EmbryosManager = {
             const detail = document.getElementById('vitals-detail');
             if (detail) {
                 detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, tp);
+                this.initChatPanel(detail, this.selectedEmbryoId, tp);
             }
         }
     },
@@ -1008,8 +1027,11 @@ const EmbryosManager = {
                 }
             }
 
-            // Restore session ID (will be validated against server on connect)
-            this.currentSessionId = data.sessionId || null;
+            // Restore session ID (will be validated against server on connect).
+            // A value already published wins over ours; otherwise we are the
+            // one who discovered it, so publish it.
+            this.currentSessionId = SharedState.get('sessionId') || data.sessionId || null;
+            SharedState.set('sessionId', this.currentSessionId);
 
             this.state.status = data.status || 'IDLE';
             this.state.startedAt = data.startedAt ? new Date(data.startedAt) : null;
@@ -1078,8 +1100,9 @@ const EmbryosManager = {
             console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);
         }
 
-        // Update session ID
+        // Update session ID (the server value is the authoritative discovery)
         this.currentSessionId = serverSessionId;
+        SharedState.set('sessionId', serverSessionId || null);
         this.updateSessionIdLink();
 
         // Server state is authoritative - replace everything
@@ -1735,145 +1758,6 @@ const EmbryosManager = {
     },
 
     // Legacy full embryo card (keeping for reference, not used)
-    renderEmbryoCardFull(embryo) {
-        const status = embryo.isComplete ? 'complete' :
-                       embryo.lastError ? 'error' :
-                       this.state.status === 'PAUSED' ? 'paused' : 'running';
-
-        const statusIcon = status === 'complete' ? '&#x2714;' :
-                          status === 'error' ? '&#x2718;' :
-                          status === 'paused' ? '&#x23F8;' : '&#x25CF;';
-
-        const statusText = status === 'complete' ? 'Complete' :
-                          status === 'error' ? 'Error' :
-                          status === 'paused' ? 'Paused' : 'Running';
-
-        const isSelected = this.selectedEmbryoId === embryo.embryoId;
-
-        // Calculate progress percentage
-        const maxTimepoints = this.getMaxTimepoints(embryo);
-        const progressPct = maxTimepoints > 0 ? Math.min(100, (embryo.timepoints / maxTimepoints) * 100) : 0;
-
-        // Calculate countdown
-        let countdownHtml = '';
-        if (!embryo.isComplete && embryo.lastAcquired) {
-            const secondsUntilNext = this.getSecondsUntilNext(embryo);
-            countdownHtml = `
-                <div class="next-acquisition">
-                    <span class="next-label">Next in:</span>
-                    <span class="mini-countdown" data-embryo="${embryo.embryoId}">${this.formatCountdown(secondsUntilNext)}</span>
-                    <span class="interval-info">(every ${this.formatInterval(embryo.intervalSeconds)})</span>
-                </div>
-            `;
-        } else if (!embryo.isComplete) {
-            countdownHtml = `
-                <div class="next-acquisition">
-                    <span class="next-label">Waiting for first acquisition...</span>
-                </div>
-            `;
-        }
-
-        // Current developmental stage (from perception system)
-        let stageHtml = '';
-        if (embryo.current_stage) {
-            const stageIcon = this.getStageIcon(embryo.current_stage);
-            stageHtml = `
-                <div class="current-stage">
-                    <span class="stage-icon">${stageIcon}</span>
-                    <span class="stage-label">Stage:</span>
-                    <span class="stage-value">${this.formatStageName(embryo.current_stage)}</span>
-                </div>
-            `;
-        }
-
-        // Detection status (legacy detectors)
-        let detectionsHtml = '';
-        const detectorNames = Object.keys(embryo.detections).filter(n => n !== 'perception' && n !== 'unknown');
-        if (detectorNames.length > 0) {
-            detectionsHtml = `
-                <div class="detection-status">
-                    ${detectorNames.map(name => {
-                        const det = embryo.detections[name];
-                        const detected = det.detected;
-                        return `
-                            <div class="detector-item ${detected ? 'detected' : ''}">
-                                <span class="detector-icon">${detected ? '&#x2714;' : '&#x2022;'}</span>
-                                <span>${this.formatDetectorName(name)}: ${detected ? 'Detected' : 'Not detected'}</span>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-        }
-
-        // Verification status (shows during/after verification rounds)
-        let verificationHtml = '';
-        if (embryo.verification || embryo.consecutive_verified > 0) {
-            verificationHtml = this.renderVerificationStatus(embryo);
-        }
-
-        // Completion or error info
-        let completionHtml = '';
-        if (embryo.isComplete) {
-            completionHtml = `
-                <div class="completion-info">
-                    <span class="completion-reason">${embryo.completionReason || 'Completed'}</span>
-                </div>
-            `;
-        } else if (embryo.lastError) {
-            completionHtml = `
-                <div class="error-info">
-                    <div class="error-message">${embryo.lastError}</div>
-                </div>
-            `;
-        }
-
-        // Play button for viewing all timepoints as video
-        const hasTimepoints = embryo.timepoints > 0;
-        const playButton = hasTimepoints ? `
-            <button class="embryo-play-btn" onclick="event.stopPropagation(); EmbryosManager.playEmbryoTimelapse('${embryo.embryoId}')" data-tooltip="Play timelapse video">
-                <span class="play-icon">▶</span>
-            </button>
-        ` : '';
-
-        return `
-            <div class="embryo-card sidebar-card ${status} ${isSelected ? 'selected' : ''}" data-embryo-id="${embryo.embryoId}">
-                <div class="embryo-header">
-                    <div class="embryo-header-left">
-                        <span class="embryo-name">${embryo.embryoId}</span>
-                        ${playButton}
-                    </div>
-                    <span class="embryo-status ${status}">
-                        <span class="embryo-status-icon">${statusIcon}</span>
-                        ${statusText}
-                    </span>
-                </div>
-
-                <div class="stop-condition">
-                    <span class="condition-icon">${this.getConditionIcon(embryo.stopCondition)}</span>
-                    <span class="condition-text">${this.formatStopCondition(embryo.stopCondition)}</span>
-                </div>
-
-                <div class="progress-section">
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${progressPct}%"></div>
-                    </div>
-                    <div class="progress-stats">
-                        <span class="timepoints">${embryo.timepoints}${maxTimepoints > 0 ? ' / ' + maxTimepoints : ''} timepoints</span>
-                        <span class="imaging-duration">${this.getEmbryoImagingDuration(embryo)}</span>
-                    </div>
-                </div>
-
-                ${countdownHtml}
-                ${stageHtml}
-                ${detectionsHtml}
-                ${verificationHtml}
-                ${completionHtml}
-            </div>
-        `;
-    },
-
-    // Get icon for developmental stage
     getStageIcon(stage) {
         const icons = {
             'early': '🥚',
@@ -1911,84 +1795,6 @@ const EmbryosManager = {
     },
 
     // Render verification status for embryo card
-    renderVerificationStatus(embryo) {
-        const v = embryo.verification;
-        const consecutiveCount = embryo.consecutive_verified || 0;
-        const requiredCount = v?.required_count || 5;
-
-        // If verification is running
-        if (v && v.status === 'running') {
-            const strategiesComplete = v.strategies_complete || 0;
-            const totalStrategies = v.total_strategies || 5;
-            const progressPct = (strategiesComplete / totalStrategies) * 100;
-
-            // Build strategy status icons
-            const strategies = v.strategies || {};
-            const strategyIcons = ['adversarial', 'independent', 'temporal', 'ensemble', 'hardware_context']
-                .map(name => {
-                    if (strategies[name] !== undefined) {
-                        return strategies[name].passed
-                            ? `<span class="strategy-icon passed" title="${name}: passed">✓</span>`
-                            : `<span class="strategy-icon failed" title="${name}: failed">✗</span>`;
-                    }
-                    return `<span class="strategy-icon pending" title="${name}: pending">○</span>`;
-                }).join('');
-
-            return `
-                <div class="verification-status running">
-                    <div class="verification-header">
-                        <span class="verification-icon">🔍</span>
-                        <span class="verification-label">Verifying...</span>
-                        <span class="verification-count">(${consecutiveCount}/${requiredCount})</span>
-                    </div>
-                    <div class="verification-progress">
-                        <div class="verification-progress-bar">
-                            <div class="verification-progress-fill" style="width: ${progressPct}%"></div>
-                        </div>
-                        <span class="verification-progress-text">${strategiesComplete}/${totalStrategies}</span>
-                    </div>
-                    <div class="verification-strategies">
-                        ${strategyIcons}
-                    </div>
-                </div>
-            `;
-        }
-
-        // If verification completed (show result)
-        if (v && v.status === 'completed') {
-            const passed = v.consensus;
-            const icon = passed ? '✓' : '✗';
-            const statusClass = passed ? 'passed' : 'failed';
-            const statusText = passed ? 'Verified' : 'Failed';
-
-            return `
-                <div class="verification-status ${statusClass}">
-                    <div class="verification-header">
-                        <span class="verification-icon">${icon}</span>
-                        <span class="verification-label">${statusText}</span>
-                        <span class="verification-count">(${consecutiveCount}/${requiredCount} consecutive)</span>
-                    </div>
-                    ${v.ensemble_votes ? `<div class="verification-detail">Ensemble: ${v.ensemble_votes}</div>` : ''}
-                </div>
-            `;
-        }
-
-        // If we have consecutive count but no active verification
-        if (consecutiveCount > 0) {
-            return `
-                <div class="verification-status summary">
-                    <div class="verification-header">
-                        <span class="verification-icon">🔍</span>
-                        <span class="verification-label">Verified</span>
-                        <span class="verification-count">${consecutiveCount}/${requiredCount} consecutive</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        return '';
-    },
-
     selectEmbryo(embryoId) {
         // Clear per-embryo UI state when switching embryos
         const isNewEmbryo = this.selectedEmbryoId !== embryoId;
@@ -2000,7 +1806,7 @@ const EmbryosManager = {
             this.detailPanelVisible = false;
         }
 
-        this.selectedEmbryoId = embryoId;
+        this._setSelectedEmbryo(embryoId);
 
         // Update card selection styles
         document.querySelectorAll('.embryo-rail-item').forEach(card => {
@@ -2174,345 +1980,11 @@ const EmbryosManager = {
     },
 
     // Render detections with range collapse for "not detected" sequences
-    renderDetectionListWithCollapse(reasoning) {
-        // Separate verification events from regular detections
-        const verificationEvents = reasoning.filter(r => r.type === 'verification_started' || r.type === 'verification_completed');
-        const detectionEvents = reasoning.filter(r => !r.type || (!r.type.startsWith('verification_')));
-
-        // Sort by timepoint/timestamp descending (newest first)
-        const sorted = [...detectionEvents].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
-        const sortedVerifications = [...verificationEvents].sort((a, b) => {
-            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-            return timeB - timeA;
-        });
-
-        // Apply filter
-        let filtered = sorted;
-        if (this.detectionFilter === 'detections') {
-            filtered = sorted.filter(r => r.detected);
-        } else if (this.detectionFilter === 'high-confidence') {
-            filtered = sorted.filter(r => this.normalizeConfidence(r.confidence) === 'high');
-        }
-
-        // If showing only detections, render them directly without collapse
-        if (this.detectionFilter !== 'all') {
-            if (filtered.length === 0 && sortedVerifications.length === 0) {
-                return `
-                    <div class="detection-empty-filtered">
-                        <div class="icon">&#x1F50E;</div>
-                        <div class="message">No ${this.detectionFilter === 'detections' ? 'positive detections' : 'high confidence evaluations'} found</div>
-                        <div class="hint">Try selecting "All" to see all evaluations</div>
-                    </div>
-                `;
-            }
-            let html = filtered.map((r, idx) => this.renderDetectionCard(r, idx, true)).join('');
-            // Also show verification events in filtered view
-            if (sortedVerifications.length > 0) {
-                html += sortedVerifications.map((v, idx) => this.renderVerificationCard(v, `ver-${idx}`)).join('');
-            }
-            return html;
-        }
-
-        // For "all" view, use range collapse
-        // Group consecutive "not detected" items, but always show "detected" items expanded
-        const groups = this.groupDetectionsForCollapse(sorted);
-
-        let html = '';
-
-        // First, render verification section if any exist
-        if (sortedVerifications.length > 0) {
-            const completedVerifications = sortedVerifications.filter(v => v.type === 'verification_completed');
-            html += `
-                <div class="verification-section">
-                    <div class="section-header">
-                        <span class="icon">🔍</span>
-                        <span class="title">Verification Rounds</span>
-                        <span class="count">${completedVerifications.length} completed</span>
-                    </div>
-                    ${sortedVerifications.map((v, idx) => this.renderVerificationCard(v, `ver-${idx}`)).join('')}
-                </div>
-            `;
-        }
-
-        // Then, render positive detections section if any exist
-        const positiveDetections = sorted.filter(r => r.detected);
-        if (positiveDetections.length > 0) {
-            html += `
-                <div class="positive-detections-section">
-                    <div class="section-header">
-                        <span class="icon">&#x2714;</span>
-                        <span class="title">Positive Detections</span>
-                        <span class="count">${positiveDetections.length} found</span>
-                    </div>
-                    ${positiveDetections.map((r, idx) => this.renderDetectionCard(r, `pos-${idx}`, true)).join('')}
-                </div>
-            `;
-        }
-
-        // Then render the timeline with collapsed ranges
-        html += `<div class="section-header" style="margin-top: 1rem;">
-            <span class="icon">&#x1F4C5;</span>
-            <span class="title" style="color: var(--text-muted);">Evaluation Timeline</span>
-            <span class="count">${sorted.length} total</span>
-        </div>`;
-
-        let firstNegativeRangeAutoExpanded = false;
-
-        groups.forEach((group, groupIdx) => {
-            if (group.type === 'positive') {
-                // Already rendered above in positive section, just show a marker
-                html += `
-                    <div class="detection-card positive-highlight" style="padding: 0.75rem; margin-bottom: 0.5rem;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span style="color: var(--accent-green);">&#x2714;</span>
-                            <span class="timepoint-badge">T${group.items[0].timepoint}</span>
-                            <span class="detector-badge">${this.formatDetectorName(group.items[0].detector_name)}</span>
-                            <span style="color: var(--accent-green); font-weight: 500;">DETECTED</span>
-                        </div>
-                    </div>
-                `;
-            } else {
-                // Collapsed range of "not detected" items
-                const rangeKey = `range-${groupIdx}`;
-
-                // Auto-expand first negative range so user sees evaluations immediately
-                let isExpanded = this.expandedRanges[rangeKey];
-                if (isExpanded === undefined && !firstNegativeRangeAutoExpanded) {
-                    isExpanded = true;
-                    firstNegativeRangeAutoExpanded = true;
-                }
-                isExpanded = isExpanded || false;
-                const items = group.items;
-                const startTp = items[items.length - 1].timepoint ?? '?';
-                const endTp = items[0].timepoint ?? '?';
-                const rangeLabel = items.length === 1
-                    ? `Timepoint ${startTp}`
-                    : `Timepoints ${endTp} - ${startTp}`;
-
-                html += `
-                    <div class="collapsed-range ${isExpanded ? 'expanded' : ''}" onclick="EmbryosManager.toggleRange('${rangeKey}')">
-                        <span class="range-indicator"></span>
-                        <span class="range-label"><strong>${rangeLabel}</strong>: No detections</span>
-                        <span class="range-count">${items.length} evaluation${items.length > 1 ? 's' : ''}</span>
-                        <span class="range-chevron">&#x25BC;</span>
-                    </div>
-                    <div class="range-expansion ${isExpanded ? 'expanded' : ''}" id="${rangeKey}">
-                        <div class="range-expansion-inner">
-                            ${this.renderRangeItems(items, rangeKey)}
-                        </div>
-                    </div>
-                `;
-            }
-        });
-
-        return html;
-    },
-
-    // Group detections into positive singles and negative ranges
-    groupDetectionsForCollapse(sorted) {
-        const groups = [];
-        let currentNegatives = [];
-
-        sorted.forEach(item => {
-            if (item.detected) {
-                // Flush any accumulated negatives
-                if (currentNegatives.length > 0) {
-                    groups.push({ type: 'negative', items: currentNegatives });
-                    currentNegatives = [];
-                }
-                // Add positive as its own group
-                groups.push({ type: 'positive', items: [item] });
-            } else {
-                currentNegatives.push(item);
-            }
-        });
-
-        // Flush remaining negatives
-        if (currentNegatives.length > 0) {
-            groups.push({ type: 'negative', items: currentNegatives });
-        }
-
-        return groups;
-    },
-
-    // Render items inside an expanded range with thumbnails, confidence dots, and inline expansion
-    renderRangeItems(items, rangeKey) {
-        const loadedCount = this.rangeLoadMore[rangeKey] || this.rangeLoadLimit;
-        const visibleItems = items.slice(0, loadedCount);
-        const hasMore = items.length > loadedCount;
-
-        // Get all items in this embryo for interest score calculation
-        const allReasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
-
-        let html = visibleItems.map(item => {
-            const itemKey = `${rangeKey}-${item.timepoint}`;
-            const isExpanded = this.expandedRangeItems[itemKey] || false;
-            // Only use stored UIDs - don't guess with fallback patterns as they can match wrong datasets
-            const imageUid = item.projection_uid || item.volume_uid || null;
-            const isInteresting = this.calculateInterestScore(item, allReasoning) > 0.5;
-
-            return `
-                <div class="detection-row-compact ${isExpanded ? 'expanded' : ''} ${isInteresting ? 'flagged' : ''}"
-                     data-range="${rangeKey}" data-timepoint="${item.timepoint}">
-                    <div class="compact-row-header" onclick="EmbryosManager.toggleRangeItem('${rangeKey}', ${item.timepoint})">
-                        ${imageUid
-                            ? `<img class="compact-thumbnail" src="/api/images/${imageUid}/png" alt="T${item.timepoint}" loading="lazy" />`
-                            : '<div class="compact-thumbnail-placeholder"></div>'}
-                        <span class="tp-badge">T${item.timepoint ?? '?'}</span>
-                        <span class="detector-name">${this.formatDetectorName(item.detector_name)}</span>
-                        <span class="result">Not detected</span>
-                        ${this.renderConfidenceDots(item.confidence)}
-                        ${isInteresting ? '<span class="interest-flag" title="Near detection boundary">&#x2691;</span>' : ''}
-                        <span class="row-affordance">&#x22EF;</span>
-                        <span class="row-chevron">&#x25B8;</span>
-                    </div>
-                    ${isExpanded ? this.renderInlineExpansion(item) : ''}
-                </div>
-            `;
-        }).join('');
-
-        if (hasMore) {
-            html += `
-                <button class="load-more-btn" onclick="event.stopPropagation(); EmbryosManager.loadMoreInRange('${rangeKey}', ${items.length})">
-                    Load more (${items.length - loadedCount} remaining)
-                </button>
-            `;
-        }
-
-        return html;
-    },
-
-    // Toggle expansion of an individual item within a range
-    toggleRangeItem(rangeKey, timepoint) {
-        const itemKey = `${rangeKey}-${timepoint}`;
-        this.expandedRangeItems[itemKey] = !this.expandedRangeItems[itemKey];
-
-        const row = document.querySelector(`.detection-row-compact[data-range="${rangeKey}"][data-timepoint="${timepoint}"]`);
-        if (row) {
-            row.classList.toggle('expanded', this.expandedRangeItems[itemKey]);
-
-            // Re-render the row content
-            const allReasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
-            const item = allReasoning.find(r => r.timepoint === timepoint);
-            if (item) {
-                const expansionContainer = row.querySelector('.inline-expansion');
-                if (this.expandedRangeItems[itemKey] && !expansionContainer) {
-                    // Add expansion
-                    row.insertAdjacentHTML('beforeend', this.renderInlineExpansion(item));
-                } else if (!this.expandedRangeItems[itemKey] && expansionContainer) {
-                    // Remove expansion
-                    expansionContainer.remove();
-                }
-            }
-        }
-    },
-
-    // Render inline expansion with thumbnail and truncated reasoning
-    renderInlineExpansion(item) {
-        // Only use stored UIDs - don't guess with fallback patterns as they can match wrong datasets
-        const imageUid = item.projection_uid || item.volume_uid || null;
-        const reasoning = item.reasoning || 'No reasoning provided';
-        const truncatedReasoning = reasoning.length > 250
-            ? reasoning.substring(0, 250) + '...'
-            : reasoning;
-
-        return `
-            <div class="inline-expansion">
-                <div class="expansion-content">
-                    ${imageUid ? `
-                        <img class="expansion-image"
-                             src="/api/images/${imageUid}/png"
-                             alt="T${item.timepoint}"
-                             onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint}, true)" />
-                    ` : '<div class="expansion-image-placeholder">No image</div>'}
-                    <div class="expansion-text">
-                        <div class="expansion-reasoning">${this.escapeHtml(truncatedReasoning)}</div>
-                        <button class="expansion-link" onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint}, true)">
-                            View full analysis &#x2192;
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    // Render confidence level as dots (5-dot scale)
-    renderConfidenceDots(confidence) {
-        const level = this.normalizeConfidence(confidence);
-        const filled = level === 'high' ? 4 : level === 'medium' ? 3 : level === 'low' ? 1 : 2;
-
-        let dots = '';
-        for (let i = 0; i < 5; i++) {
-            dots += `<span class="confidence-dot ${i < filled ? 'filled' : ''}"></span>`;
-        }
-        return `<div class="confidence-dots" title="${confidence || 'Unknown'} confidence">${dots}</div>`;
-    },
-
-    // Calculate interest score for flagging "interesting" negatives
-    calculateInterestScore(item, allItems) {
-        if (!item || item.detected) return 0;
-
-        let score = 0;
-
-        // Find nearest positive detection
-        const positives = allItems.filter(i => i.detected);
-        if (positives.length > 0) {
-            const distances = positives.map(p => Math.abs((p.timepoint || 0) - (item.timepoint || 0)));
-            const nearestDistance = Math.min(...distances);
-
-            // Within 3 timepoints of a detection
-            if (nearestDistance <= 3) {
-                score += 0.4 * (1 - nearestDistance / 3);
-            }
-        }
-
-        // High confidence negative (VLM was very sure it wasn't detected)
-        if (this.normalizeConfidence(item.confidence) === 'high') {
-            score += 0.3;
-        }
-
-        return score;
-    },
-
-    // Toggle a collapsed range
-    toggleRange(rangeKey) {
-        this.expandedRanges[rangeKey] = !this.expandedRanges[rangeKey];
-
-        const rangeHeader = document.querySelector(`.collapsed-range[onclick*="${rangeKey}"]`);
-        const expansion = document.getElementById(rangeKey);
-
-        if (rangeHeader && expansion) {
-            rangeHeader.classList.toggle('expanded', this.expandedRanges[rangeKey]);
-            expansion.classList.toggle('expanded', this.expandedRanges[rangeKey]);
-        }
-    },
-
-    // Load more items in a range
-    loadMoreInRange(rangeKey, totalItems) {
-        const current = this.rangeLoadMore[rangeKey] || this.rangeLoadLimit;
-        this.rangeLoadMore[rangeKey] = Math.min(current + this.rangeLoadLimit, totalItems);
-        this.renderReasoningPanel();
-    },
-
-    // Set detection filter
-    setDetectionFilter(filter) {
-        this.detectionFilter = filter;
-        this.renderReasoningPanel();
-    },
-
-    // Scroll to a specific detection - now opens detail panel directly
     scrollToDetection(timepoint, detectorName) {
         this.openDetailPanel(detectorName, timepoint, true);
     },
 
     // Show detail for a compact row (legacy - redirects to openDetailPanel)
-    showDetectionDetail(detectorName, timepoint) {
-        this.openDetailPanel(detectorName, timepoint, true);
-    },
-
-    // Open the detail panel inline in the reasoning panel
-    // userInitiated: true when user clicked, false when auto-opened by new data
     openDetailPanel(detectorName, timepoint, userInitiated = false) {
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
         const item = reasoning.find(r =>
@@ -2558,13 +2030,12 @@ const EmbryosManager = {
         container.innerHTML = this.renderDetailPanel(item);
         container.classList.add('visible');
 
-        // Auto-scroll active dot into view in the horizontal strip
-        const activeDot = document.querySelector('.eval-dot.active');
-        if (activeDot) {
-            activeDot.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-        }
+        // No auto-scroll here: .eval-dots-track wraps rather than scrolling and
+        // every ancestor is a fixed-height overflow:hidden box, so the dot is
+        // always in view. A scrollIntoView would only find a scrollable
+        // ancestor further out and pan that instead.
 
-        this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+        this.initChatPanel(container, this.selectedEmbryoId, item.timepoint);
     },
 
     // Render the detail panel content
@@ -2628,7 +2099,7 @@ const EmbryosManager = {
             ? `<img src="/api/images/${imageUid}/png"
                     alt="T${item.timepoint}"
                     onclick="EmbryosManager.openTimepointInLightbox('${this.selectedEmbryoId}', ${item.timepoint})" />`
-            : `<div class="detail-image-loading" id="detail-image-placeholder"
+            : `<div class="detail-image-loading"
                     data-embryo="${this.selectedEmbryoId}"
                     data-timepoint="${item.timepoint}">Loading image...</div>`;
 
@@ -2871,9 +2342,9 @@ const EmbryosManager = {
                          data-embryo-id="${this.selectedEmbryoId}"
                          data-timepoint="${item.timepoint}">
                         <div class="chat-panel-label">Follow-up</div>
-                        <div class="chat-thread" id="chat-thread"></div>
+                        <div class="chat-thread"></div>
                         <form class="chat-input-row" onsubmit="return EmbryosManager.sendChat(event)">
-                            <textarea class="chat-input" id="chat-input"
+                            <textarea class="chat-input"
                                       placeholder="Ask a follow-up about this timepoint…"
                                       rows="2"
                                       onkeydown="EmbryosManager.handleChatKeydown(event)"></textarea>
@@ -2893,11 +2364,15 @@ const EmbryosManager = {
     // Chat — per-timepoint VLM follow-up
     // ==========================================
 
-    async initChatPanel(embryoId, timepoint) {
+    // ``root`` is the element the detail panel was just rendered into.
+    // Several views can hold a detail panel at once (hidden views keep
+    // theirs in the DOM), so the thread must be resolved inside the panel
+    // we are initialising, not at document root.
+    async initChatPanel(root, embryoId, timepoint) {
         const sessionId = this.currentSessionId;
         if (!sessionId) return;
 
-        const thread = document.getElementById('chat-thread');
+        const thread = root && root.querySelector('.chat-thread');
         if (!thread) return;
         thread.innerHTML = '';
 
@@ -2908,15 +2383,14 @@ const EmbryosManager = {
             if (!resp.ok) return;
             const data = await resp.json();
             for (const turn of (data.turns || [])) {
-                this.appendChatMessage(turn.role, turn.content);
+                this.appendChatMessage(thread, turn.role, turn.content);
             }
         } catch (err) {
             console.warn('Failed to load chat history', err);
         }
     },
 
-    appendChatMessage(role, content) {
-        const thread = document.getElementById('chat-thread');
+    appendChatMessage(thread, role, content) {
         if (!thread) return null;
 
         const el = document.createElement('div');
@@ -2947,8 +2421,9 @@ const EmbryosManager = {
 
     async sendChat(event) {
         event.preventDefault();
-        const panel = document.querySelector('.chat-panel');
-        const input = document.getElementById('chat-input');
+        const panel = event.target.closest('.chat-panel');
+        const input = panel && panel.querySelector('.chat-input');
+        const thread = panel && panel.querySelector('.chat-thread');
         if (!panel || !input) return false;
 
         const text = input.value.trim();
@@ -2962,13 +2437,13 @@ const EmbryosManager = {
             return false;
         }
 
-        this.appendChatMessage('user', text);
+        this.appendChatMessage(thread, 'user', text);
         input.value = '';
         input.disabled = true;
         const sendBtn = panel.querySelector('.chat-send');
         if (sendBtn) sendBtn.disabled = true;
 
-        const assistantEl = this.appendChatMessage('assistant', '');
+        const assistantEl = this.appendChatMessage(thread, 'assistant', '');
         const contentEl = assistantEl
             ? assistantEl.querySelector('.chat-message-content')
             : null;
@@ -3015,7 +2490,6 @@ const EmbryosManager = {
                         if (payload.type === 'delta') {
                             accumulated += payload.text;
                             if (contentEl) contentEl.textContent = accumulated;
-                            const thread = document.getElementById('chat-thread');
                             if (thread) thread.scrollTop = thread.scrollHeight;
                         } else if (payload.type === 'error') {
                             if (contentEl) {
@@ -3047,8 +2521,12 @@ const EmbryosManager = {
     // Fetch image for detail panel using sequence API
     // Tries multiple data types as fallbacks
     async fetchDetailImage(embryoId, timepoint) {
-        const placeholder = document.getElementById('detail-image-placeholder');
-        if (!placeholder) return;
+        // The panel HTML is still a string when this is called, and hidden
+        // views keep their own placeholders in the DOM, so resolve by data
+        // attributes at replacement time instead of by id up front.
+        const placeholders = () => document.querySelectorAll(
+            `.detail-image-loading[data-embryo="${embryoId}"][data-timepoint="${timepoint}"]`
+        );
 
         // Try these data types in order of preference
         const dataTypes = ['volume_projection', 'volume', 'image'];
@@ -3062,9 +2540,10 @@ const EmbryosManager = {
                     const imgData = data.sequence[0];
                     const uid = imgData.uid;
                     // Use openTimepointInLightbox for navigation through all timepoints
-                    placeholder.outerHTML = `<img src="/api/images/${uid}/png"
-                                                  alt="T${timepoint}"
-                                                  onclick="EmbryosManager.openTimepointInLightbox('${embryoId}', ${timepoint})" />`;
+                    const imgHtml = `<img src="/api/images/${uid}/png"
+                                          alt="T${timepoint}"
+                                          onclick="EmbryosManager.openTimepointInLightbox('${embryoId}', ${timepoint})" />`;
+                    placeholders().forEach(el => { el.outerHTML = imgHtml; });
                     return; // Success - exit
                 }
             } catch (err) {
@@ -3073,7 +2552,9 @@ const EmbryosManager = {
         }
 
         // All types failed
-        placeholder.outerHTML = '<div class="no-image">No image available for this timepoint</div>';
+        placeholders().forEach(el => {
+            el.outerHTML = '<div class="no-image">No image available for this timepoint</div>';
+        });
     },
 
     // Close the detail panel
@@ -3132,293 +2613,6 @@ const EmbryosManager = {
         if (name.includes('comma')) return '&#x1F52C;';
         if (name.includes('twofold')) return '&#x1F9EC;';
         return '&#x1F50D;';
-    },
-
-    renderDetectionCard(detection, index, isPositiveHighlight = false) {
-        const imageExpanded = this.expandedImages[index] || false;
-        const reasoningExpanded = this.expandedReasoning[index] || false;
-        // Use projection_uid (proper DataStore UID) with fallback to volume_uid
-        const imageUid = detection.projection_uid || detection.volume_uid;
-        const hasImage = !!imageUid;
-        const timestamp = detection.timestamp ? new Date(detection.timestamp).toLocaleTimeString() : '';
-
-        // Confidence styling
-        const confidenceClass = this.normalizeConfidence(detection.confidence);
-
-        // Stage badge for perception results
-        const isPerception = detection.detector_name === 'perception';
-        const stageHtml = detection.stage
-            ? `<span class="stage-badge" title="Developmental stage">${this.getStageIcon(detection.stage)} ${this.formatStageName(detection.stage)}</span>`
-            : '';
-
-        // For positive detections, show context (confidence trend from previous timepoints)
-        let contextHtml = '';
-        if (detection.detected && isPositiveHighlight) {
-            contextHtml = this.renderDetectionContext(detection);
-        }
-
-        // Card class based on detection status
-        const cardClass = detection.detected
-            ? (isPositiveHighlight ? 'detection-card positive-highlight' : 'detection-card detected')
-            : 'detection-card';
-
-        // VLM analysis section. Two-stage detectors (dopaminergic_signal)
-        // emit both a perceiver description (free prose, what the model
-        // saw) and a classifier reasoning (one-line rubric pick). Show
-        // them as two labelled blocks so the audience can see observation
-        // vs classification separately. Single-call detectors just emit
-        // reasoning and get the classifier block alone.
-        let reasoningHtml = '';
-        if (detection.description || detection.reasoning) {
-            const embryoId = this.selectedEmbryoId || '';
-            const linkContext = {
-                detectionPoint: detection.detected ? detection.timepoint : null,
-                reasoningText: detection.reasoning || ''
-            };
-            const linkedReasoning = detection.reasoning
-                ? this.linkifyTimepoints(detection.reasoning, embryoId, linkContext)
-                : '';
-
-            const isTwoStage = !!detection.description;
-            const perceiverBlock = detection.description
-                ? `<div class="vlm-perceiver-text">
-                       <span class="vlm-stage-label perceiver"><span class="stage-icon" aria-hidden="true">&#x1F441;</span><span class="stage-text">Perceiver</span></span>
-                       <div class="vlm-stage-body">${this.escapeHtml(detection.description)}</div>
-                   </div>`
-                : '';
-            // Pretty-printed JSON of the classifier's structured output —
-            // shown alongside the prose so the audience can see the
-            // exact decision the classifier emitted to the orchestrator.
-            // Fall back to `findings` for fields the newer detector nests
-            // there. Without this, missing top-level keys silently drop
-            // from the JSON view.
-            const df = detection.findings || {};
-            const classifierJsonBlock = isTwoStage
-                ? `<pre class="classifier-json"><code>${this.escapeHtml(JSON.stringify({
-                       intensity_level: detection.intensity_level ?? df.intensity_level ?? null,
-                       structure_quality: detection.structure_quality ?? df.structure_quality ?? null,
-                       has_hatched: detection.has_hatched ?? df.has_hatched ?? null,
-                       reasoning: detection.reasoning,
-                   }, null, 2))}</code></pre>`
-                : '';
-            const classifierBlock = detection.reasoning
-                ? `<div class="detection-reasoning-text ${isTwoStage ? 'two-stage' : ''}">
-                       ${isTwoStage ? '<span class="vlm-stage-label classifier"><span class="stage-icon" aria-hidden="true">&#x2699;</span><span class="stage-text">Classifier</span></span>' : ''}
-                       <div class="vlm-stage-body">${linkedReasoning}</div>
-                       ${classifierJsonBlock}
-                   </div>`
-                : '';
-            const inner = perceiverBlock + classifierBlock;
-
-            if (detection.detected) {
-                reasoningHtml = `<div class="vlm-analysis ${isTwoStage ? 'two-stage' : ''}">${inner}</div>`;
-            } else {
-                const label = isTwoStage ? 'analysis' : 'VLM reasoning';
-                reasoningHtml = `
-                    <button class="reasoning-toggle ${reasoningExpanded ? 'expanded' : ''}"
-                            onclick="event.stopPropagation(); EmbryosManager.toggleReasoning('${index}')">
-                        <span class="chevron">&#x25B6;</span>
-                        ${reasoningExpanded ? 'Hide' : 'Show'} ${label}
-                    </button>
-                    <div class="reasoning-content ${reasoningExpanded ? 'expanded' : ''}" id="reasoning-${index}">
-                        <div class="vlm-analysis ${isTwoStage ? 'two-stage' : ''}">${inner}</div>
-                    </div>
-                `;
-            }
-        }
-
-        return `
-            <div class="${cardClass}" data-timepoint="${detection.timepoint}" data-detector="${detection.detector_name}">
-                <div class="detection-card-header">
-                    <div class="detection-meta">
-                        <span class="detector-badge">${this.formatDetectorName(detection.detector_name)}</span>
-                        ${stageHtml}
-                        <span class="detection-result ${detection.detected ? 'positive' : 'negative'}">
-                            ${isPerception ? (detection.is_hatching ? 'Hatching!' : '') : (detection.detected ? 'Detected' : 'Not detected')}
-                        </span>
-                        ${detection.confidence ? `<span class="confidence-badge ${confidenceClass}">${detection.confidence}</span>` : ''}
-                    </div>
-                    <div class="detection-timing">
-                        <span class="timepoint-badge">T${detection.timepoint ?? '?'}</span>
-                        <span class="detection-time">${timestamp}</span>
-                    </div>
-                </div>
-                ${contextHtml}
-                ${reasoningHtml}
-                ${hasImage ? `
-                    <div class="detection-image-section">
-                        <div class="detection-image-actions">
-                            <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
-                                <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
-                                ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
-                            </button>
-                            <button class="view-projections-btn" onclick="event.stopPropagation(); ProjectionViewer.open('${this.selectedEmbryoId}', ${detection.timepoint})"
-                                    data-tooltip="View all projection types from the 3D volume">
-                                View All Projections
-                            </button>
-                        </div>
-                        <div class="detection-image-container ${imageExpanded ? 'expanded' : ''}" id="detection-image-${index}">
-                            ${imageExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}
-                        </div>
-                    </div>
-                ` : ''}
-                ${detection.detected ? this.renderAgreeDisagreeButtons(detection, index) : ''}
-            </div>
-        `;
-    },
-
-    // Render agree/disagree buttons for detection feedback
-    renderAgreeDisagreeButtons(detection, index) {
-        const agreement = this.detectionAgreements[`${detection.detector_name}-${detection.timepoint}`];
-        const agreedClass = agreement === true ? 'agreed' : '';
-        const disagreedClass = agreement === false ? 'disagreed' : '';
-
-        return `
-            <div class="vlm-actions">
-                <button class="vlm-action-btn agree ${agreedClass}"
-                        onclick="event.stopPropagation(); EmbryosManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, true)"
-                        data-tooltip="Confirm this detection is correct">
-                    ${agreement === true ? '&#x2714; Agreed' : 'I Agree'}
-                </button>
-                <button class="vlm-action-btn disagree ${disagreedClass}"
-                        onclick="event.stopPropagation(); EmbryosManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, false)"
-                        data-tooltip="Mark this detection as incorrect">
-                    ${agreement === false ? '&#x2718; Disagreed' : 'I Disagree'}
-                </button>
-                <button class="vlm-action-btn" onclick="event.stopPropagation(); EmbryosManager.compareDetection('${detection.detector_name}', ${detection.timepoint})"
-                        data-tooltip="Compare with previous timepoint">
-                    Compare
-                </button>
-            </div>
-        `;
-    },
-
-    // Render a verification event card for the reasoning panel
-    renderVerificationCard(verification, index) {
-        const isCompleted = verification.type === 'verification_completed';
-        const timestamp = verification.timestamp ? new Date(verification.timestamp).toLocaleTimeString() : '';
-
-        if (verification.type === 'verification_started') {
-            return `
-                <div class="detection-card verification-card started" data-timepoint="${verification.timepoint}">
-                    <div class="detection-card-header">
-                        <div class="detection-meta">
-                            <span class="detector-badge verification">🔍 Verification</span>
-                            <span class="detection-result verification-started">Started</span>
-                        </div>
-                        <div class="detection-timing">
-                            <span class="timepoint-badge">Round ${verification.timepoint}</span>
-                            <span class="detection-time">${timestamp}</span>
-                        </div>
-                    </div>
-                    <div class="verification-info">
-                        <span class="consecutive-badge">${verification.consecutive_count}/${verification.required_count} consecutive</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        // verification_completed
-        const passed = verification.consensus;
-        const strategies = verification.strategies || {};
-        const strategyNames = ['adversarial', 'independent', 'temporal', 'ensemble', 'hardware_context'];
-
-        const strategyRows = strategyNames.map(name => {
-            const result = strategies[name];
-            if (result === undefined || result === null) return '';
-            const icon = result ? '✓' : '✗';
-            const statusClass = result ? 'passed' : 'failed';
-            const label = name.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
-            return `
-                <div class="strategy-row ${statusClass}">
-                    <span class="strategy-icon">${icon}</span>
-                    <span class="strategy-name">${label}</span>
-                </div>
-            `;
-        }).filter(Boolean).join('');
-
-        return `
-            <div class="detection-card verification-card ${passed ? 'passed' : 'failed'}" data-timepoint="${verification.timepoint}">
-                <div class="detection-card-header">
-                    <div class="detection-meta">
-                        <span class="detector-badge verification">🔍 Verification</span>
-                        <span class="detection-result ${passed ? 'positive' : 'negative'}">
-                            ${passed ? 'PASSED' : 'FAILED'}
-                        </span>
-                    </div>
-                    <div class="detection-timing">
-                        <span class="consecutive-badge ${passed ? 'passed' : 'failed'}">
-                            ${verification.consecutive_verified}/${5} consecutive
-                        </span>
-                        <span class="detection-time">${timestamp}</span>
-                    </div>
-                </div>
-
-                <div class="verification-strategies-detail">
-                    ${strategyRows}
-                </div>
-
-                ${verification.ensemble_votes ? `
-                    <div class="verification-ensemble">
-                        <span class="ensemble-label">Ensemble:</span>
-                        <span class="ensemble-votes">${verification.ensemble_votes}</span>
-                    </div>
-                ` : ''}
-
-                ${verification.reasoning ? `
-                    <div class="verification-reasoning">
-                        <span class="reasoning-label">Consensus:</span>
-                        <span class="reasoning-text">${verification.reasoning}</span>
-                    </div>
-                ` : ''}
-
-                ${verification.duration_seconds ? `
-                    <div class="verification-duration">
-                        Completed in ${verification.duration_seconds.toFixed(1)}s
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    },
-
-    // Track user agreement/disagreement with detections
-    detectionAgreements: {},  // key: "{detector}-{timepoint}" -> true/false
-
-    markAgreement(detectorName, timepoint, agrees) {
-        const key = `${detectorName}-${timepoint}`;
-        const current = this.detectionAgreements[key];
-
-        // Toggle off if clicking same button
-        if (current === agrees) {
-            delete this.detectionAgreements[key];
-        } else {
-            this.detectionAgreements[key] = agrees;
-        }
-
-        // Save to localStorage
-        try {
-            localStorage.setItem('gently-detection-agreements', JSON.stringify(this.detectionAgreements));
-        } catch (e) {
-            console.warn('Failed to save detection agreements:', e);
-        }
-
-        // Log for potential future analytics
-        console.log(`Detection feedback: ${detectorName} at T${timepoint} - ${agrees ? 'agreed' : 'disagreed'}`);
-
-        // Re-render the panel to update button states
-        this.renderReasoningPanel();
-    },
-
-    // Load saved agreements
-    loadAgreements() {
-        try {
-            const saved = localStorage.getItem('gently-detection-agreements');
-            if (saved) {
-                this.detectionAgreements = JSON.parse(saved);
-            }
-        } catch (e) {
-            console.warn('Failed to load detection agreements:', e);
-        }
     },
 
     // ==========================================
@@ -3500,54 +2694,6 @@ const EmbryosManager = {
      * @param {string} message - Hint message
      * @param {string} targetSelector - CSS selector for where to insert the hint
      */
-    showFirstRunHint(key, title, message, targetSelector) {
-        // Check if already dismissed
-        if (localStorage.getItem(`gently-hint-${key}`)) return;
-
-        const target = document.querySelector(targetSelector);
-        if (!target) return;
-
-        // Don't show if already showing a hint here
-        if (target.querySelector('.first-run-hint')) return;
-
-        const hint = document.createElement('div');
-        hint.className = 'first-run-hint';
-        hint.innerHTML = `
-            <div class="hint-header">
-                <span class="hint-icon">&#x1F4A1;</span>
-                <span class="hint-title">${title}</span>
-            </div>
-            <div class="hint-message">${message}</div>
-            <div class="hint-actions">
-                <button class="hint-dismiss" onclick="EmbryosManager.dismissHint('${key}')">Got it</button>
-            </div>
-        `;
-
-        target.insertAdjacentElement('afterbegin', hint);
-    },
-
-    /**
-     * Dismiss a hint and save to localStorage
-     * @param {string} key - Hint key to dismiss
-     */
-    dismissHint(key) {
-        localStorage.setItem(`gently-hint-${key}`, 'true');
-        const hint = document.querySelector('.first-run-hint');
-        if (hint) {
-            hint.style.animation = 'hintSlideOut 0.2s ease forwards';
-            setTimeout(() => hint.remove(), 200);
-        }
-    },
-
-    // ==========================================
-    // Smart Empty States
-    // ==========================================
-
-    /**
-     * Render a smart empty state with contextual messaging
-     * @param {string} type - Type of empty state
-     * @returns {string} HTML for the empty state
-     */
     renderSmartEmptyState(type) {
         const states = {
             'no-embryos': {
@@ -3595,39 +2741,6 @@ const EmbryosManager = {
     /**
      * Show appropriate first-run hints based on current state
      */
-    showFirstRunHints() {
-        // Hint for the embryo list
-        if (!localStorage.getItem('gently-hint-embryos') && Object.keys(this.state.embryos).length > 0) {
-            this.showFirstRunHint(
-                'embryos',
-                'Welcome to Embryo Monitoring',
-                'This is where you\'ll track your experiment progress. Each embryo card shows acquisition status and AI-detected events. Click an embryo to see detailed detection reasoning.',
-                '.embryo-list'
-            );
-        }
-
-        // Hint for detection panel when there are detections
-        const hasDetections = Object.values(this.detectionReasoning).some(r => r && r.length > 0);
-        if (!localStorage.getItem('gently-hint-detections') && hasDetections) {
-            this.showFirstRunHint(
-                'detections',
-                'AI Detection Analysis',
-                'The AI evaluates each timepoint for developmental events. Positive detections are highlighted. Click "View full analysis" to see the AI\'s reasoning with the actual image.',
-                '.reasoning-panel'
-            );
-        }
-    },
-
-    // Compare detection to previous timepoint (placeholder for future enhancement)
-    compareDetection(detectorName, timepoint) {
-        console.log(`Compare detection: ${detectorName} at T${timepoint} vs T${timepoint - 1}`);
-        // TODO: Open comparison modal showing current vs previous timepoint
-        // For now, just show a notification
-        const msg = `Comparison view coming soon. This will show ${detectorName} at T${timepoint} vs T${timepoint - 1}`;
-        alert(msg);
-    },
-
-    // Render a timeline sparkline showing detection/perception distribution
     renderTimelineSparkline(reasoning, totalTimepoints) {
         if (!reasoning || reasoning.length === 0) {
             return '';
@@ -3795,133 +2908,6 @@ const EmbryosManager = {
     },
 
     // Render context showing confidence trend leading up to a positive detection
-    renderDetectionContext(detection) {
-        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
-        const detectorName = detection.detector_name;
-        const timepoint = detection.timepoint;
-
-        // Get previous evaluations for same detector
-        const previousEvals = reasoning
-            .filter(r => r.detector_name === detectorName && (r.timepoint ?? 0) < timepoint)
-            .sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0))
-            .slice(0, 3);  // Last 3 before detection
-
-        if (previousEvals.length === 0) return '';
-
-        const dots = previousEvals.reverse().map(e => {
-            const conf = this.normalizeConfidence(e.confidence);
-            const confDisplay = typeof e.confidence === 'number' ? `${Math.round(e.confidence * 100)}%` : (e.confidence || 'Unknown');
-            return `<span class="context-dot ${conf}" title="T${e.timepoint}: ${confDisplay}"></span>`;
-        }).join('');
-
-        return `
-            <div class="detection-context">
-                <span>Confidence trend:</span>
-                <div class="context-dots">${dots}</div>
-                <span style="color: var(--accent-green);">&#x2714;</span>
-                <span style="font-size: 0.7rem; color: var(--text-muted);">(${previousEvals.length} prior evaluations)</span>
-            </div>
-        `;
-    },
-
-    // Toggle reasoning visibility for a detection
-    toggleReasoning(index) {
-        this.expandedReasoning[index] = !this.expandedReasoning[index];
-
-        const toggle = document.querySelector(`.reasoning-toggle[onclick*="'${index}'"]`);
-        const content = document.getElementById(`reasoning-${index}`);
-
-        if (toggle && content) {
-            toggle.classList.toggle('expanded', this.expandedReasoning[index]);
-            content.classList.toggle('expanded', this.expandedReasoning[index]);
-            toggle.innerHTML = `
-                <span class="chevron">&#x25B6;</span>
-                ${this.expandedReasoning[index] ? 'Hide' : 'Show'} VLM reasoning
-            `;
-        }
-    },
-
-    toggleImage(index, volumeUid) {
-        this.expandedImages[index] = !this.expandedImages[index];
-
-        const container = document.getElementById(`detection-image-${index}`);
-        const btn = container?.previousElementSibling;
-
-        if (container && btn) {
-            if (this.expandedImages[index]) {
-                container.classList.add('expanded');
-                container.innerHTML = `<img src="/api/images/${volumeUid}/png" alt="Volume projection" class="detection-image" />`;
-                btn.innerHTML = '<span class="toggle-icon">&#x25BC;</span> Hide Volume Projection';
-            } else {
-                container.classList.remove('expanded');
-                container.innerHTML = '';
-                btn.innerHTML = '<span class="toggle-icon">&#x25B6;</span> Show Volume Projection';
-            }
-        }
-    },
-
-    /**
-     * Open the 3D volume viewer for a detection
-     * Tries to find a matching 3D segmented volume for the given embryo/timepoint
-     */
-    async view3D(embryoId, timepoint) {
-        try {
-            // First, check if there are any 3D volumes available
-            const response = await fetch('/api/volumes3d');
-            const data = await response.json();
-
-            if (!data.volumes || data.volumes.length === 0) {
-                this.showToast('No 3D volumes available. Run segmentation to generate 3D data.', 'info');
-                return;
-            }
-
-            // Try to find a volume matching this embryo
-            let volumeUid = null;
-            const matchingVolumes = data.volumes.filter(v =>
-                v.metadata?.embryo_id === embryoId
-            );
-
-            if (matchingVolumes.length > 0) {
-                // Use the most recent matching volume
-                volumeUid = matchingVolumes[matchingVolumes.length - 1].uid;
-            } else if (data.volumes.length > 0) {
-                // Fallback to most recent volume
-                volumeUid = data.volumes[data.volumes.length - 1].uid;
-                this.showToast(`Showing most recent 3D volume (no match for ${embryoId})`, 'info');
-            }
-
-            if (volumeUid && typeof ProjectionViewer !== 'undefined') {
-                ProjectionViewer.open(embryoId, timepoint);
-            } else if (typeof ProjectionViewer === 'undefined') {
-                console.error('ProjectionViewer not loaded');
-                this.showToast('3D Viewer not available - refresh the page', 'error');
-            }
-        } catch (err) {
-            console.error('Failed to load 3D volumes:', err);
-            this.showToast('Failed to load 3D volumes', 'error');
-        }
-    },
-
-    /**
-     * Show a toast notification
-     */
-    showToast(message, type = 'info') {
-        // Simple toast implementation
-        let toast = document.getElementById('embryo-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'embryo-toast';
-            toast.className = 'embryo-toast';
-            document.body.appendChild(toast);
-        }
-        toast.textContent = message;
-        toast.className = `embryo-toast ${type} visible`;
-        setTimeout(() => {
-            toast.classList.remove('visible');
-        }, 3000);
-    },
-
-    // Toggle trace content expand/collapse
     toggleTraceContent(contentId) {
         const container = document.getElementById(contentId);
         if (!container) return;
@@ -4140,53 +3126,6 @@ const EmbryosManager = {
     /**
      * Play all timepoints for an embryo as a video timelapse
      */
-    async playEmbryoTimelapse(embryoId) {
-        if (typeof TimepointPlayer !== 'undefined') {
-            // Get detection info if available
-            const reasoning = this.detectionReasoning[embryoId] || [];
-
-            // Check for perception data (has stage) or legacy detections
-            const hasPerceptionData = reasoning.some(r => r.stage);
-
-            let latestEvent = null;
-            if (hasPerceptionData) {
-                // Get latest stage info, prefer hatching
-                const hatchingEvent = reasoning.find(r => r.is_hatching);
-                const latestReasoning = reasoning.filter(r => r.stage).slice(-1)[0];
-                latestEvent = hatchingEvent || latestReasoning;
-            } else {
-                // Legacy: get latest positive detection
-                const positiveDetections = reasoning.filter(r => r.detected);
-                latestEvent = positiveDetections.length > 0
-                    ? positiveDetections[positiveDetections.length - 1]
-                    : null;
-            }
-
-            // Build stage data map (timepoint -> stage)
-            const stageData = {};
-            reasoning.forEach(r => {
-                if (r.timepoint !== undefined && r.stage) {
-                    stageData[r.timepoint] = r.stage;
-                }
-            });
-
-            await TimepointPlayer.openSequence(embryoId, 0, null, {
-                vlmRange: null,  // No specific VLM range for "play all"
-                detectionPoint: latestEvent?.timepoint ?? null,
-                reasoningText: latestEvent?.reasoning ?? null,
-                stage: latestEvent?.stage ?? null,
-                isHatching: latestEvent?.is_hatching ?? false,
-                bufferPercent: 0,  // No buffer for "play all"
-                stageData: stageData  // Per-timepoint stage info for timeline coloring
-            });
-
-            // Auto-play when opening from gallery
-            TimepointPlayer.play();
-        } else {
-            console.warn('TimepointPlayer not available');
-        }
-    },
-
     updateEmbryoCard(embryoId) {
         // Invalidate countdown cache since card DOM is being replaced
         this._countdownCache = null;
@@ -4293,64 +3232,6 @@ const EmbryosManager = {
         return Math.max(0, embryo.intervalSeconds - elapsed);
     },
 
-    getMaxTimepoints(embryo) {
-        // Try to parse max from stop condition
-        const condition = embryo.stopCondition.toLowerCase();
-        const match = condition.match(/(\d+)\s*timepoints?/);
-        if (match) return parseInt(match[1]);
-
-        // Duration-based: estimate based on interval
-        const durationMatch = condition.match(/(\d+)\s*h(?:ours?)?/);
-        if (durationMatch && embryo.intervalSeconds) {
-            const hours = parseInt(durationMatch[1]);
-            return Math.ceil((hours * 3600) / embryo.intervalSeconds);
-        }
-
-        return 0; // Unknown
-    },
-
-    formatStopCondition(condition) {
-        if (!condition) return 'Manual stop';
-
-        const c = condition.toLowerCase();
-
-        // Handle composite conditions
-        if (c.includes('|')) {
-            const parts = c.split('|').map(p => this.formatSingleCondition(p.trim()));
-            return parts.join(' OR ');
-        }
-
-        return this.formatSingleCondition(c);
-    },
-
-    formatSingleCondition(condition) {
-        if (condition === 'manual') return 'Manual stop only';
-        if (condition.includes('hatching')) return 'Until hatching';
-        if (condition.includes('comma')) return 'Until comma stage';
-
-        // Parse "duration:10h" or "10h" or "10 hours"
-        const durationMatch = condition.match(/(?:duration:)?(\d+)\s*h(?:ours?)?/);
-        if (durationMatch) return `${durationMatch[1]} hours`;
-
-        // Parse "fixed_timepoints:100" or "100 timepoints"
-        const tpMatch = condition.match(/(?:fixed_timepoints:)?(\d+)\s*(?:timepoints?)?/);
-        if (tpMatch && !durationMatch) return `${tpMatch[1]} timepoints`;
-
-        return condition;
-    },
-
-    getConditionIcon(condition) {
-        if (!condition) return '&#x270B;'; // Hand
-
-        const c = condition.toLowerCase();
-        if (c.includes('|')) return '&#x1F3AF;'; // Target (composite)
-        if (c.includes('hatching')) return '&#x1F423;'; // Hatching chick
-        if (c.includes('comma')) return '&#x1F52C;'; // Microscope
-        if (c.includes('timepoint')) return '&#x1F522;'; // Numbers
-        if (c.includes('duration') || c.includes('hour')) return '&#x23F1;'; // Stopwatch
-        return '&#x270B;'; // Hand (manual)
-    },
-
     formatDetectorName(name) {
         return name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
     },
@@ -4374,26 +3255,6 @@ const EmbryosManager = {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
-    },
-
-    formatInterval(seconds) {
-        if (seconds >= 3600) {
-            return `${(seconds / 3600).toFixed(1)}h`;
-        } else if (seconds >= 60) {
-            return `${Math.round(seconds / 60)} min`;
-        } else {
-            return `${seconds}s`;
-        }
-    },
-
-    getEmbryoImagingDuration(embryo) {
-        // Show per-embryo imaging duration (time from first to last acquisition)
-        if (!embryo.firstAcquired) {
-            return '';
-        }
-        const endTime = embryo.isComplete ? embryo.lastAcquired : new Date();
-        const durationMs = endTime.getTime() - embryo.firstAcquired.getTime();
-        return this.formatDuration(durationMs);
     },
 
     updateEmbryosCount() {
@@ -4469,11 +3330,25 @@ const EmbryosManager = {
                 );
                 if (cell) {
                     cell.classList.add('active');
-                    cell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    // Scroll the filmstrip container itself, not every scrollable
+                    // ancestor: scrollIntoView would also pan whatever encloses it.
+                    // .filmstrip-container is position:relative, so it is the
+                    // cell's offsetParent and these offsets are relative to it.
+                    const sc = cell.closest('.filmstrip-container');
+                    if (sc) {
+                        sc.scrollTo({
+                            left: cell.offsetLeft + cell.offsetWidth / 2 - sc.clientWidth / 2,
+                            top: Math.min(
+                                Math.max(sc.scrollTop, cell.offsetTop + cell.offsetHeight - sc.clientHeight),
+                                cell.offsetTop
+                            ),
+                            behavior: 'smooth',
+                        });
+                    }
                 }
                 this.currentDetailItem = item;
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+                this.initChatPanel(detail, this.selectedEmbryoId, item.timepoint);
             }
             return;
         }
@@ -4482,7 +3357,7 @@ const EmbryosManager = {
             if (detail) {
                 this.currentDetailItem = item;
                 detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
-                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+                this.initChatPanel(detail, this.selectedEmbryoId, item.timepoint);
             }
             return;
         }

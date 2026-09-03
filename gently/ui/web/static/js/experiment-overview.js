@@ -131,7 +131,7 @@ const ExperimentOverview = {
     },
 
     // Debounced plan refetch — coalesces rapid tactic-event bursts into a single
-    // fetch+render.  500 ms window matches experiment-strip.js convention.
+    // fetch+render.  500 ms debounce window.
     // D2: also re-fetches the embryo roster so the lens stays current.
     _debouncedRefresh() {
         if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);
@@ -144,6 +144,9 @@ const ExperimentOverview = {
             this.activePlan = plan;
             this._rosterEmbryos = rosterEmbryos;
             this.isLive = plan !== null;
+            // Don't blow away an open plan picker (and the operator's pending
+            // selection) mid-edit — the next tactic event renders fresh data.
+            if (this._planPickerOpen) return;
             this.render(this.activeStrategy);
         }, 500);
     },

@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/static/css/landing.css">
     <link rel="stylesheet" href="/static/css/notebook.css">
     <link rel="stylesheet" href="/static/css/operate.css">
+    <link rel="stylesheet" href="/static/css/atrium.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% if show_landing %}
@@ -1409,7 +1410,6 @@
     <script src="/static/js/events.js"></script>
     <script src="/static/js/embryos.js"></script>
     <script src="/static/js/projection-viewer.js"></script>
-    <script src="/static/js/experiment-strip.js"></script>
     <script src="/static/js/marking.js"></script>
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
@@ -1432,6 +1432,8 @@
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/context-surface.js"></script>
     <script src="/static/js/landing.js"></script>
+    <!-- The Atrium spatial shell. Inert unless ?atrium=1. docs/atrium/SPEC.md -->
+    <script src="/static/js/atrium.js"></script>
 
     <!-- Device-layer boot banner (boot-banner.js) — non-modal, follows MMCore
          startup from any tab; the Devices panel is the on-demand full console. -->

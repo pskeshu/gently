@@ -54,7 +54,19 @@ const Occupancy3DManager = (function () {
     // Live data caches
     let _geom = null;                 // last SCAN_GEOMETRY_UPDATE.data
     let _firmwareBox = null;          // {x:[min,max], y:[min,max]} µm
+    // stageXY is shared (status-store.js): _stage is a local mirror kept in sync
+    // by the subscription below, and every write goes through _setStage so the
+    // other windows see the same position. Sticky replay means a late mount
+    // cannot miss it.
     let _stage = { x: null, y: null };
+    SharedState.on('stageXY', (v) => { if (v) _stage = { x: v.x, y: v.y }; });
+    // Partial update: DEVICE_STATE_UPDATE may carry X without Y.
+    function _setStage(x, y) {
+        SharedState.set('stageXY', {
+            x: x != null ? x : _stage.x,
+            y: y != null ? y : _stage.y,
+        });
+    }
     let _piezoZ = null;               // live axial position (µm)
     let _galvo = { a: null, b: null };
     let _embryos = [];                // [{x,y,role,id}]
@@ -149,13 +161,18 @@ const Occupancy3DManager = (function () {
 
     function _wireInteraction() {
         const el = _renderer.domElement;
+        // Screen px -> canvas-local px. 1.0 unless an ancestor (the Atrium
+        // bench) is CSS-scaled; sampled per drag so orbit speed stays constant.
+        let dragScale = 1;
         el.addEventListener('mousedown', (e) => {
             _isDragging = true; _prevMouse = { x: e.clientX, y: e.clientY };
+            const r = el.getBoundingClientRect();
+            dragScale = el.offsetWidth ? r.width / el.offsetWidth : 1;
         });
         el.addEventListener('mousemove', (e) => {
             if (!_isDragging) return;
-            _root.rotation.y += (e.clientX - _prevMouse.x) * 0.01;
-            _root.rotation.x += (e.clientY - _prevMouse.y) * 0.01;
+            _root.rotation.y += ((e.clientX - _prevMouse.x) / dragScale) * 0.01;
+            _root.rotation.x += ((e.clientY - _prevMouse.y) / dragScale) * 0.01;
             _rot.x = _root.rotation.x; _rot.y = _root.rotation.y;
             _prevMouse = { x: e.clientX, y: e.clientY };
         });
@@ -323,8 +340,7 @@ const Occupancy3DManager = (function () {
         for (const name of Object.keys(pos)) {
             const e = pos[name] || {};
             if (e.kind === 'xy_stage') {
-                if (e.X != null) _stage.x = e.X;
-                if (e.Y != null) _stage.y = e.Y;
+                _setStage(e.X, e.Y);
             } else if (e.kind === 'piezo') {
                 if (e.Position != null) _piezoZ = e.Position;
             } else if (e.kind === 'galvo') {
@@ -343,8 +359,7 @@ const Occupancy3DManager = (function () {
         if (!payload) return;
         _geom = payload;
         if (payload.stage_position_um) {
-            if (payload.stage_position_um.x != null) _stage.x = payload.stage_position_um.x;
-            if (payload.stage_position_um.y != null) _stage.y = payload.stage_position_um.y;
+            _setStage(payload.stage_position_um.x, payload.stage_position_um.y);
         }
         _rebuildSceneObjects();
         _renderReadouts();

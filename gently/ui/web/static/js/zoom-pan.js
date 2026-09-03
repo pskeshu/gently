@@ -22,6 +22,7 @@ class ZoomPanController {
 
         this.zoom = { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 };
         this._indicatorTimeout = null;
+        this._panScale = 1;
 
         // Bound handlers for cleanup
         this._onMouseMove = (e) => this._doPan(e);
@@ -73,15 +74,29 @@ class ZoomPanController {
         if (e.target.closest && e.target.closest('.zoom-controls, .ctrl-btn')) return;
 
         this.zoom.isDragging = true;
-        this.zoom.startX = e.clientX - this.zoom.offsetX;
-        this.zoom.startY = e.clientY - this.zoom.offsetY;
+        this._panScale = this._ancestorScale();
+        this.zoom.startX = e.clientX - this.zoom.offsetX * this._panScale;
+        this.zoom.startY = e.clientY - this.zoom.offsetY * this._panScale;
     }
 
     _doPan(e) {
         if (!this.zoom.isDragging) return;
-        this.zoom.offsetX = e.clientX - this.zoom.startX;
-        this.zoom.offsetY = e.clientY - this.zoom.startY;
+        // Mouse deltas are screen px; the transform's translate is in the
+        // target's local space, which every ancestor transform scales.
+        this.zoom.offsetX = (e.clientX - this.zoom.startX) / this._panScale;
+        this.zoom.offsetY = (e.clientY - this.zoom.startY) / this._panScale;
         this._apply();
+    }
+
+    // Live scale applied to the container by its ancestors (e.g. the bench).
+    // Measured rect over layout width; 1 unless something above us is scaled.
+    _ancestorScale() {
+        const w = this.container?.offsetWidth;
+        if (!w) return 1;
+        const s = this.container.getBoundingClientRect().width / w;
+        // offsetWidth is integer-rounded, so an untransformed container can
+        // read a hair off 1 -- deadband keeps the unscaled case exact.
+        return (s > 0 && Math.abs(s - 1) > 0.01) ? s : 1;
     }
 
     _endPan() {

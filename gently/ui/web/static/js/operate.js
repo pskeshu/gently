@@ -22,6 +22,9 @@
  */
 const OperateManager = (function () {
     const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
+    // Canvas CSS pixels, matching the drawn glyph radii — NOT screen pixels.
+    // onCanvasClick divides the ancestor scale out first, so a click stays on
+    // the same embryo whatever the bench is zoomed to.
     const MARK_HIT_PX = 14;
 
     let _wired = false, _active = false;
@@ -33,10 +36,15 @@ const OperateManager = (function () {
     let _embryos = [];
     // A CURSOR, not a step. It parameterises request bodies and readouts. It
     // must never appear in a `disabled` or visibility expression.
+    // Mirrors SharedState 'selectedEmbryoId' (see wire()): this file both
+    // publishes it and follows it, so a selection made in another surface lands
+    // here too instead of the two drifting apart.
     let _selected = null;
 
     // ── device state ────────────────────────────────────────────────────────
-    let _xy = null;                 // {x, y} from DEVICE_STATE_UPDATE
+    // {x, y}. Fed from SharedState 'stageXY' (see wire()); DEVICE_STATE_UPDATE
+    // publishes into the store rather than writing here directly.
+    let _xy = null;
     // Last bottom-cam frame. Kept because the marking canvas needs its geometry
     // and capture position; the SPIM frame is only ever displayed, so it isn't.
     let _lastBottom = null;
@@ -427,37 +435,44 @@ const OperateManager = (function () {
     }
 
     // Letterbox geometry for an object-fit: contain image, in CSS pixels.
-    // Measured off the CANVAS, not its host: it is the element being drawn into,
+    // Taken off the CANVAS, not its host: it is the element being drawn into,
     // and using one source for geometry and for the backing store keeps them
     // from disagreeing.
+    // The LAYOUT box, never getBoundingClientRect: an ancestor `scale()` (the
+    // Atrium bench) inflates the measured rect but not offsetWidth/offsetHeight,
+    // and a transform-inclusive geometry feeding a transform-blind backing store
+    // is exactly how the overlay drifts off the image. Everything downstream —
+    // markers, glyph radii, hit tests — is in these canvas CSS pixels.
     function renderedRect() {
         const c = $('op-mark-canvas');
         if (!c) return null;
-        const sb = c.getBoundingClientRect();
-        if (!(sb.width > 0 && sb.height > 0)) return null;
+        const bw = c.offsetWidth, bh = c.offsetHeight;
+        if (!(bw > 0 && bh > 0)) return null;
         const f = frameOf(_lastBottom);
-        const fw = f ? f.w : sb.width, fh = f ? f.h : sb.height;
-        const ar = fw / fh, sar = sb.width / sb.height;
+        const fw = f ? f.w : bw, fh = f ? f.h : bh;
+        const ar = fw / fh, sar = bw / bh;
         let w, h;
-        if (ar > sar) { w = sb.width; h = sb.width / ar; }
-        else { h = sb.height; w = sb.height * ar; }
-        return { x: (sb.width - w) / 2, y: (sb.height - h) / 2, w, h, fw, fh, sb };
+        if (ar > sar) { w = bw; h = bw / ar; }
+        else { h = bh; w = bh * ar; }
+        return { x: (bw - w) / 2, y: (bh - h) / 2, w, h, fw, fh };
     }
     function canvasCtx() {
         const c = $('op-mark-canvas');
         if (!c) return null;
-        const r = c.getBoundingClientRect();
-        if (!(r.width > 0 && r.height > 0)) return null;
+        const bw = c.offsetWidth, bh = c.offsetHeight;
+        if (!(bw > 0 && bh > 0)) return null;
         // The backing store must track the CSS box or everything drawn is
         // scaled — a stale height renders circles as ellipses. Scaling by dpr
         // keeps it crisp on fractional-ratio displays; the transform then lets
-        // every drawing call stay in CSS pixels.
+        // every drawing call stay in CSS pixels. Sizing off the layout box also
+        // keeps a bench zoom from reallocating (and past ~16384px, failing to
+        // allocate) the store on every step.
         const dpr = window.devicePixelRatio || 1;
-        const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+        const w = Math.round(bw * dpr), h = Math.round(bh * dpr);
         if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
         const ctx = c.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, r.width, r.height);
+        ctx.clearRect(0, 0, bw, bh);
         return ctx;
     }
     // Project a stage-space marker onto the current frame, then onto the canvas.
@@ -536,7 +551,12 @@ const OperateManager = (function () {
         const c = $('op-mark-canvas');
         if (!r || !c) return;
         const rect = c.getBoundingClientRect();
-        const cxv = e.clientX - rect.left, cyv = e.clientY - rect.top;
+        // rect is transform-inclusive, offsetWidth is not, so their ratio IS the
+        // live ancestor scale. Dividing by it lands the click in the same canvas
+        // CSS-pixel space renderedRect() drew into. Both are 1 when unscaled.
+        const sx = rect.width / c.offsetWidth, sy = rect.height / c.offsetHeight;
+        if (!(sx > 0 && sy > 0)) return;
+        const cxv = (e.clientX - rect.left) / sx, cyv = (e.clientY - rect.top) / sy;
 
         // Click a pending marker to remove it.
         for (let i = 0; i < _markers.length; i++) {
@@ -796,6 +816,11 @@ const OperateManager = (function () {
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
     function selectEmbryo(id) {
         _selected = id;
+        // Publish AFTER the local assignment: the subscription in wire() sees
+        // _selected already equal and no-ops, so our own click renders exactly
+        // once, as before. The set() is what makes the other copies of this
+        // cursor follow.
+        SharedState.set('selectedEmbryoId', id);
         renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
     }
 
@@ -840,7 +865,10 @@ const OperateManager = (function () {
             // EMBRYOS_UPDATE will reconcile every view; prune optimistically so
             // the row disappears immediately even before the event lands.
             _embryos = _embryos.filter(e => e.id !== id);
-            if (_selected === id) _selected = _embryos.length ? _embryos[0].id : null;
+            if (_selected === id) {
+                _selected = _embryos.length ? _embryos[0].id : null;
+                SharedState.set('selectedEmbryoId', _selected);
+            }
             renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
             toast(`Delete failed (${e.status || e.message})`);
@@ -1144,6 +1172,7 @@ const OperateManager = (function () {
         // ("No embryo selected") right after registering. The operator can still
         // switch by clicking a registered embryo (bottom) or a roster row.
         if (!_selected && _embryos.length) _selected = _embryos[0].id;
+        SharedState.set('selectedEmbryoId', _selected);
         // Render the shared rail even when the Operate view isn't the active tab,
         // so switching to it (or refreshing) shows the list immediately rather
         // than waiting for the next mutation event.
@@ -1264,6 +1293,20 @@ const OperateManager = (function () {
             new ResizeObserver(() => { if (_active && _pane === 'bottom') drawMarkers(); }).observe(camBox);
         }
 
+        // ── shared state: follow the values this file used to keep privately ──
+        // Both are sticky and synchronous, so a set() from our own handler has
+        // applied the local before the handler's next line runs. Assignment
+        // only: the renders stay where they already were, so nothing here can
+        // change what is drawn today. What it buys is fan-IN — when another
+        // surface moves the stage or the cursor, these locals follow instead of
+        // going stale.
+        SharedState.on('stageXY', v => { if (v) _xy = v; });
+        SharedState.on('selectedEmbryoId', id => {
+            if (id === _selected) return;      // our own publish, already applied
+            _selected = id;
+            renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
+        });
+
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
@@ -1271,7 +1314,9 @@ const OperateManager = (function () {
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
                 const pos = p && p.positions;
                 if (!pos) return;
-                if (Array.isArray(pos.xy_stage)) _xy = { x: pos.xy_stage[0], y: pos.xy_stage[1] };
+                if (Array.isArray(pos.xy_stage)) {
+                    SharedState.set('stageXY', { x: pos.xy_stage[0], y: pos.xy_stage[1] });
+                }
                 if (!_active) return;
                 for (const v of Object.values(pos)) {
                     if (!v || typeof v !== 'object' || v.Position == null) continue;
@@ -1314,5 +1359,8 @@ const OperateManager = (function () {
         forceLedOff();
     }
 
-    return { activate, deactivate };
+    // redraw: a CSS transform on an ancestor fires neither `resize` nor
+    // ResizeObserver, so the bench has to say when it has zoomed. Cheap and
+    // idempotent — it no-ops off the bottom pane.
+    return { activate, deactivate, redraw: drawMarkers };
 })();

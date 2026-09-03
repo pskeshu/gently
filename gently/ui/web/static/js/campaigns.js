@@ -63,7 +63,6 @@ const state = {
     docData: null,              // plan document data for plan view
     versions: [],               // snapshots list
     viewingSnapshotId: null,
-    allItemsFlat: {},           // id → item for quick lookup
     editingSpec: false,         // inspector imaging-spec edit mode
     _inspectorData: null,       // last item-detail payload (for re-render on edit toggle)
     _specError: '',             // inline save error in the spec editor
@@ -186,17 +185,6 @@ async function loadCampaigns() {
         const data = await res.json();
         state.allCampaigns = data.campaigns || [];
 
-        // Build flat item index across all campaigns
-        state.allItemsFlat = {};
-        function indexItems(tree) {
-            for (const item of (tree.items || [])) {
-                state.allItemsFlat[item.id] = item;
-                item._rootCampaignId = tree.campaign.id;
-            }
-            for (const child of (tree.children || [])) indexItems(child);
-        }
-        state.allCampaigns.forEach(indexItems);
-
         hideLoading();
         renderNavigator();
 
@@ -228,8 +216,6 @@ async function loadDocument(campaignId) {
         const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/document`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         state.docData = await res.json();
-        state.allItemsFlat = {};
-        buildItemIndex(state.docData.document);
     } catch (err) {
         console.error('Failed to load document:', err);
         state.docData = null;
@@ -245,15 +231,6 @@ async function loadVersions(campaignId) {
     } catch (err) {
         console.error('Failed to load versions:', err);
         state.versions = [];
-    }
-}
-
-function buildItemIndex(node) {
-    for (const item of (node.items || [])) {
-        state.allItemsFlat[item.id] = item;
-    }
-    for (const child of (node.children || [])) {
-        buildItemIndex(child);
     }
 }
 
@@ -1097,8 +1074,6 @@ async function viewVersion(versionId, isCurrent) {
             state.docData.document = normalized;
             state.docData.status = normalized.status;
             state.docData.bibliography = [];  // snapshots don't carry bibliography
-            state.allItemsFlat = {};
-            buildItemIndex(normalized);
 
             renderAll();
 
@@ -1185,11 +1160,25 @@ function updateStatusbar() {
 //  NAVIGATION HELPERS
 // ══════════════════════════════════════════════════════════
 
+// scrollIntoView scrolls every scrollable ancestor, so inside a transformed
+// wrapper it pans the whole workspace. Scroll #canvas -- the intended container
+// -- explicitly, converting the measured (transform-inclusive) offset back into
+// the canvas's own scroll units.
+function scrollCanvasToEl(el, centered) {
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const scale = canvasRect.height / (canvas.offsetHeight || canvasRect.height) || 1;
+    const rect = el.getBoundingClientRect();
+    const delta = rect.top - canvasRect.top - (centered ? (canvasRect.height - rect.height) / 2 : 0);
+    canvas.scrollTo({ top: canvas.scrollTop + delta / scale, behavior: 'smooth' });
+}
+
 function navigateToItem(itemId) {
     // Scroll to item in canvas
     const el = document.getElementById(`item-${itemId}`);
     if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        scrollCanvasToEl(el, true);
     }
     // Open detail
     selectItem(itemId);
@@ -1197,7 +1186,7 @@ function navigateToItem(itemId) {
 
 function scrollCanvasTo(elementId) {
     const el = document.getElementById(elementId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) scrollCanvasToEl(el, false);
 }
 
 function toggleNavPhase(headerEl) {
@@ -1217,10 +1206,14 @@ function onCanvasScroll() {
     let closestItem = null;
     let closestDist = Infinity;
 
+    // Measured rects are transform-inclusive; the 100 threshold below is in CSS
+    // px, so divide the offset by the live scale before comparing.
+    const canvasRect = canvas.getBoundingClientRect();
+    const scale = canvasRect.height / (canvas.offsetHeight || canvasRect.height) || 1;
+
     document.querySelectorAll('.doc-item').forEach(el => {
         const rect = el.getBoundingClientRect();
-        const canvasRect = canvas.getBoundingClientRect();
-        const relTop = rect.top - canvasRect.top;
+        const relTop = (rect.top - canvasRect.top) / scale;
         if (relTop < 100 && Math.abs(relTop) < closestDist) {
             closestDist = Math.abs(relTop);
             closestItem = el;
@@ -1799,7 +1792,6 @@ function renderTimelinePlanView() {
     const totalDays = Math.max(1, ...Object.values(endDay));
     const dayWidth = 36;
     const rowHeight = 32;
-    const labelWidth = 220;
     const headerHeight = 40;
     const chartWidth = totalDays * dayWidth;
 
@@ -1864,10 +1856,16 @@ function renderTimelinePlanView() {
     if (chartScroll && headerScroll) {
         chartScroll.addEventListener('scroll', () => { headerScroll.scrollLeft = chartScroll.scrollLeft; });
         // Wheel scroll → horizontal pan. Leave native deltaX (trackpad) and shift+wheel alone.
+        // Only consume the wheel when there is something to pan, so an enclosing
+        // zoomable surface still sees the gesture otherwise.
         chartScroll.addEventListener('wheel', (e) => {
-            if (e.deltaY !== 0 && e.deltaX === 0 && !e.shiftKey) {
+            const pannable = chartScroll.scrollWidth > chartScroll.clientWidth;
+            if (pannable && e.deltaY !== 0 && e.deltaX === 0 && !e.shiftKey) {
                 e.preventDefault();
-                chartScroll.scrollLeft += e.deltaY;
+                // deltaY is screen px; scrollLeft is in the element's own units.
+                const rect = chartScroll.getBoundingClientRect();
+                const scale = rect.width / (chartScroll.offsetWidth || rect.width) || 1;
+                chartScroll.scrollLeft += e.deltaY / scale;
             }
         }, { passive: false });
     }
