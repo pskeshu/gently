@@ -871,114 +871,6 @@
    a containing block for it. */
 .op-cam { position: relative; }
 
-/* Contrast/brightness strip — fades in on hover or keyboard focus. The
-   video-player idiom: discoverable, nothing to open or close, and gone while
-   you are just watching the frame. */
-.iv-bar {
-    position: absolute;
-    left: 6px;
-    right: 6px;
-    bottom: 6px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 8px;
-    border-radius: 5px;
-    background: rgba(0, 0, 0, 0.55);
-    opacity: 0;
-    transition: opacity 0.15s ease;
-    pointer-events: none;
-}
-
-.op-cam:hover .iv-bar,
-.iv-bar:focus-within {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .iv-bar { transition: none; }
-}
-
-/* Display window: one track, a black point and a white point. The lit span
-   between them is the range being mapped to the full output. */
-.iv-lbl {
-    flex: 0 0 auto;
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.65);
-}
-
-.iv-win {
-    position: relative;
-    flex: 1 1 auto;
-    min-width: 70px;
-    height: 18px;
-    touch-action: none;      /* the handles own the gesture */
-    cursor: ew-resize;
-}
-
-.iv-win-track {
-    position: absolute;
-    inset: 7px 0 auto 0;
-    height: 4px;
-    border-radius: 2px;
-    /* black-to-white, because that is literally the axis being windowed */
-    background: linear-gradient(90deg, #000, #fff);
-    outline: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.iv-win-span {
-    position: absolute;
-    top: 6px;
-    height: 6px;
-    border-radius: 3px;
-    background: rgba(96, 165, 250, 0.55);
-    pointer-events: none;
-}
-
-.iv-win-h {
-    position: absolute;
-    top: 2px;
-    width: 10px;
-    height: 14px;
-    margin-left: -5px;
-    border-radius: 2px;
-    background: #fff;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
-    cursor: ew-resize;
-}
-
-.iv-win-h:focus-visible {
-    outline: 2px solid var(--accent, #3b82f6);
-    outline-offset: 1px;
-}
-
-/* Numbers only once the window is not full — a permanent "0–100" is a label
-   reporting that nothing has been changed. */
-.iv-read {
-    flex: 0 0 auto;
-    min-width: 42px;
-    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-    font-size: 0.64rem;
-    color: #fff;
-    text-align: right;
-}
-
-.iv-reset {
-    flex: 0 0 auto;
-    font-size: 0.64rem;
-    padding: 1px 6px;
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    border-radius: 3px;
-    background: transparent;
-    color: #fff;
-    cursor: pointer;
-}
-
-/* The zoom badge shares the corner with the strip; lift it clear on hover. */
-.op-cam:hover .iv-badge { bottom: 34px; }
 
 /* ── Marking panel ────────────────────────────────────────────────────────
    Two counts side by side, because they are two different facts and showing
@@ -1052,4 +944,76 @@
 .op-block-marking .mk-note {
     grid-column: 1 / -1;
     margin: 0;
+}
+
+/* ── Display panel ────────────────────────────────────────────────────────
+   A histogram with the transfer line drawn across it, after ImageJ/Fiji's
+   Brightness/Contrast. It sits UNDER the frame, never over it: the image is
+   the instrument, and an overlay both hides data and swallows clicks meant
+   for markers. The picture is the readout, so there is no numeric status. */
+.op-block-display .lp-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+/* Says what the histogram is of, because it is not raw camera counts. */
+.iv-src {
+    font-size: 0.62rem;
+    color: var(--op-ink-dim);
+    cursor: help;
+}
+
+.iv-hist {
+    position: relative;
+    height: 60px;
+    margin-bottom: 10px;
+    border-radius: 3px;
+    /* Black-to-white behind the bars: the axis being windowed, made literal. */
+    background: linear-gradient(90deg, #0b0f14, #2b3441);
+    outline: 1px solid var(--op-rule);
+    touch-action: none;
+    cursor: ew-resize;
+}
+
+.iv-hist-c {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.iv-h {
+    position: absolute;
+    top: -3px;
+    bottom: -6px;
+    width: 2px;
+    margin-left: -1px;
+    background: #60a5fa;
+    cursor: ew-resize;
+}
+
+/* A grip at the foot, so the handle is grabbable without hiding the data. */
+.iv-h::after {
+    content: '';
+    position: absolute;
+    left: -4px;
+    bottom: -1px;
+    width: 10px;
+    height: 8px;
+    border-radius: 2px;
+    background: #60a5fa;
+}
+
+.iv-h-lo::after { border-bottom-left-radius: 0; }
+.iv-h-hi::after { border-bottom-right-radius: 0; }
+
+.iv-h:focus-visible {
+    outline: 2px solid var(--accent, #3b82f6);
+    outline-offset: 2px;
+}
+
+.iv-acts {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
 }

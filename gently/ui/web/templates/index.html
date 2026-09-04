@@ -579,6 +579,9 @@
                     <div class="op-bar">
                       <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
                     </div>
+                    <!-- Display range, attached under the frame it applies to.
+                         Nothing sits on the pixels. -->
+                    <div class="op-block op-block-display" id="op-display-bottom"></div>
                     <!-- Marking sits under the frame it acts on, not off in the
                          instrument rail. Shared panel; the module owns its
                          markup (docs/architecture/PANELS.md). -->
@@ -642,6 +645,7 @@
                     <!-- Seats itself while a routine is producing images and retires
                          when they stop. No open or close control on purpose: an
                          operator watching the scope should not have to ask for it. -->
+                    <div class="op-block op-block-display" id="op-display-spim"></div>
                     <figure class="op-preview" id="op-preview" hidden>
                       <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
                       <figcaption class="op-preview-cap">
