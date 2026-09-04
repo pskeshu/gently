@@ -286,7 +286,10 @@ const DeviceLayerCard = (function () {
         if (!res.ok) {
             let payload = {};
             try { payload = await res.json(); } catch (_) { /* non-JSON */ }
-            const err = new Error(payload.error || payload.reason || res.statusText);
+            // `detail` first: that is what FastAPI's HTTPException writes, and
+            // without it a real reason was being reported as "Bad Gateway".
+            const err = new Error(
+                payload.detail || payload.error || payload.reason || res.statusText);
             err.status = res.status;
             err.payload = payload;
             throw err;

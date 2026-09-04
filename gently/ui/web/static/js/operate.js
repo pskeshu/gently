@@ -103,7 +103,32 @@ const OperateManager = (function () {
     function $(id) { return document.getElementById(id); }
     function toast(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m); }
     // Same funnel, error styling — a failure must not read as a confirmation.
-    function toastFail(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, 6000, 'error'); }
+    // Longer than a success toast: a failure carries a reason now, and a reason
+    // takes longer to read than "Volume acquired".
+    function toastFail(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, 10000, 'error'); }
+
+    // The reason a request failed, not the number it failed with.
+    //
+    // Every route already answers with one — FastAPI's HTTPException writes
+    // `{detail: ...}` and the device layer writes `{error: ...}`. postJSON kept
+    // the body on the error, but every call site formatted `${e.status ||
+    // e.message}`, so an operator at the scope read "Detect failed (502)" while
+    // the server had said exactly what went wrong. That is most of a debugging
+    // round trip thrown away at the last step.
+    const WHY_MAX = 200;
+    function why(e) {
+        const d = (e && e.data) || {};
+        let msg = d.detail != null ? d.detail : d.error;
+        // FastAPI answers 422 with a list of validation objects.
+        if (Array.isArray(msg)) msg = msg.map(x => (x && x.msg) || JSON.stringify(x)).join('; ');
+        else if (msg && typeof msg === 'object') msg = JSON.stringify(msg);
+        msg = msg == null ? '' : String(msg).trim();
+        if (!msg) return String((e && (e.status || e.message)) || 'unknown error');
+        // The full text always reaches the console; the toast gets a readable cut.
+        if (e && e.status) console.warn(`[gently] ${e.status}: ${msg}`);
+        const short = msg.length > WHY_MAX ? `${msg.slice(0, WHY_MAX - 1)}…` : msg;
+        return e && e.status ? `${e.status} — ${short}` : short;
+    }
     function escapeHtml(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -182,7 +207,7 @@ const OperateManager = (function () {
             if (why) toast(why);
             return true;
         } catch (e) {
-            toastFail(`Move failed (${e.status || e.message})`);
+            toastFail(`Move failed (${why(e)})`);
             return false;
         }
     }
@@ -335,7 +360,7 @@ const OperateManager = (function () {
             } catch (e) {
                 // Even a refused nudge reports the real position — take it.
                 if (e && e.data && e.data.position != null) absorb(e.data);
-                toastFail(`${cfg.label} nudge blocked (${e.status || e.message})`);
+                toastFail(`${cfg.label} nudge blocked (${why(e)})`);
             } finally { busy = false; renderNudges(); }
         }
 
@@ -415,7 +440,7 @@ const OperateManager = (function () {
             toast('Backed off 100 µm');
         } catch (e) {
             if (e && e.data && e.data.position != null) fd.absorb(e.data);
-            toastFail(`Back-off failed (${e.status || e.message}) — head still down`);
+            toastFail(`Back-off failed (${why(e)}) — head still down`);
         }
     }
 
@@ -715,7 +740,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applyBottomCam(!!d.streaming);
             _bottomWasOn = _bottomOn;
-        } catch (e) { toastFail(`Camera toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Camera toggle failed (${why(e)})`); }
         finally { if (b) b.disabled = false; }
     }
     function applyBottomCam(on) {
@@ -784,7 +809,7 @@ const OperateManager = (function () {
             if (e.status === 503) {
                 if (note) note.textContent = 'Automatic detection is unavailable on this rig — mark by clicking the image.';
             } else {
-                toastFail(`Detect failed (${e.status || e.message})`);
+                toastFail(`Detect failed (${why(e)})`);
             }
         } finally {
             if (b) { b.disabled = false; b.textContent = 'Detect automatically'; }
@@ -822,7 +847,7 @@ const OperateManager = (function () {
             setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
-            toastFail(`Register failed (${e.status || e.message})`);
+            toastFail(`Register failed (${why(e)})`);
             if (b) b.disabled = false;
         }
     }
@@ -835,7 +860,7 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             applySpim(!!d.streaming);
             _spimWasOn = _spimOn;
-        } catch (e) { toastFail(`SPIM view toggle failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`SPIM view toggle failed (${why(e)})`); }
         finally { if (b) b.disabled = false; }
     }
     function applySpim(on) {
@@ -868,7 +893,7 @@ const OperateManager = (function () {
         _ledOn = !_ledOn;
         applyLed();
         try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
-        catch (e) { toastFail(`LED failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`LED failed (${why(e)})`); }
     }
     function applyLed() {
         const b = $('op-led');
@@ -906,7 +931,7 @@ const OperateManager = (function () {
             }
         } catch (e) {
             if (out) out.textContent = 'failed';
-            toastFail(`Calibrate failed (${e.status || e.message})`);
+            toastFail(`Calibrate failed (${why(e)})`);
         } finally {
             clearInterval(tick);
             if (b) { b.disabled = false; b.textContent = 'Calibrate'; }
@@ -990,7 +1015,7 @@ const OperateManager = (function () {
             }
             renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
-            toastFail(`Delete failed (${e.status || e.message})`);
+            toastFail(`Delete failed (${why(e)})`);
         }
     }
 
@@ -1039,7 +1064,7 @@ const OperateManager = (function () {
         const roles = {};
         _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
         try { await postJSON('/api/embryos/roles', { roles }); }
-        catch (e) { toastFail(`Roles failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Roles failed (${why(e)})`); }
     }
 
     function setMode(m) {
@@ -1145,7 +1170,7 @@ const OperateManager = (function () {
                 } else toastFail('Agent chat unavailable');
             }
         } catch (e) {
-            toastFail(`Start failed (${e.status || e.message})`);
+            toastFail(`Start failed (${why(e)})`);
         } finally { done(); }
     }
 
@@ -1191,13 +1216,13 @@ const OperateManager = (function () {
         try {
             await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
             toast(_runPaused ? 'Resumed' : 'Paused');
-        } catch (e) { toastFail(`Pause/resume failed (${e.status || e.message})`); }
+        } catch (e) { toastFail(`Pause/resume failed (${why(e)})`); }
         renderRun();
     }
     async function stopRun() {
         if (!window.confirm('Stop the run?')) return;
         try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); toast('Run stopped'); }
-        catch (e) { toastFail(`Stop failed (${e.status || e.message})`); }
+        catch (e) { toastFail(`Stop failed (${why(e)})`); }
         renderRun();
     }
 
