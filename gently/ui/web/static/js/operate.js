@@ -1257,6 +1257,16 @@ const OperateManager = (function () {
         applySpim(false);
     }
 
+    // The Light panel is shared, so Operate only says where to draw it — see
+    // docs/architecture/PANELS.md. Mounted once; SharedState keeps it current.
+    let _lightMounted = false;
+    function mountLightPanel() {
+        if (_lightMounted || typeof LightPanel === 'undefined') return;
+        if (!$('op-light-host')) return;
+        _lightMounted = true;
+        LightPanel.mount('op-light-host');
+    }
+
     function showPane(name) {
         if (!PANES[name] || name === _pane) return;
         const prev = _pane;
@@ -1270,6 +1280,7 @@ const OperateManager = (function () {
         // roster is richer) while keeping it on Bottom / SPIM.
         const body = $('op-body'); if (body) body.dataset.pane = name;
         if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', name);
+        if (name === 'spim') mountLightPanel();
         PANES[name].onEnter();
         PANES[name].render();
         renderEmbryoRail();

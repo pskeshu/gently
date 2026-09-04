@@ -722,3 +722,114 @@
     .op-body { flex-direction: column; }
     .op-embryos { flex: 0 0 auto; max-height: 148px; }
 }
+
+/* ── Light panel ──────────────────────────────────────────────────────────
+   Styles for the shared panel in static/js/panels/light.js. They live here
+   rather than in the module because the app has no bundler and CSS-in-JS
+   would be the only instance of it. Prefixed `lp-` so a second mount site
+   cannot collide. See docs/architecture/PANELS.md. */
+.lp {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lp-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+
+.lp-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* Staleness is load-bearing: these are read-back values, and a number with no
+   age is indistinguishable from a remembered one. */
+.lp-age {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.lp-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+}
+
+.lp-label {
+    flex: 0 0 62px;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+.lp-val {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.74rem;
+    color: var(--text);
+    min-width: 54px;
+}
+
+.lp-lim {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.lp-range { flex: 1 1 auto; min-width: 60px; }
+.lp-select,
+.lp-num {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.74rem;
+    padding: 2px 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.lp-num { flex: 0 0 70px; }
+
+.lp-btn {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+}
+
+/* Armed is a hazard, not a preference — it reads as one. */
+.lp-btn.is-armed {
+    border-color: var(--accent-red, #ef4444);
+    color: var(--accent-red, #ef4444);
+    font-weight: 600;
+}
+
+/* Presence-driven (PANELS.md rule 6): present only while light is actually
+   coming out, and derived from read-back state, never from a flag. */
+.lp-emit {
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: var(--accent-red, #ef4444);
+}
+
+/* "I do not know" must not look like "no". */
+.lp-emit-unknown {
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px dashed var(--border);
+    font-weight: 500;
+    letter-spacing: 0;
+}

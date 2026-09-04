@@ -2414,6 +2414,75 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    # Sides are separate scanner cards, so the beam can genuinely be armed on
+    # one and not the other. Reporting a single boolean would have to pick a
+    # lie; the panel is given both.
+    _BEAM_SIDES = {"a": "scanner", "b": "scanner_b"}
+
+    def _read_beam(self) -> dict:
+        """`BeamEnabled` per side, read from the hardware — never remembered.
+
+        A commanded value is not a true one: `configure_for_volume_acquisition`
+        disables the beam and nothing re-enables it, so a UI trusting its own
+        last write reports ON over a dark scope. That is #106.
+        """
+        out: dict[str, bool | None] = {}
+        for side, dev_name in self._BEAM_SIDES.items():
+            dev = self.devices.get(dev_name)
+            if dev is None:
+                continue
+            try:
+                out[side] = str(dev.core.getProperty(dev.name, "BeamEnabled")).strip() == "Yes"
+            except Exception:
+                # Present but unreadable is not the same as absent, and it is
+                # certainly not "off". Say unknown.
+                out[side] = None
+        return out
+
+    async def handle_get_beam(self, request):
+        """GET /api/scanner/beam — is the beam armed, per side, from hardware."""
+        try:
+            return web.json_response({"success": True, "beam": self._read_beam()})
+        except Exception as exc:
+            logger.exception("[beam] read failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    async def handle_set_beam(self, request):
+        """POST /api/scanner/beam — arm or disarm. Body: {enabled: bool, side?: a|b|both}.
+
+        Answers with the state read back afterwards rather than echoing the
+        request, so a write that did not take cannot be reported as one that
+        did.
+        """
+        try:
+            data = await request.json()
+            enabled = bool(data.get("enabled"))
+            side = str(data.get("side", "both")).lower()
+            if side not in ("a", "b", "both"):
+                return web.json_response(
+                    {"success": False, "error": "side must be a, b or both"}, status=400
+                )
+
+            targets = self._BEAM_SIDES if side == "both" else {side: self._BEAM_SIDES[side]}
+            touched = []
+            for key, dev_name in targets.items():
+                dev = self.devices.get(dev_name)
+                if dev is None:
+                    continue
+                dev.enable_beam(enabled)
+                touched.append(key)
+
+            if not touched:
+                return web.json_response(
+                    {"success": False, "error": "no scanner device present"}, status=503
+                )
+
+            logger.info("[beam] %s on %s", "armed" if enabled else "disarmed", ", ".join(touched))
+            return web.json_response({"success": True, "beam": self._read_beam()})
+        except Exception as exc:
+            logger.exception("[beam] set failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
     async def handle_set_light_source_power(self, request):
         """POST /api/light_source/power — set per-line laser power %.
 
@@ -3760,6 +3829,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
+        self._app.router.add_get("/api/scanner/beam", self.handle_get_beam)
+        self._app.router.add_post("/api/scanner/beam", self.handle_set_beam)
         self._app.router.add_post("/api/laser/config", self.handle_set_laser_config)
         self._app.router.add_get("/api/laser/configs", self.handle_get_laser_configs)
         self._app.router.add_get("/api/plan_log", self.handle_get_plan_log)

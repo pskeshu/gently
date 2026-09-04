@@ -664,6 +664,12 @@
                         <span class="op-num" id="op-spim-score">—</span></div>
                     </div>
 
+                    <!-- The shared Light panel (docs/architecture/PANELS.md).
+                         Empty on purpose: panels/light.js owns the markup, so
+                         the bottom camera and the calibration tab mount the
+                         same one rather than copying it. -->
+                    <div class="op-block" id="op-light-host"></div>
+
                     <div class="op-gauge" id="op-gauge-fd" data-status="unknown">
                       <div class="op-gauge-head">
                         <span class="op-gauge-name">Sample → objective</span>
@@ -1424,6 +1430,7 @@
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate-math.js"></script>
+    <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/device-layer.js"></script>
     <script src="/static/js/boot-banner.js"></script>

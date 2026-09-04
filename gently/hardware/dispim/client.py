@@ -819,6 +819,24 @@ class DiSPIMMicroscope(Microscope):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def get_beam(self) -> dict:
+        """Read whether the beam is armed, per side, from the hardware.
+
+        Hits ``GET /api/scanner/beam``. This is a real property read, not a
+        remembered command — the beam is left disabled after every volume
+        acquisition, so anything trusting its own last write is wrong from then
+        on (#106).
+        """
+        return await self._api_get("/api/scanner/beam")
+
+    async def set_beam(self, enabled: bool, side: str = "both") -> dict:
+        """Arm or disarm the beam. ``side`` is ``"a"``, ``"b"`` or ``"both"``.
+
+        Answers with the state read back after the write, so a command that did
+        not take cannot look like one that did.
+        """
+        return await self._api_post("/api/scanner/beam", {"enabled": bool(enabled), "side": side})
+
     async def set_laser_config(self, config_name: str) -> dict:
         """Apply a Laser config-group preset (e.g. "ALL OFF").
 

@@ -91,6 +91,9 @@ const SharedState = (() => {
         sessionId: null,
         agentBusy: false,
         hasControl: false,
+        // Read-back light state, owned by panels/light.js. One value, so every
+        // mounted Light panel agrees — see docs/architecture/PANELS.md rule 2.
+        light: null,
     };
     const subs = new Map();     // key -> Set<handler>
 
