@@ -46,7 +46,8 @@ const ImageView = (() => {
         const fit = box.querySelector('.op-cam-fit');
         if (!fit) return;
 
-        const v = { z: 1, tx: 0, ty: 0, fit, box, badge: null, drag: null };
+        const v = { z: 1, tx: 0, ty: 0, fit, box, badge: null, drag: null,
+                    contrast: 1, brightness: 1, bar: null };
         views.set(containerId, v);
 
         // Zoom about the cursor, so the thing under the pointer stays under it.
@@ -93,7 +94,52 @@ const ImageView = (() => {
         // uses (PANELS.md rule 6 — nothing to open or close).
         box.addEventListener('dblclick', e => { e.preventDefault(); reset(containerId); });
 
+        buildBar(v, containerId);
         apply(v);
+    }
+
+    /**
+     * Contrast is a tool the operator reaches for, not a transient report, so
+     * it gets real controls rather than appearing by itself. They live in a
+     * strip that fades in on hover — the video-player idiom, discoverable with
+     * nothing to open or close (PANELS.md rule 6).
+     *
+     * These are CSS filters on the already-encoded frame. The device layer
+     * auto-stretches every frame to its 1-99th percentile before JPEG
+     * encoding, so this is fine adjustment on top of that, not a display range
+     * over raw counts. Anything clipped by that stretch is already gone; see
+     * the display-range work for the real fix.
+     */
+    function buildBar(v, containerId) {
+        const bar = document.createElement('div');
+        bar.className = 'iv-bar';
+        bar.innerHTML = `
+          <label class="iv-ctl">C
+            <input type="range" min="0.2" max="4" step="0.05" value="1" data-contrast
+                   aria-label="Display contrast">
+          </label>
+          <label class="iv-ctl">B
+            <input type="range" min="0.2" max="3" step="0.05" value="1" data-brightness
+                   aria-label="Display brightness">
+          </label>
+          <button type="button" class="iv-reset" title="Reset view">reset</button>`;
+        // The strip sits over the frame; clicks in it must not reach the
+        // marking canvas underneath.
+        ['pointerdown', 'pointerup', 'click', 'dblclick', 'wheel'].forEach(ev =>
+            bar.addEventListener(ev, e => e.stopPropagation()));
+
+        const c = bar.querySelector('[data-contrast]');
+        const b = bar.querySelector('[data-brightness]');
+        c.addEventListener('input', () => { v.contrast = Number(c.value); apply(v); });
+        b.addEventListener('input', () => { v.brightness = Number(b.value); apply(v); });
+        bar.querySelector('.iv-reset').addEventListener('click', () => {
+            c.value = b.value = 1;
+            v.contrast = v.brightness = 1;
+            reset(containerId);
+        });
+
+        v.bar = bar;
+        v.box.appendChild(bar);
     }
 
     const clamp = z => Math.min(MAX_Z, Math.max(MIN_Z, z));
@@ -102,6 +148,13 @@ const ImageView = (() => {
         if (v.z <= 1) { v.z = 1; v.tx = 0; v.ty = 0; }
         v.fit.style.transform = v.z === 1 ? '' : `translate(${v.tx}px, ${v.ty}px) scale(${v.z})`;
         v.fit.style.transformOrigin = '0 0';
+        // On the fit box, not the <img>: the marker canvas is a sibling inside
+        // it and must NOT be filtered, or green markers dim with the frame.
+        const img = v.fit.querySelector('.op-cam-img');
+        if (img) {
+            img.style.filter = (v.contrast === 1 && v.brightness === 1)
+                ? '' : `contrast(${v.contrast}) brightness(${v.brightness})`;
+        }
         v.box.style.cursor = v.z > 1 ? 'grab' : '';
         badge(v);
     }
@@ -134,7 +187,12 @@ const ImageView = (() => {
         return v ? v.z : 1;
     }
 
-    return { attach, reset, zoomOf, MIN_Z, MAX_Z, WHEEL_STEP, _clamp: clamp };
+    function displayOf(containerId) {
+        const v = views.get(containerId);
+        return v ? { contrast: v.contrast, brightness: v.brightness } : null;
+    }
+
+    return { attach, reset, zoomOf, displayOf, MIN_Z, MAX_Z, WHEEL_STEP, _clamp: clamp };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = ImageView;
