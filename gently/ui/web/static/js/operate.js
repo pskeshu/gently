@@ -452,6 +452,70 @@ const OperateManager = (function () {
             fit.style.setProperty('--cam-ar', `${img.naturalWidth} / ${img.naturalHeight}`);
         }
     }
+    // ══ REACTIVE PREVIEW ════════════════════════════════════════════════════
+    // A routine that takes seconds and produces images has to show them where it
+    // was started. Calibrate used to be one blocking POST: the montage it builds
+    // was pushed to the viz server with nobody listening, so the only way to see
+    // what the sweep did was to decide, unprompted, to go and open the
+    // Calibration tab. The operator is watching the microscope, not hunting tabs.
+    //
+    // Presence-driven: it seats itself when images arrive and retires when they
+    // stop. There is deliberately no open or close control — an observer should
+    // be able to stand and watch without touching anything.
+    //
+    // RIG-NOTE: 45s is a guess at how long someone wants a finished sweep to stay
+    // readable before the pane goes quiet again. Tune it against real use; too
+    // short and the result vanishes mid-read, too long and a stale montage sits
+    // next to a live view.
+    const PREVIEW_IDLE_MS = 45000;
+    let _previewTimer = null;
+
+    function showPreview(title, meta, src) {
+        const fig = $('op-preview'), img = $('op-preview-img');
+        if (!fig || !img) return;
+        if (src) img.src = src;
+        const t = $('op-preview-title'), m = $('op-preview-meta');
+        if (t) t.textContent = title || '';
+        if (m) m.textContent = meta || '';
+        fig.hidden = false;
+        // Next frame, so the transition runs from the hidden state.
+        requestAnimationFrame(() => fig.classList.add('is-live'));
+        clearTimeout(_previewTimer);
+        _previewTimer = setTimeout(retirePreview, PREVIEW_IDLE_MS);
+    }
+
+    function retirePreview() {
+        const fig = $('op-preview');
+        clearTimeout(_previewTimer);
+        _previewTimer = null;
+        if (!fig || fig.hidden) return;
+        fig.classList.remove('is-live');
+        // Hide only after the fade, or it disappears with a jump.
+        setTimeout(() => { if (!fig.classList.contains('is-live')) fig.hidden = true; }, 300);
+    }
+
+    // Every image the server pushes lands here; we take the ones this pane is
+    // responsible for. Filtering on data_type rather than uid keeps a new routine
+    // one string away from having a preview.
+    const PREVIEW_KINDS = {
+        focus_montage: 'Focus sweep',
+    };
+
+    function onPushedImage(d) {
+        if (!d || !d.base64_png) return;
+        const title = PREVIEW_KINDS[d.data_type];
+        if (!title) return;
+        const md = d.metadata || {};
+        const bits = [];
+        if (md.pick) bits.push(`pick ${md.pick}`);
+        if (md.method) bits.push(md.method === 'vision' ? 'chosen by vision' : 'chosen by FFT');
+        if (Array.isArray(md.offsets) && md.offsets.length) {
+            bits.push(`${md.offsets.length} offsets, ${md.offsets[0]} to ${md.offsets[md.offsets.length - 1]} µm`);
+        }
+        if (md.reasoning) bits.push(String(md.reasoning));
+        showPreview(title, bits.join(' · '), `data:image/png;base64,${d.base64_png}`);
+    }
+
     function clearImg(imgId, phId, text) {
         const img = $(imgId), ph = $(phId);
         if (img) img.classList.remove('has-frame');
@@ -823,7 +887,13 @@ const OperateManager = (function () {
     async function calibrateSelected() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-calibrate'), out = $('op-cal-result');
-        if (b) { b.disabled = true; b.textContent = 'Calibrating…'; }
+        // A routine that runs for tens of seconds behind a disabled button is
+        // indistinguishable from one that has hung. Count out loud.
+        const t0 = Date.now();
+        const tick = setInterval(() => {
+            if (b) b.textContent = `Calibrating… ${Math.round((Date.now() - t0) / 1000)}s`;
+        }, 1000);
+        if (b) { b.disabled = true; b.textContent = 'Calibrating… 0s'; }
         if (out) out.textContent = 'sweeping…';
         try {
             const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, {});
@@ -837,7 +907,10 @@ const OperateManager = (function () {
         } catch (e) {
             if (out) out.textContent = 'failed';
             toastFail(`Calibrate failed (${e.status || e.message})`);
-        } finally { if (b) { b.disabled = false; b.textContent = 'Calibrate piezo–galvo'; } }
+        } finally {
+            clearInterval(tick);
+            if (b) { b.disabled = false; b.textContent = 'Calibrate'; }
+        }
     }
 
     function renderSpimTarget() {
@@ -1366,6 +1439,9 @@ const OperateManager = (function () {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
+            // Server-pushed stills (focus montages today). websocket.js emits
+            // this for every image; onPushedImage takes the kinds this pane owns.
+            ClientEventBus.on('IMAGE_RECEIVED', onPushedImage);
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
                 const pos = p && p.positions;
                 if (!pos) return;
