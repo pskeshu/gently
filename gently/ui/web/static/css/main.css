@@ -9611,12 +9611,6 @@ body.modal-open {
     dominant-baseline: middle;
 }
 /* Calm empty state — never shows mock data */
-.temp-graph-empty {
-    padding: 1rem 0;
-    text-align: center;
-    color: var(--map-ink-mute);
-    font-size: 0.78rem;
-}
 /* Last-sample readout above the SVG */
 .temp-graph-readout {
     font-size: 0.68rem;

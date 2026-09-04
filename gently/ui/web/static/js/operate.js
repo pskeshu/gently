@@ -93,7 +93,9 @@ const OperateManager = (function () {
     let _markers = [];
 
     // ── emitters / run ──────────────────────────────────────────────────────
-    let _ledOn = false, _acquiring = false;
+    let _acquiring = false;
+    // Read back from the Light panel's device read, never remembered here.
+    const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
     let _galvo = 0.0, _piezo = 50.0;
     let _mode = 'single';
     let _selectedLib = null;
@@ -922,24 +924,19 @@ const OperateManager = (function () {
         const el = $('op-pz'); if (el) el.textContent = _piezo.toFixed(0);
         postLsParams();
     }
-    async function toggleLed() {
-        _ledOn = !_ledOn;
-        applyLed();
-        try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
-        catch (e) { toastFail(`LED failed (${why(e)})`); }
-    }
-    function applyLed() {
-        const b = $('op-led');
-        if (b) {
-            b.setAttribute('aria-pressed', _ledOn ? 'true' : 'false');
-            b.classList.toggle('is-emitting', _ledOn);
-        }
-        renderSubnavMeta();
-    }
+    // The LED has ONE control, in the Light panel. There used to be a second
+    // button here with its own `_ledOn` belief, and the two did not talk: the
+    // Light panel went on reporting the LED as it had last read it while this
+    // button had already changed it. Two renderings of one fact — PANELS.md
+    // rule 1, and reported from the rig.
+    //
+    // Nothing here remembers the LED any more; the panel reads it from the
+    // device and this asks the panel. Programmatic close still lives here
+    // because pane exit and end-of-acquisition are operate.js's business.
     async function forceLedOff() {
-        if (!_ledOn) return;
-        _ledOn = false; applyLed();
         try { await postJSON('/api/devices/led/set', { state: 'Closed' }); } catch (_) {}
+        if (typeof LightPanel !== 'undefined') { try { await LightPanel.refresh(); } catch (_) {} }
+        renderSubnavMeta();
     }
 
     async function calibrateSelected() {
@@ -1353,7 +1350,7 @@ const OperateManager = (function () {
         const bits = [];
         if (_bottomOn) bits.push('BOTTOM ● LIVE');
         if (_spimOn) bits.push('SPIM ● LIVE');
-        if (_ledOn) bits.push('LED EMITTING');
+        if (ledIsOpen()) bits.push('LED EMITTING');
         if (_acquiring) bits.push('LASER EMITTING');
         el.textContent = bits.join('  ·  ');
     }
@@ -1364,19 +1361,11 @@ const OperateManager = (function () {
         // frame behind whatever is on screen and races for stream ownership.
         if (!_active || _pane !== 'bottom' || !p || !p.jpeg_b64) return;
         _lastBottom = p;
-        if (p.focus_score != null) {
-            const el = $('op-bz-score');
-            if (el) el.textContent = Number(p.focus_score).toFixed(3);
-        }
         setImg('op-img-bottom', 'op-ph-bottom', p);
         drawMarkers();
     }
     function onSpimFrame(p) {
         if (!_active || _pane !== 'spim' || !p || !p.jpeg_b64) return;
-        if (p.focus_score != null) {
-            const el = $('op-spim-score');
-            if (el) el.textContent = Number(p.focus_score).toFixed(3);
-        }
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
@@ -1445,7 +1434,6 @@ const OperateManager = (function () {
         }
 
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
-        const led = $('op-led'); if (led) led.addEventListener('click', toggleLed);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
         document.querySelectorAll('[data-gv]').forEach(b =>
             b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));

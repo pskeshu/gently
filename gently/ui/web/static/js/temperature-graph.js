@@ -53,14 +53,21 @@ const TemperatureGraph = (() => {
         render();
     }
 
+    // Presence-driven (docs/architecture/PANELS.md rule 6). This used to render
+    // "No temperature data yet" — a permanent label reporting that nothing had
+    // happened, charging the operator ~60 px of vertical space for it. On a
+    // 1080p screen that pushed the Light and Marking panels below a scrollbar,
+    // reported from the rig. A section with nothing to say takes no room.
     function renderEmpty() {
         if (!_root) return;
-        _root.innerHTML = '<div class="temp-graph-empty">No temperature data yet</div>';
+        _root.innerHTML = '';
+        _root.hidden = true;
     }
 
     function render() {
         if (!_root) return;
         if (!_samples.length) { renderEmpty(); return; }
+        _root.hidden = false;
 
         const W = _root.clientWidth || 480;
         const H = 160;
