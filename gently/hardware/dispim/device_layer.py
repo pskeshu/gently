@@ -2443,6 +2443,67 @@ class DeviceLayerServer(Service):
                 out[side] = None
         return out
 
+    async def handle_get_properties(self, request):
+        """GET /api/properties?device=<label> — every property of one device.
+
+        Read-only, and the read is the point: it asks the hardware what it says
+        about itself, rather than what this codebase happens to model. Gently
+        knows four properties on the Coherent Scientific Remote — the per-line
+        `PowerSetpoint (%)` — because those are the ones it writes. The adapter
+        exposes many more, and among them are the ones that answer whether a
+        laser is actually emitting: enable state, interlock, faults, power
+        readback.
+
+        That matters when nobody can look at the instrument. A camera can only
+        report photons that reach it, which needs the specimen in focus; the
+        controller can report its own state regardless.
+
+        With no `device`, lists the loaded device labels.
+        """
+        try:
+            label = request.query.get("device")
+            core = None
+            for dev in self.devices.values():
+                core = getattr(dev, "core", None)
+                if core is not None:
+                    break
+            if core is None:
+                return web.json_response(
+                    {"success": False, "error": "no core available"}, status=503
+                )
+
+            if not label:
+                return web.json_response(
+                    {"success": True, "devices": sorted(core.getLoadedDevices())}
+                )
+
+            if label not in set(core.getLoadedDevices()):
+                return web.json_response(
+                    {"success": False, "error": f"unknown device {label!r}"}, status=404
+                )
+
+            props = {}
+            for name in core.getDevicePropertyNames(label):
+                try:
+                    entry: dict[str, Any] = {"value": core.getProperty(label, name)}
+                    # Allowed values turn an opaque string into a state machine
+                    # you can reason about; read-only marks what is a readback
+                    # rather than a setting, which is exactly the distinction
+                    # being chased here.
+                    allowed = list(core.getAllowedPropertyValues(label, name))
+                    if allowed:
+                        entry["allowed"] = allowed
+                    if core.isPropertyReadOnly(label, name):
+                        entry["read_only"] = True
+                    props[name] = entry
+                except Exception as exc:
+                    props[name] = {"error": str(exc)}
+
+            return web.json_response({"success": True, "device": label, "properties": props})
+        except Exception as exc:
+            logger.exception("[properties] read failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
     async def handle_get_beam(self, request):
         """GET /api/scanner/beam — is the beam armed, per side, from hardware."""
         try:
@@ -3833,6 +3894,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
+        self._app.router.add_get("/api/properties", self.handle_get_properties)
         self._app.router.add_get("/api/scanner/beam", self.handle_get_beam)
         self._app.router.add_post("/api/scanner/beam", self.handle_set_beam)
         self._app.router.add_post("/api/laser/config", self.handle_set_laser_config)

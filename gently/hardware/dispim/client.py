@@ -819,6 +819,16 @@ class DiSPIMMicroscope(Microscope):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def get_properties(self, device: str | None = None) -> dict:
+        """Every property of one Micro-Manager device, or the device list.
+
+        Read-only. Asks the hardware what it reports about itself rather than
+        what this codebase models — the difference that matters when no one can
+        look at the instrument.
+        """
+        suffix = f"?device={device}" if device else ""
+        return await self._api_get(f"/api/properties{suffix}")
+
     async def get_beam(self) -> dict:
         """Read whether the beam is armed, per side, from the hardware.
 
