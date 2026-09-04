@@ -833,3 +833,25 @@
     font-weight: 500;
     letter-spacing: 0;
 }
+
+/* ── ImageView ────────────────────────────────────────────────────────────
+   Zoom/pan badge for static/js/panels/imageview.js. The transform itself is
+   set inline by the module; only the readout is styled here.
+   `.op-cam` is already `overflow: hidden`, which is what clips a panned frame
+   instead of letting it push the layout around. */
+.iv-badge {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.68rem;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+
+/* The badge is absolutely positioned against the camera box, which needs to be
+   a containing block for it. */
+.op-cam { position: relative; }

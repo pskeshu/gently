@@ -1259,6 +1259,16 @@ const OperateManager = (function () {
 
     // The Light panel is shared, so Operate only says where to draw it — see
     // docs/architecture/PANELS.md. Mounted once; SharedState keeps it current.
+    // Zoom/pan on the camera surfaces. Attached once each; the transform is
+    // view state, not instrument state, so it stays local rather than going
+    // into SharedState — two people looking at one scope still want their own
+    // magnification.
+    function attachImageViews() {
+        if (typeof ImageView === 'undefined') return;
+        ImageView.attach('op-cam-bottom');
+        ImageView.attach('op-cam-spim');
+    }
+
     let _lightMounted = false;
     function mountLightPanel() {
         if (_lightMounted || typeof LightPanel === 'undefined') return;
@@ -1499,9 +1509,14 @@ const OperateManager = (function () {
 
     async function activate() {
         wire();
+        // Here rather than in showPane: showPane early-returns when the pane has
+        // not changed, and 'bottom' is the pane we start on, so the initial
+        // surface would never get its zoom.
+        attachImageViews();
         if (_active) return;
         _active = true;
         showPaneInitial();
+        if (_pane === 'spim') mountLightPanel();
         try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) {}
         await Promise.all([bz.refresh(), fd.refresh()]);
         renderLock();
