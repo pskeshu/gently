@@ -37,9 +37,10 @@ def test_missing_module_is_named_with_its_fix(tmp_path) -> None:  # noqa: ANN001
     ckpt = tmp_path / "sam_vit_b_01ec64.pth"
     ckpt.write_bytes(b"not a real checkpoint")
 
-    with patch("importlib.util.find_spec", return_value=None):
-        line = readiness(_Stub(str(ckpt)))
+    with patch("gently.hardware.dispim.device_layer.find_spec", return_value=None):
+        line, ok = readiness(_Stub(str(ckpt)))
 
+    assert ok is False
     assert "UNAVAILABLE" in line
     assert "segment-anything not installed" in line
     # The remedy belongs in the message; the operator is at a microscope, not
@@ -50,9 +51,10 @@ def test_missing_module_is_named_with_its_fix(tmp_path) -> None:  # noqa: ANN001
 def test_missing_checkpoint_is_named_with_its_path(tmp_path) -> None:  # noqa: ANN001
     absent = tmp_path / "nope.pth"
 
-    with patch("importlib.util.find_spec", return_value=object()):
-        line = readiness(_Stub(str(absent)))
+    with patch("gently.hardware.dispim.device_layer.find_spec", return_value=object()):
+        line, ok = readiness(_Stub(str(absent)))
 
+    assert ok is False
     assert "UNAVAILABLE" in line
     assert "checkpoint not found" in line
     assert str(absent) in line
@@ -61,8 +63,8 @@ def test_missing_checkpoint_is_named_with_its_path(tmp_path) -> None:  # noqa: A
 
 def test_both_missing_are_reported_together(tmp_path) -> None:  # noqa: ANN001
     """One restart should reveal every reason, not the first one only."""
-    with patch("importlib.util.find_spec", return_value=None):
-        line = readiness(_Stub(str(tmp_path / "nope.pth")))
+    with patch("gently.hardware.dispim.device_layer.find_spec", return_value=None):
+        line, ok = readiness(_Stub(str(tmp_path / "nope.pth")))
 
     assert "segment-anything not installed" in line
     assert "checkpoint not found" in line
@@ -72,10 +74,11 @@ def test_a_working_install_still_reads_normally(tmp_path) -> None:  # noqa: ANN0
     ckpt = tmp_path / "sam_vit_b_01ec64.pth"
     ckpt.write_bytes(b"not a real checkpoint")
 
-    with patch("importlib.util.find_spec", return_value=object()):
-        line = readiness(_Stub(str(ckpt)))
+    with patch("gently.hardware.dispim.device_layer.find_spec", return_value=object()):
+        line, ok = readiness(_Stub(str(ckpt)))
 
     assert line == "SAM on cuda (loads on first use)"
+    assert ok is True
     assert "UNAVAILABLE" not in line
 
 

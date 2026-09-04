@@ -578,15 +578,7 @@
                          instrument column, which is for the hardware axes. -->
                     <div class="op-bar">
                       <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
-                      <span class="op-bar-r">
-                        <span class="op-label">Marked</span>
-                        <b class="op-num" id="op-mark-count">0</b>
-                        <button class="op-btn op-btn-primary" id="op-detect" type="button">Detect automatically</button>
-                        <button class="op-btn" id="op-confirm" type="button" disabled>Register</button>
-                        <button class="op-btn op-btn-ghost" id="op-clear" type="button" disabled>Clear</button>
-                      </span>
                     </div>
-                    <p class="op-cap" id="op-detect-note"></p>
                   </div>
 
                   <aside class="op-inst">
@@ -595,7 +587,14 @@
                       <button class="op-btn op-btn-toggle" id="op-cam-toggle" type="button">Start camera</button>
                       <div class="op-row"><span class="op-label">Focus score</span>
                         <span class="op-num" id="op-bz-score">—</span></div>
+                      <!-- Exposure joins the block that already names this
+                           camera, rather than opening a second one about it. -->
+                      <div id="op-cam-panel-bottom"></div>
                     </div>
+
+                    <!-- Shared panel (docs/architecture/PANELS.md); the module
+                         owns its markup. -->
+                    <div class="op-block" id="op-marking-host"></div>
 
                     <div class="op-gauge" id="op-gauge-bz" data-status="unknown">
                       <div class="op-gauge-head">
@@ -662,7 +661,14 @@
                       </div>
                       <div class="op-row"><span class="op-label">Focus score</span>
                         <span class="op-num" id="op-spim-score">—</span></div>
+                      <div id="op-cam-panel-spim"></div>
                     </div>
+
+                    <!-- The shared Light panel (docs/architecture/PANELS.md).
+                         Empty on purpose: panels/light.js owns the markup, so
+                         the bottom camera and the calibration tab mount the
+                         same one rather than copying it. -->
+                    <div class="op-block" id="op-light-host"></div>
 
                     <div class="op-gauge" id="op-gauge-fd" data-status="unknown">
                       <div class="op-gauge-head">
@@ -1424,6 +1430,10 @@
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate-math.js"></script>
+    <script src="/static/js/panels/imageview.js"></script>
+    <script src="/static/js/panels/camera.js"></script>
+    <script src="/static/js/panels/marking.js"></script>
+    <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/device-layer.js"></script>
     <script src="/static/js/boot-banner.js"></script>

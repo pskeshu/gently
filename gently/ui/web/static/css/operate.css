@@ -722,3 +722,249 @@
     .op-body { flex-direction: column; }
     .op-embryos { flex: 0 0 auto; max-height: 148px; }
 }
+
+/* ── Light panel ──────────────────────────────────────────────────────────
+   Styles for the shared panel in static/js/panels/light.js. They live here
+   rather than in the module because the app has no bundler and CSS-in-JS
+   would be the only instance of it. Prefixed `lp-` so a second mount site
+   cannot collide. See docs/architecture/PANELS.md. */
+.lp {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lp-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+
+.lp-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* Staleness is load-bearing: these are read-back values, and a number with no
+   age is indistinguishable from a remembered one. */
+.lp-age {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.lp-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+}
+
+.lp-label {
+    flex: 0 0 62px;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+.lp-val {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.74rem;
+    color: var(--text);
+    min-width: 54px;
+}
+
+.lp-lim {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.lp-range { flex: 1 1 auto; min-width: 60px; }
+.lp-select,
+.lp-num {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.74rem;
+    padding: 2px 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.lp-num { flex: 0 0 70px; }
+
+.lp-btn {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+}
+
+/* Armed is a hazard, not a preference — it reads as one. */
+.lp-btn.is-armed {
+    border-color: var(--accent-red, #ef4444);
+    color: var(--accent-red, #ef4444);
+    font-weight: 600;
+}
+
+/* Presence-driven (PANELS.md rule 6): present only while light is actually
+   coming out, and derived from read-back state, never from a flag. */
+.lp-emit {
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: var(--accent-red, #ef4444);
+}
+
+/* "I do not know" must not look like "no". */
+.lp-emit-unknown {
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px dashed var(--border);
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+/* ── ImageView ────────────────────────────────────────────────────────────
+   Zoom/pan badge for static/js/panels/imageview.js. The transform itself is
+   set inline by the module; only the readout is styled here.
+   `.op-cam` is already `overflow: hidden`, which is what clips a panned frame
+   instead of letting it push the layout around. */
+.iv-badge {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.68rem;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+
+/* The badge is absolutely positioned against the camera box, which needs to be
+   a containing block for it. */
+.op-cam { position: relative; }
+
+/* Contrast/brightness strip — fades in on hover or keyboard focus. The
+   video-player idiom: discoverable, nothing to open or close, and gone while
+   you are just watching the frame. */
+.iv-bar {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+}
+
+.op-cam:hover .iv-bar,
+.iv-bar:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .iv-bar { transition: none; }
+}
+
+.iv-ctl {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.66rem;
+    color: #fff;
+}
+
+.iv-ctl input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 40px;
+    accent-color: #fff;
+}
+
+.iv-reset {
+    flex: 0 0 auto;
+    font-size: 0.64rem;
+    padding: 1px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 3px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+}
+
+/* The zoom badge shares the corner with the strip; lift it clear on hover. */
+.op-cam:hover .iv-badge { bottom: 34px; }
+
+/* ── Marking panel ────────────────────────────────────────────────────────
+   Two counts side by side, because they are two different facts and showing
+   one number for both is the #113 defect. */
+.mk-counts {
+    display: flex;
+    gap: 14px;
+    margin: 2px 0 6px;
+}
+
+.mk-count {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.mk-n {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+.mk-cap {
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.mk-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.mk-acts .lp-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* Elapsed time, so a slow SAM load is distinguishable from a hang. */
+.mk-busy {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.68rem;
+    color: var(--accent, #3b82f6);
+}
+
+.mk-note {
+    margin: 6px 0 0;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+}

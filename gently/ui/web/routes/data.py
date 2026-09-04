@@ -820,6 +820,129 @@ def create_router(server) -> APIRouter:
             logger.exception("Laser off command failed")
             raise HTTPException(status_code=502, detail=f"laser off failed: {exc}") from exc
 
+    @router.get("/api/devices/beam")
+    async def beam_get():
+        """Is the beam armed, per side? Read from hardware. Read-only route."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_beam()
+        except Exception as exc:
+            logger.exception("Beam read failed")
+            raise HTTPException(status_code=502, detail=f"beam read failed: {exc}") from exc
+
+    @router.post("/api/devices/beam", dependencies=[Depends(require_control)])
+    async def beam_set(payload: dict = Body(...)):  # noqa: B008
+        """Arm or disarm the beam. Body: {"enabled": bool, "side"?: "a"|"b"|"both"}.
+
+        Never called implicitly. Ryan, on the 2026-08-07 walkthrough: "I would
+        probably not turn the laser on. Typically I leave the laser off in
+        Micro-Manager until I'm ready to do this stuff." Arming is an act the
+        operator performs, not a side effect of asking for something else.
+        """
+        if "enabled" not in payload:
+            raise HTTPException(status_code=400, detail="enabled (bool) required")
+        side = str(payload.get("side", "both")).lower()
+        if side not in ("a", "b", "both"):
+            raise HTTPException(status_code=400, detail="side must be a, b or both")
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_beam(bool(payload["enabled"]), side)
+        except Exception as exc:
+            logger.exception("Beam set failed")
+            raise HTTPException(status_code=502, detail=f"beam failed: {exc}") from exc
+
+    @router.get("/api/devices/laser/limits")
+    async def laser_limits():
+        """Per-wavelength hard power bounds, so the UI cannot offer an illegal one.
+
+        Read straight off ``DiSPIMLightSource.POWER_LIMITS_PCT`` — a class
+        constant, no hardware needed, which is why this answers even with the
+        device layer down. The panel needs it before it can render a control:
+        488 is limited to 2.0-6.0%, and a control hardcoded 0-100 in JS would
+        invite a setting the device layer refuses (rule 4 in
+        docs/architecture/PANELS.md).
+        """
+        from gently.hardware.dispim.devices.optical import DiSPIMLightSource
+
+        return {
+            "success": True,
+            "limits": {
+                str(wl): {"min": lo, "max": hi}
+                for wl, (lo, hi) in DiSPIMLightSource.POWER_LIMITS_PCT.items()
+            },
+        }
+
+    @router.get("/api/devices/laser/power")
+    async def laser_power_get(wavelength: int = 488):
+        """Read the per-line laser power %. Read-only, so no require_control."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_laser_power(int(wavelength))
+        except Exception as exc:
+            logger.exception("Laser power read failed")
+            raise HTTPException(status_code=502, detail=f"laser power read failed: {exc}") from exc
+
+    @router.post("/api/devices/laser/power", dependencies=[Depends(require_control)])
+    async def laser_power_set(payload: dict = Body(...)):  # noqa: B008
+        """Set per-line laser power %. Body: {"wavelength": int, "pct": float}.
+
+        The hard bound lives in the device layer and cannot be bypassed here;
+        an out-of-range value comes back from it as an error, which this
+        forwards rather than silently clamping. Clamping would report success
+        for a setting the operator did not get.
+        """
+        try:
+            wavelength = int(payload.get("wavelength", 488))
+            pct = float(payload["pct"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="wavelength (int) and pct (float) required"
+            ) from exc
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_laser_power(wavelength, pct)
+        except Exception as exc:
+            logger.exception("Laser power set failed")
+            raise HTTPException(status_code=502, detail=f"laser power failed: {exc}") from exc
+
+    @router.get("/api/devices/camera/exposure")
+    async def camera_exposure_get():
+        """Read the bottom-camera exposure (ms). Read-only, so no require_control."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_bottom_camera_exposure()
+        except Exception as exc:
+            logger.exception("Camera exposure read failed")
+            raise HTTPException(status_code=502, detail=f"exposure read failed: {exc}") from exc
+
+    @router.post("/api/devices/camera/exposure", dependencies=[Depends(require_control)])
+    async def camera_exposure_set(payload: dict = Body(...)):  # noqa: B008
+        """Set the bottom-camera exposure. Body: {"exposure_ms": float}."""
+        try:
+            exposure_ms = float(payload["exposure_ms"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="exposure_ms (float) required") from exc
+        if not (0 < exposure_ms <= 10000):
+            raise HTTPException(status_code=400, detail="exposure_ms must be in (0, 10000]")
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_bottom_camera_exposure(exposure_ms)
+        except Exception as exc:
+            logger.exception("Camera exposure set failed")
+            raise HTTPException(status_code=502, detail=f"exposure failed: {exc}") from exc
+
     @router.get("/api/devices/laser/configs")
     async def laser_configs():
         """Return the available Laser config-group presets from the device layer.
