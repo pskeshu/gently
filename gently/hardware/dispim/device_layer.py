@@ -3877,12 +3877,40 @@ class DeviceLayerServer(Service):
         for label, names in self._categorize_devices():
             if names:
                 cui.sub(label, _fmt(names))
-        cui.row("Detection", f"SAM on {self._sam_device} (loads on first use)")
+        cui.row("Detection", self._sam_readiness())
         cui.row("Plans", f"{len(self.plans)} available")
         cui.rule(heavy=False)
         cui.note("Waiting for the agent to connect.  Press Ctrl+C to stop.")
         cui.rule(heavy=True)
         cui.out()
+
+    def _sam_readiness(self) -> str:
+        """What the banner may honestly claim about detection.
+
+        This line used to read "SAM on cuda (loads on first use)" whether or not
+        `segment_anything` was installed or the checkpoint was on disk. Both are
+        lazy, so the truth surfaced on the first Detect — mid-workflow, at the
+        microscope, with a sample already positioned, as
+        `ModuleNotFoundError: No module named 'segment_anything'` buried in a
+        device-layer traceback while the browser showed a bare 502.
+
+        A bare `uv sync` uninstalls the `sam` extra, so this is not an exotic
+        state; it is one forgotten flag away at all times. Boot is the cheap
+        place to find out. `find_spec` does not import the module, so this costs
+        nothing and does not drag torch in early.
+        """
+        from importlib.util import find_spec
+        from pathlib import Path
+
+        missing = []
+        if find_spec("segment_anything") is None:
+            missing.append("segment-anything not installed (uv sync --extra sam)")
+        if not Path(self._sam_checkpoint).exists():
+            missing.append(f"checkpoint not found: {self._sam_checkpoint}")
+
+        if missing:
+            return cui.c("UNAVAILABLE" + cui.MIDDOT + cui.MIDDOT.join(missing), "red")
+        return f"SAM on {self._sam_device} (loads on first use)"
 
     async def on_stop(self):
         """Shut down the HTTP server and plan executor."""
