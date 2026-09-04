@@ -13,14 +13,16 @@
  * "Everything exists" is not a change we have to make, it is already true. We
  * are deleting the hiding.
  *
- * OFF BY DEFAULT. Enable with ?atrium=1, disable with ?atrium=0; the choice
- * sticks in localStorage. With it off this file registers nothing and the
+ * OFF BY DEFAULT, and it does not stick. Enable with ?atrium=1 for that page
+ * load; anything else is off. With it off this file registers nothing and the
  * tabbed UI is untouched.
  */
 const Atrium = (() => {
     'use strict';
 
+    // Retained only to clear what older builds latched — see wanted().
     const FLAG_KEY = 'gently.atrium.enabled';
+    try { localStorage.removeItem(FLAG_KEY); } catch (_) {}
     const SAVE_KEY = 'gently.atrium.layout.v1';
 
     /* ── CONFIG — the whole surface is described here (SPEC R9) ─────── */
@@ -792,7 +794,6 @@ const Atrium = (() => {
         setDensity(CONFIG.density);
         restore();
         goHome(false);
-        try { localStorage.setItem(FLAG_KEY, '1'); } catch (_) {}
         console.info('[atrium] on —', wins.size, 'windows adopted. ?atrium=0 to leave.');
     }
 
@@ -809,8 +810,8 @@ const Atrium = (() => {
 
     function disable() {
         legacyChrome().forEach(el => el.removeAttribute('inert'));
-        try { localStorage.setItem(FLAG_KEY, '0'); } catch (_) {}
-        location.href = location.pathname + '?atrium=0';
+        // Leaving means leaving the flag behind, not recording a preference.
+        location.href = location.pathname;
     }
 
     function onKey(e) {
@@ -845,11 +846,21 @@ const Atrium = (() => {
         if (best) attend(best.dataset.tab);
     }
 
+    /**
+     * The flag is the URL, and only the URL.
+     *
+     * It used to persist: `enable()` wrote '1' to localStorage, so a single
+     * visit to `?atrium=1` turned the Atrium on permanently, on that browser,
+     * for every later visit — including plain `/`. An experimental surface
+     * that latches after one look is the same trap as #133, where the agent
+     * panel's "open by default" was defeated permanently by one close.
+     *
+     * Off unless this page load asked for it. Nothing to discover and undo
+     * later, and no way to hand someone a machine that opens into a viewer
+     * they did not choose.
+     */
     function wanted() {
-        const q = new URLSearchParams(location.search).get('atrium');
-        if (q === '1') return true;
-        if (q === '0') return false;
-        try { return localStorage.getItem(FLAG_KEY) === '1'; } catch (_) { return false; }
+        return new URLSearchParams(location.search).get('atrium') === '1';
     }
 
     function init() {

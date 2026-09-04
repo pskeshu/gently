@@ -60,6 +60,62 @@ instance.
 Markup, styles and behaviour ship together and mount into a host element, so
 adding it to a new surface is one call rather than a copy-paste of markup.
 
+## Design language
+
+A panel has to be recognisable as one. An operator scanning the screen for a
+control should not have to work out where one grouping ends and the next
+begins, and a panel that dissolves into the background is a panel they will not
+find under pressure.
+
+### Anatomy
+
+**A card.** Standalone panels sit in `.op-block`: 1px border, 6px radius, panel
+background, consistent padding. Same card as the instrument rail already uses —
+one panel look in the app, not a second one that nearly matches.
+
+**A heading.** Small, uppercase, letter-spaced, naming the subject. `.lp-title`
+shares the `.op-block-head` rule rather than defining its own.
+
+**Rows.** `label — control — value`. Labels are fixed-width and muted so the
+values line up down the panel. Values are monospace and tabular, because they
+are read by comparison between glances.
+
+**An em dash for unknown.** Never a plausible default (rule 3). `—` is a
+statement.
+
+**Red only for hazards**, and only when derived from read-back state (rule 5).
+
+### Composition
+
+A panel mounted **standalone** draws its own card and heading. A panel composed
+**into an existing card** draws neither — `CameraPanel.mount(host, {titled:
+false})` puts exposure inside the block that already names the camera. Two
+borders around one subject, or two headings for one device, is the same
+duplication as two controls for one LED, just quieter.
+
+### Placement
+
+**Panels go where the thing they act on is.** Marking sits under the frame it
+marks, not out in the instrument rail — the marks are on that image. Light and
+Camera sit in the rail beside the surface they drive. The main column is for
+the specimen and the work; the rail is for the state of the instrument.
+
+Group by subject, not by widget type. Everything about illumination is in one
+panel; exposure is with its camera and not with the light.
+
+### Overflow
+
+The rail scrolls, and must show that it does. `scrollbar-gutter: stable` keeps
+a scrollbar appearing from reflowing the rail, and the scrollbar is the signal
+that there is more below.
+
+**Nothing may claim vertical space to say nothing.** The temperature strip
+rendered "No temperature data yet" permanently and cost ~60px, which pushed
+real panels below the fold; it is hidden until a sample arrives. A widget that
+occupies the screen while reporting that nothing has happened is taking space
+from one that has something to say — this is rule 6 read as a layout
+constraint.
+
 ## Status
 
 | Panel | Subject | Mounted in | Notes |
