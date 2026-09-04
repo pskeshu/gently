@@ -179,6 +179,15 @@
 
 .op-main {
     grid-column: 1;
+    /* Row 2 EXPLICITLY. The lock banner is `hidden` most of the time, and a
+       hidden element generates no box, so auto-placement used to drop this and
+       the rail into row 1 — the `auto` row — leaving the `1fr` row empty. The
+       whole pane then sized to its content: the camera rendered 163 px tall in
+       a 464 px pane, with 324 px of dead space beside a 163 px image.
+       Worse, it changed with interlock state, because when the banner IS shown
+       it fills row 1 and pushes these into row 2. The frame was one size with
+       the sample at the objective and another without. */
+    grid-row: 2;
     min-width: 0;
     min-height: 0;
     display: flex;
@@ -187,12 +196,25 @@
 }
 .op-inst {
     grid-column: 2;
+    grid-row: 2;
     min-height: 0;
     display: flex;
     flex-direction: column;
     gap: var(--op-2);
     overflow-y: auto;
     padding-right: var(--op-1);
+    /* A panel silently clipped is a panel that does not exist. The gutter is
+       reserved so a scrollbar appearing cannot reflow the rail, and the
+       scrollbar itself is the honest signal that there is more below. A fade
+       was tried and dropped: CSS cannot tell whether the rail actually
+       overflows, so a permanent fade makes the last panel look cut off when
+       everything already fits. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+@supports not (scrollbar-gutter: stable) {
+    .op-inst { padding-right: calc(var(--op-1) + 6px); }
 }
 
 /* ── the XY interlock banner ────────────────────────────────────────────────
@@ -201,6 +223,7 @@
    header abstraction. */
 .op-lock {
     grid-column: 1 / -1;
+    grid-row: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -397,14 +420,15 @@
     flex-direction: column;
     gap: var(--op-2);
 }
-.op-block-head, .op-gauge-name, .op-label {
+.op-block-head, .op-gauge-name, .op-label,
+.lp-title, .lp-label {
     font-size: 0.62rem;
     font-weight: 600;
     letter-spacing: 0.10em;
     text-transform: uppercase;
     color: var(--op-ink-dim);
 }
-.op-block-head { color: var(--op-ink); }
+.op-block-head, .lp-title { color: var(--op-ink); }
 
 .op-row {
     display: flex;
@@ -741,13 +765,8 @@
     margin-bottom: 2px;
 }
 
-.lp-title {
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
+/* .lp-title / .lp-label share the block heading rule above — one panel
+   heading style in the app, not two that nearly match. */
 
 /* Staleness is load-bearing: these are read-back values, and a number with no
    age is indistinguishable from a remembered one. */
@@ -763,11 +782,7 @@
     min-height: 26px;
 }
 
-.lp-label {
-    flex: 0 0 62px;
-    font-size: 0.74rem;
-    color: var(--text-muted);
-}
+.lp-label { flex: 0 0 62px; }
 
 .lp-val {
     font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
@@ -1016,4 +1031,25 @@
     font-size: 0.7rem;
     line-height: 1.35;
     color: var(--text-muted);
+}
+
+/* Marking sits under the frame as a full-width card, so it reads across rather
+   than down: counts on the left, verbs on the right, note beneath. It uses the
+   same .op-block card as the instrument rail — one panel look, not two. */
+.op-block-marking .lp {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 4px 18px;
+}
+
+.op-block-marking .lp-head { grid-column: 1 / -1; }
+
+.op-block-marking .mk-counts { margin: 0; }
+
+.op-block-marking .mk-acts { justify-content: flex-end; }
+
+.op-block-marking .mk-note {
+    grid-column: 1 / -1;
+    margin: 0;
 }
