@@ -726,9 +726,38 @@ const OperateManager = (function () {
         const c = $('op-mark-count'); if (c) c.textContent = n;
         const ok = $('op-confirm'); if (ok) ok.disabled = n === 0;
         const cl = $('op-clear'); if (cl) cl.disabled = n === 0;
+        publishMarking();
     }
     function setDetectNote(text) {
         const note = $('op-detect-note'); if (note) note.textContent = text || '';
+        _markNote = text || '';
+        publishMarking();
+    }
+
+    // ── marking state, for panels/marking.js ────────────────────────────────
+    // Pending marks and a registered roster are DIFFERENT counts. Conflating
+    // them is why Register and Clear sat greyed out reading "MARKED 0" while
+    // the caption said "Registered 4 embryos", with no way to act on the
+    // roster that existed (#113).
+    let _markNote = '';
+    let _detecting = false;
+    let _detectStartedAt = 0;
+
+    function publishMarking() {
+        SharedState.set('marking', {
+            marked: _markers.length,
+            registered: _embryos.length,
+            detecting: _detecting,
+            startedAt: _detectStartedAt,
+            note: _markNote,
+        });
+    }
+
+    function clearMarks() {
+        _markers = [];
+        drawMarkers();
+        renderMarkCount();
+        setDetectNote('');
     }
 
     // ══ BOTTOM PANE ═════════════════════════════════════════════════════════
@@ -758,8 +787,10 @@ const OperateManager = (function () {
     async function runDetect() {
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
+        _detecting = true;
+        _detectStartedAt = Date.now();
+        publishMarking();
         const busy = $('op-busy-bottom'); if (busy) busy.hidden = false;
-        const note = $('op-detect-note');
         // Detect on the frame already on screen when there is one — the operator
         // is looking at it, and re-capturing would disturb the LED/room light.
         const shown = $('op-img-bottom');
@@ -803,17 +834,19 @@ const OperateManager = (function () {
                 added++;
             });
             drawMarkers(); renderMarkCount();
-            if (note) note.textContent = `${added} candidate${added === 1 ? '' : 's'} added — edit them on the image, then register.`;
+            setDetectNote(`${added} candidate${added === 1 ? '' : 's'} added — edit them on the image, then register.`);
             toast(`Detected ${added} candidate${added === 1 ? '' : 's'}`);
         } catch (e) {
             if (e.status === 503) {
-                if (note) note.textContent = 'Automatic detection is unavailable on this rig — mark by clicking the image.';
+                setDetectNote('Automatic detection is unavailable on this rig — mark by clicking the image.');
             } else {
                 toastFail(`Detect failed (${why(e)})`);
             }
         } finally {
             if (b) { b.disabled = false; b.textContent = 'Detect automatically'; }
             if (busy) busy.hidden = true;
+            _detecting = false;
+            publishMarking();
         }
     }
 
@@ -1277,6 +1310,23 @@ const OperateManager = (function () {
         LightPanel.mount('op-light-host');
     }
 
+    let _panelsMounted = false;
+    function mountPanels() {
+        if (_panelsMounted) return;
+        _panelsMounted = true;
+        if (typeof MarkingPanel !== 'undefined' && $('op-marking-host')) {
+            MarkingPanel.mount('op-marking-host');
+        }
+        if (typeof CameraPanel !== 'undefined') {
+            if ($('op-cam-panel-bottom')) {
+                CameraPanel.mount('op-cam-panel-bottom', { camera: 'bottom', titled: false });
+            }
+            if ($('op-cam-panel-spim')) {
+                CameraPanel.mount('op-cam-panel-spim', { camera: 'spim', titled: false });
+            }
+        }
+    }
+
     function showPane(name) {
         if (!PANES[name] || name === _pane) return;
         const prev = _pane;
@@ -1345,6 +1395,7 @@ const OperateManager = (function () {
         // so switching to it (or refreshing) shows the list immediately rather
         // than waiting for the next mutation event.
         renderEmbryoRail();
+        publishMarking();
         if (!_active) return;
         renderRoster(); renderSpimTarget(); renderSingle();
     }
@@ -1373,7 +1424,7 @@ const OperateManager = (function () {
         const det = $('op-detect'); if (det) det.addEventListener('click', runDetect);
         const ok = $('op-confirm'); if (ok) ok.addEventListener('click', confirmMarks);
         const cl = $('op-clear');
-        if (cl) cl.addEventListener('click', () => { _markers = []; drawMarkers(); renderMarkCount(); setDetectNote(''); });
+        if (cl) cl.addEventListener('click', clearMarks);
         const canvas = $('op-mark-canvas'); if (canvas) canvas.addEventListener('click', onCanvasClick);
 
         // Shared embryo rail: click a row to select (delete button is guarded
@@ -1513,6 +1564,7 @@ const OperateManager = (function () {
         // not changed, and 'bottom' is the pane we start on, so the initial
         // surface would never get its zoom.
         attachImageViews();
+        mountPanels();
         if (_active) return;
         _active = true;
         showPaneInitial();
@@ -1544,5 +1596,15 @@ const OperateManager = (function () {
     // redraw: a CSS transform on an ancestor fires neither `resize` nor
     // ResizeObserver, so the bench has to say when it has zoomed. Cheap and
     // idempotent — it no-ops off the bottom pane.
-    return { activate, deactivate, redraw: drawMarkers };
+    // The Marking panel renders SharedState and calls these. The logic stays
+    // here, with the canvas and the frame geometry it depends on — the panel
+    // owns the readout and the verbs, not the marking itself.
+    return {
+        activate, deactivate, redraw: drawMarkers,
+        marking: {
+            detect: () => runDetect(),
+            register: () => confirmMarks(),
+            clear: () => clearMarks(),
+        },
+    };
 })();

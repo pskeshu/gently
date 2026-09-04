@@ -915,3 +915,56 @@
 
 /* The zoom badge shares the corner with the strip; lift it clear on hover. */
 .op-cam:hover .iv-badge { bottom: 34px; }
+
+/* ── Marking panel ────────────────────────────────────────────────────────
+   Two counts side by side, because they are two different facts and showing
+   one number for both is the #113 defect. */
+.mk-counts {
+    display: flex;
+    gap: 14px;
+    margin: 2px 0 6px;
+}
+
+.mk-count {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.mk-n {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+.mk-cap {
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.mk-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.mk-acts .lp-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* Elapsed time, so a slow SAM load is distinguishable from a hang. */
+.mk-busy {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.68rem;
+    color: var(--accent, #3b82f6);
+}
+
+.mk-note {
+    margin: 6px 0 0;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+}

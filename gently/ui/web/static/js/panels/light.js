@@ -1,6 +1,10 @@
 /**
  * Light — the standard control panel for illumination.
  *
+ * LED, beam, routed lines and per-line power. Exposure is a camera
+ * property, not a light one, and lives in panels/camera.js — the bottom
+ * camera needs it without needing any of this.
+ *
  * The first panel built to docs/architecture/PANELS.md. Mount it anywhere that
  * needs light control; every mount shows the same state because the state
  * lives in SharedState, not in the panel.
@@ -62,8 +66,6 @@ const LightPanel = (() => {
         await Promise.all([
             get('/api/devices/beam', 'beam', d => (d && d.beam) || null),
             get('/api/devices/led/status', 'led', d => (d && d.current_state) || null),
-            get('/api/devices/camera/exposure', 'exposureMs',
-                d => (d && (d.exposure_ms != null ? Number(d.exposure_ms) : null))),
         ]);
 
         // Power is per wavelength, and only the routed lines are interesting.
@@ -205,14 +207,6 @@ const LightPanel = (() => {
 
             ${powerRows}
 
-            <div class="lp-row">
-              <span class="lp-label">Exposure</span>
-              <input class="lp-num" type="number" data-exposure min="1" max="10000" step="1"
-                     value="${s.exposureMs == null ? '' : s.exposureMs}"
-                     placeholder="—" aria-label="Camera exposure in milliseconds">
-              <span class="lp-val">ms</span>
-            </div>
-
             ${em === true
                 ? `<div class="lp-emit" role="status">EMITTING · ${s.config || 'lines unknown'}</div>`
                 : em === null
@@ -251,12 +245,6 @@ const LightPanel = (() => {
                 { wavelength: Number(r.dataset.power), pct: Number(r.value) }));
         });
 
-        const exp = el.querySelector('[data-exposure]');
-        if (exp) exp.onchange = () => {
-            const v = Number(exp.value);
-            if (!(v > 0)) return;
-            act(() => send('/api/devices/camera/exposure', { exposure_ms: v }));
-        };
     }
 
     /* ── lifecycle ───────────────────────────────────────────────────────── */

@@ -62,11 +62,25 @@ adding it to a new surface is one call rather than a copy-paste of markup.
 
 ## Status
 
-| Panel | Subject | Mounted in | State |
+| Panel | Subject | Mounted in | Notes |
 |---|---|---|---|
-| Light | LED, laser lines, power, exposure | SPIM head | first instance |
+| Light | LED, beam, routed lines, per-line power | SPIM head | read-back; derives EMITTING |
+| ImageView | zoom, pan, contrast, brightness | both camera surfaces | view state, stays local |
+| Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
+| Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |
 
-Bottom camera and the calibration tab (#108) mount the Light panel next.
-Manual mode's bespoke laser UI is replaced once the shared one is proven on the
-rig — deliberately not in the same change, because it is a surface nobody is
-testing this week.
+Note what Marking does *not* own: `_markers`, the canvas and the frame
+geometry stay in `operate.js`, because marks are placed in stage coordinates
+derived from the live frame and that arithmetic belongs with the pixels. A
+panel can own a readout and a set of verbs without owning the surface — which
+is what lets it mount in the Atrium's EMBRYOS window, where there is no canvas
+at all.
+
+ImageView is the exception to rule 2: zoom and contrast are view state, not
+instrument state, so they stay per-mount. Two people looking at one microscope
+still want their own magnification.
+
+Next: the calibration tab (#108) mounts Light and Camera. Manual mode's
+bespoke laser UI is replaced once the shared one is proven on the rig —
+deliberately not in the same change, because it is a surface nobody is testing
+this week.

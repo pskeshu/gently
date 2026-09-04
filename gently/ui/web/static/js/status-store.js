@@ -94,6 +94,10 @@ const SharedState = (() => {
         // Read-back light state, owned by panels/light.js. One value, so every
         // mounted Light panel agrees — see docs/architecture/PANELS.md rule 2.
         light: null,
+        // Marking progress, owned by operate.js and rendered by
+        // panels/marking.js — pending marks and a registered roster are two
+        // different counts and were being shown as one.
+        marking: null,
     };
     const subs = new Map();     // key -> Set<handler>
 
