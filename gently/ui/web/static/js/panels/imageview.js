@@ -36,6 +36,9 @@ const ImageView = (() => {
     const MIN_Z = 1;
     const MAX_Z = 8;
     const WHEEL_STEP = 1.15;
+    // Below this, a press is a click, not a pan. Generous enough to survive
+    // the hand wobble of clicking a 13 px marker on a zoomed frame.
+    const DRAG_SLOP = 4;
 
     const views = new Map();   // containerId -> {z, tx, ty, fit, badge}
 
@@ -68,25 +71,55 @@ const ImageView = (() => {
 
         // Pan only once there is somewhere to pan to, or a plain click on the
         // frame would start a drag and marking would fight it.
+        //
+        // Capture is taken LAZILY, only once the pointer has actually moved past
+        // the threshold. Capturing on pointerdown retargets the subsequent
+        // `click` to the capturing element, so it never reaches the marker
+        // canvas — which made it impossible to click a spurious marker away
+        // while zoomed in. A press that does not move must stay an ordinary
+        // click.
         box.addEventListener('pointerdown', e => {
             if (v.z <= 1 || e.button !== 0) return;
-            v.drag = { x: e.clientX, y: e.clientY, tx: v.tx, ty: v.ty, moved: false };
-            box.setPointerCapture(e.pointerId);
+            v.drag = { x: e.clientX, y: e.clientY, tx: v.tx, ty: v.ty,
+                       moved: false, captured: false, id: e.pointerId };
         });
         box.addEventListener('pointermove', e => {
             if (!v.drag) return;
             const dx = e.clientX - v.drag.x, dy = e.clientY - v.drag.y;
-            if (Math.hypot(dx, dy) > 3) v.drag.moved = true;
+            if (!v.drag.moved && Math.hypot(dx, dy) <= DRAG_SLOP) return;
+            if (!v.drag.captured) {
+                v.drag.moved = true;
+                v.drag.captured = true;
+                try { box.setPointerCapture(v.drag.id); } catch (_) { /* fine without it */ }
+            }
             v.tx = v.drag.tx + dx;
             v.ty = v.drag.ty + dy;
             apply(v);
         });
         box.addEventListener('pointerup', e => {
-            const moved = v.drag && v.drag.moved;
+            const d = v.drag;
             v.drag = null;
-            try { box.releasePointerCapture(e.pointerId); } catch (_) { /* not captured */ }
-            // A drag that panned must not also register as a mark.
-            if (moved) { e.stopPropagation(); e.preventDefault(); }
+            if (!d) return;
+            if (d.captured) {
+                try { box.releasePointerCapture(d.id); } catch (_) { /* already gone */ }
+            }
+            // A drag that panned must not also register as a mark. A press that
+            // never moved is left completely alone, so the click runs.
+            //
+            // preventDefault on pointerup does NOT suppress the click the
+            // browser then synthesises, and relying on pointer capture to
+            // retarget it is what broke clicking markers away in the first
+            // place. So the next click is swallowed explicitly, in the capture
+            // phase on the container — which runs before the canvas's own
+            // handler — and the listener removes itself either way.
+            if (d.moved) {
+                e.stopPropagation();
+                const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+                box.addEventListener('click', eat, { capture: true, once: true });
+                // If no click follows (some pointer types, or the press ended
+                // off-target), the listener must not linger and eat a real one.
+                setTimeout(() => box.removeEventListener('click', eat, true), 300);
+            }
         }, true);
 
         // Reset needs to exist or a zoomed-in operator is stranded, but it does
