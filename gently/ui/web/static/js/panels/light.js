@@ -18,10 +18,20 @@
  * the UI said it was (#106). Three independent facts were being collapsed into
  * that one word:
  *
- *   armed   — BeamEnabled on the scanner card. Left No after every volume
- *             acquisition, and nothing turns it back on.
- *   routed  — the Laser config group. PLogic gating only; emits nothing itself.
- *   power   — per-line setpoint. The calibrate path never touched it.
+ *   Laser       — the Laser config group ("ALL OFF", "488 only", ...). On this
+ *                 rig this IS what an operator means by the laser being on or
+ *                 off, so it keeps that name. PLogic gating; it emits nothing
+ *                 by itself.
+ *   BeamEnabled — the Micro-Manager property on the scanner card, named as
+ *                 Micro-Manager names it, because that is where an operator
+ *                 has seen it before. Left "No" after every volume
+ *                 acquisition with nothing to set it back, which is how a
+ *                 correctly configured laser still emits nothing.
+ *   power       — per-line setpoint. The calibrate path never touched it.
+ *
+ * Deliberately not collapsed into one "laser" switch, however much tidier that
+ * would read: collapsing them is what produced #106. "Arm" was worse still —
+ * it invented a word this instrument does not use.
  *
  * Any of the three can be wrong on its own, so the panel shows all three and
  * computes "emitting" from them rather than believing a flag.
@@ -188,16 +198,16 @@ const LightPanel = (() => {
             </div>
 
             <div class="lp-row">
-              <span class="lp-label">Beam</span>
+              <span class="lp-label" title="BeamEnabled on the scanner card — the Micro-Manager property name">BeamEnabled</span>
               <button class="lp-btn ${armed ? 'is-armed' : ''}" data-beam="${armed ? 'off' : 'on'}"
-                      aria-pressed="${armed === true}">${armed ? 'Disarm' : 'Arm'}</button>
-              <span class="lp-val">${armed == null ? '—' : armed ? 'ARMED' : 'disarmed'}</span>
+                      aria-pressed="${armed === true}">${armed ? 'Set No' : 'Set Yes'}</button>
+              <span class="lp-val">${armed == null ? '—' : armed ? 'Yes' : 'No'}</span>
               ${sideDetail(s.beam)}
             </div>
 
             <div class="lp-row">
-              <span class="lp-label">Lines</span>
-              <select class="lp-select" data-config aria-label="Laser lines">
+              <span class="lp-label" title="The Laser config group — on this rig this is the laser ON/OFF control">Laser</span>
+              <select class="lp-select" data-config aria-label="Laser config">
                 ${configs.length
                     ? configs.map(c =>
                         `<option value="${c}" ${c === s.config ? 'selected' : ''}>${c}</option>`).join('')

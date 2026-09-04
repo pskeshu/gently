@@ -1,5 +1,5 @@
 /**
- * Camera — exposure and focus readout for one camera.
+ * Camera — exposure for one camera.
  *
  * Third panel under docs/architecture/PANELS.md.
  *
@@ -38,7 +38,6 @@ const CameraPanel = (() => {
             read: '/api/devices/camera/exposure',
             write: '/api/devices/camera/exposure',
             body: ms => ({ exposure_ms: ms }),
-            scoreEl: 'op-bz-score',
         },
         spim: {
             label: 'Light sheet',
@@ -48,7 +47,6 @@ const CameraPanel = (() => {
             read: null,
             write: '/api/devices/lightsheet/live_params',
             body: ms => ({ exposure: ms }),
-            scoreEl: 'op-spim-score',
         },
     };
 
@@ -74,7 +72,10 @@ const CameraPanel = (() => {
             const r = await fetch(m.cfg.read);
             if (r.ok) {
                 const d = await r.json();
-                const ms = d && (d.exposure_ms != null ? Number(d.exposure_ms) : null);
+                // The device layer answers `{success: false, error: ...}` with
+                // HTTP 200 when the camera is absent, so `r.ok` is not enough.
+                const ms = d && d.success !== false && d.exposure_ms != null
+                    ? Number(d.exposure_ms) : null;
                 m.exposureMs = Number.isFinite(ms) ? ms : null;
                 m.confirmed = m.exposureMs != null;
                 m.readAt = Date.now();
@@ -144,9 +145,27 @@ const CameraPanel = (() => {
         };
     }
 
+    /**
+     * Re-read every mounted camera.
+     *
+     * The panel used to read once, at mount. The device supervisor spawns the
+     * device layer ~30s after the web server, so a panel mounted before that
+     * showed an em dash for the rest of the session with nothing to prompt
+     * another attempt. Reported from the rig.
+     */
+    async function refreshAll() {
+        await Promise.all([...mounts.keys()].map(read));
+    }
+
+    // The device layer becoming available is exactly when a first read becomes
+    // possible, so take that moment.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', () => refreshAll());
+    }
+
     function unmount(hostId) { mounts.delete(hostId); }
 
-    return { mount, unmount, refresh: read, CAMERAS };
+    return { mount, unmount, refresh: read, refreshAll, CAMERAS };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CameraPanel;

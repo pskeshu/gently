@@ -1,5 +1,5 @@
 /**
- * ImageView — zoom and pan for a camera surface.
+ * ImageView — zoom, pan and display range for a camera surface.
  *
  * The second panel built to docs/architecture/PANELS.md.
  *
@@ -50,7 +50,7 @@ const ImageView = (() => {
         if (!fit) return;
 
         const v = { z: 1, tx: 0, ty: 0, fit, box, badge: null, drag: null,
-                    contrast: 1, brightness: 1, bar: null };
+                    lo: 0, hi: 1, bar: null, filterId: `iv-win-${containerId}` };
         views.set(containerId, v);
 
         // Zoom about the cursor, so the thing under the pointer stays under it.
@@ -132,47 +132,158 @@ const ImageView = (() => {
     }
 
     /**
-     * Contrast is a tool the operator reaches for, not a transient report, so
-     * it gets real controls rather than appearing by itself. They live in a
-     * strip that fades in on hover — the video-player idiom, discoverable with
-     * nothing to open or close (PANELS.md rule 6).
+     * The display window: a black point and a white point on one track.
      *
-     * These are CSS filters on the already-encoded frame. The device layer
-     * auto-stretches every frame to its 1-99th percentile before JPEG
-     * encoding, so this is fine adjustment on top of that, not a display range
-     * over raw counts. Anything clipped by that stretch is already gone; see
-     * the display-range work for the real fix.
+     * This replaced two abstract "contrast" and "brightness" sliders. Those are
+     * not how anyone reading a microscope image thinks — a microscopist sets a
+     * display range, the way ImageJ's Brightness/Contrast or Micro-Manager's
+     * histogram does, and asking them to reach that through two multiplicative
+     * knobs is arithmetic homework.
+     *
+     * It also cannot be done with CSS. `brightness()` and `contrast()` are both
+     * multiplicative about their own origin, so composing them gives
+     * `out = in·b·c + k` where k is pinned by c — there is no free intercept,
+     * and an arbitrary window needs one. An SVG feComponentTransfer with
+     * type="linear" has slope AND intercept, so it maps the window exactly:
+     *
+     *     out = (in - lo) / (hi - lo)   →   slope = 1/(hi-lo), intercept = -lo·slope
+     *
+     * `color-interpolation-filters="sRGB"` matters: the SVG default is
+     * linearRGB, which would silently apply a gamma the operator did not ask
+     * for and make the readout a lie.
      */
     function buildBar(v, containerId) {
+        ensureFilter(v);
+
         const bar = document.createElement('div');
         bar.className = 'iv-bar';
         bar.innerHTML = `
-          <label class="iv-ctl">C
-            <input type="range" min="0.2" max="4" step="0.05" value="1" data-contrast
-                   aria-label="Display contrast">
-          </label>
-          <label class="iv-ctl">B
-            <input type="range" min="0.2" max="3" step="0.05" value="1" data-brightness
-                   aria-label="Display brightness">
-          </label>
-          <button type="button" class="iv-reset" title="Reset view">reset</button>`;
-        // The strip sits over the frame; clicks in it must not reach the
-        // marking canvas underneath.
+          <span class="iv-lbl">display</span>
+          <div class="iv-win" data-win tabindex="0" role="group"
+               aria-label="Display range: black point and white point">
+            <div class="iv-win-track"></div>
+            <div class="iv-win-span" data-span></div>
+            <div class="iv-win-h iv-win-lo" data-h="lo" role="slider" tabindex="0"
+                 aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
+            <div class="iv-win-h iv-win-hi" data-h="hi" role="slider" tabindex="0"
+                 aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+          <span class="iv-read" data-read></span>
+          <button type="button" class="iv-reset" title="Reset zoom and display range">reset</button>`;
+
         ['pointerdown', 'pointerup', 'click', 'dblclick', 'wheel'].forEach(ev =>
             bar.addEventListener(ev, e => e.stopPropagation()));
 
-        const c = bar.querySelector('[data-contrast]');
-        const b = bar.querySelector('[data-brightness]');
-        c.addEventListener('input', () => { v.contrast = Number(c.value); apply(v); });
-        b.addEventListener('input', () => { v.brightness = Number(b.value); apply(v); });
+        const win = bar.querySelector('[data-win]');
+        let dragging = null;
+
+        const fromX = clientX => {
+            const r = win.getBoundingClientRect();
+            return Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)));
+        };
+
+        win.addEventListener('pointerdown', e => {
+            const h = e.target.closest('[data-h]');
+            // Grab the nearer handle when the track itself is pressed, so the
+            // operator does not have to hit an 8 px target.
+            const at = fromX(e.clientX);
+            dragging = h ? h.dataset.h
+                : (Math.abs(at - v.lo) <= Math.abs(at - v.hi) ? 'lo' : 'hi');
+            moveHandle(v, dragging, at);
+            win.setPointerCapture(e.pointerId);
+        });
+        win.addEventListener('pointermove', e => {
+            if (!dragging) return;
+            moveHandle(v, dragging, fromX(e.clientX));
+        });
+        win.addEventListener('pointerup', e => {
+            dragging = null;
+            try { win.releasePointerCapture(e.pointerId); } catch (_) { /* fine */ }
+        });
+
+        // Keyboard: the window is a real control, not a mouse-only flourish.
+        win.addEventListener('keydown', e => {
+            const step = e.shiftKey ? 0.10 : 0.02;
+            const which = (document.activeElement && document.activeElement.dataset.h) || 'hi';
+            if (e.key === 'ArrowLeft') { moveHandle(v, which, v[which] - step); e.preventDefault(); }
+            else if (e.key === 'ArrowRight') { moveHandle(v, which, v[which] + step); e.preventDefault(); }
+        });
+
         bar.querySelector('.iv-reset').addEventListener('click', () => {
-            c.value = b.value = 1;
-            v.contrast = v.brightness = 1;
+            v.lo = 0; v.hi = 1;
             reset(containerId);
         });
 
         v.bar = bar;
         v.box.appendChild(bar);
+    }
+
+    // Handles cannot cross, and cannot meet: hi === lo is an infinite slope.
+    const MIN_SPAN = 0.02;
+
+    function moveHandle(v, which, value) {
+        const at = Math.min(1, Math.max(0, value));
+        if (which === 'lo') v.lo = Math.min(at, v.hi - MIN_SPAN);
+        else v.hi = Math.max(at, v.lo + MIN_SPAN);
+        apply(v);
+    }
+
+    /** One SVG filter per view, since each carries its own window. */
+    function ensureFilter(v) {
+        if (document.getElementById(v.filterId)) return;
+        let host = document.getElementById('iv-filters');
+        if (!host) {
+            host = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            host.id = 'iv-filters';
+            host.setAttribute('aria-hidden', 'true');
+            host.setAttribute('width', '0');
+            host.setAttribute('height', '0');
+            host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+            document.body.appendChild(host);
+        }
+        const NS = 'http://www.w3.org/2000/svg';
+        const f = document.createElementNS(NS, 'filter');
+        f.id = v.filterId;
+        // Without this the transfer runs in linearRGB and applies a gamma the
+        // operator never asked for.
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        const t = document.createElementNS(NS, 'feComponentTransfer');
+        ['feFuncR', 'feFuncG', 'feFuncB'].forEach(n => {
+            const fn = document.createElementNS(NS, n);
+            fn.setAttribute('type', 'linear');
+            fn.setAttribute('slope', '1');
+            fn.setAttribute('intercept', '0');
+            t.appendChild(fn);
+        });
+        f.appendChild(t);
+        host.appendChild(f);
+    }
+
+    function applyWindow(v) {
+        const img = v.fit.querySelector('.op-cam-img');
+        const wide = v.lo === 0 && v.hi === 1;
+        if (img) img.style.filter = wide ? '' : `url(#${CSS.escape(v.filterId)})`;
+
+        const f = document.getElementById(v.filterId);
+        if (f) {
+            const slope = 1 / (v.hi - v.lo);
+            const intercept = -v.lo * slope;
+            f.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => {
+                fn.setAttribute('slope', String(slope));
+                fn.setAttribute('intercept', String(intercept));
+            });
+        }
+
+        if (!v.bar) return;
+        const lo = v.bar.querySelector('[data-h="lo"]');
+        const hi = v.bar.querySelector('[data-h="hi"]');
+        const span = v.bar.querySelector('[data-span]');
+        const read = v.bar.querySelector('[data-read]');
+        if (lo) { lo.style.left = `${v.lo * 100}%`; lo.setAttribute('aria-valuenow', Math.round(v.lo * 100)); }
+        if (hi) { hi.style.left = `${v.hi * 100}%`; hi.setAttribute('aria-valuenow', Math.round(v.hi * 100)); }
+        if (span) { span.style.left = `${v.lo * 100}%`; span.style.right = `${(1 - v.hi) * 100}%`; }
+        // Presence-driven: the numbers appear only once the window is not full.
+        if (read) read.textContent = wide ? '' : `${Math.round(v.lo * 100)}–${Math.round(v.hi * 100)}`;
     }
 
     const clamp = z => Math.min(MAX_Z, Math.max(MIN_Z, z));
@@ -181,13 +292,9 @@ const ImageView = (() => {
         if (v.z <= 1) { v.z = 1; v.tx = 0; v.ty = 0; }
         v.fit.style.transform = v.z === 1 ? '' : `translate(${v.tx}px, ${v.ty}px) scale(${v.z})`;
         v.fit.style.transformOrigin = '0 0';
-        // On the fit box, not the <img>: the marker canvas is a sibling inside
+        // On the <img>, not the fit box: the marker canvas is a sibling inside
         // it and must NOT be filtered, or green markers dim with the frame.
-        const img = v.fit.querySelector('.op-cam-img');
-        if (img) {
-            img.style.filter = (v.contrast === 1 && v.brightness === 1)
-                ? '' : `contrast(${v.contrast}) brightness(${v.brightness})`;
-        }
+        applyWindow(v);
         v.box.style.cursor = v.z > 1 ? 'grab' : '';
         badge(v);
     }
@@ -222,10 +329,17 @@ const ImageView = (() => {
 
     function displayOf(containerId) {
         const v = views.get(containerId);
-        return v ? { contrast: v.contrast, brightness: v.brightness } : null;
+        return v ? { lo: v.lo, hi: v.hi } : null;
     }
 
-    return { attach, reset, zoomOf, displayOf, MIN_Z, MAX_Z, WHEEL_STEP, _clamp: clamp };
+    /** The exact linear map the window applies — `out = in * slope + intercept`. */
+    function windowTransfer(lo, hi) {
+        const slope = 1 / (hi - lo);
+        return { slope, intercept: -lo * slope };
+    }
+
+    return { attach, reset, zoomOf, displayOf, windowTransfer,
+             MIN_Z, MAX_Z, WHEEL_STEP, MIN_SPAN, _clamp: clamp };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = ImageView;

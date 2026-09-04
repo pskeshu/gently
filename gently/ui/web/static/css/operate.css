@@ -885,21 +885,70 @@
     .iv-bar { transition: none; }
 }
 
-.iv-ctl {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex: 1 1 auto;
-    min-width: 0;
-    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-    font-size: 0.66rem;
-    color: #fff;
+/* Display window: one track, a black point and a white point. The lit span
+   between them is the range being mapped to the full output. */
+.iv-lbl {
+    flex: 0 0 auto;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.65);
 }
 
-.iv-ctl input[type="range"] {
+.iv-win {
+    position: relative;
     flex: 1 1 auto;
-    min-width: 40px;
-    accent-color: #fff;
+    min-width: 70px;
+    height: 18px;
+    touch-action: none;      /* the handles own the gesture */
+    cursor: ew-resize;
+}
+
+.iv-win-track {
+    position: absolute;
+    inset: 7px 0 auto 0;
+    height: 4px;
+    border-radius: 2px;
+    /* black-to-white, because that is literally the axis being windowed */
+    background: linear-gradient(90deg, #000, #fff);
+    outline: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.iv-win-span {
+    position: absolute;
+    top: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(96, 165, 250, 0.55);
+    pointer-events: none;
+}
+
+.iv-win-h {
+    position: absolute;
+    top: 2px;
+    width: 10px;
+    height: 14px;
+    margin-left: -5px;
+    border-radius: 2px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+    cursor: ew-resize;
+}
+
+.iv-win-h:focus-visible {
+    outline: 2px solid var(--accent, #3b82f6);
+    outline-offset: 1px;
+}
+
+/* Numbers only once the window is not full — a permanent "0–100" is a label
+   reporting that nothing has been changed. */
+.iv-read {
+    flex: 0 0 auto;
+    min-width: 42px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.64rem;
+    color: #fff;
+    text-align: right;
 }
 
 .iv-reset {

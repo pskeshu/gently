@@ -579,22 +579,21 @@
                     <div class="op-bar">
                       <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
                     </div>
+                    <!-- Marking sits under the frame it acts on, not off in the
+                         instrument rail. Shared panel; the module owns its
+                         markup (docs/architecture/PANELS.md). -->
+                    <div id="op-marking-host"></div>
                   </div>
 
                   <aside class="op-inst">
                     <div class="op-block">
                       <div class="op-block-head">Camera</div>
                       <button class="op-btn op-btn-toggle" id="op-cam-toggle" type="button">Start camera</button>
-                      <div class="op-row"><span class="op-label">Focus score</span>
-                        <span class="op-num" id="op-bz-score">—</span></div>
                       <!-- Exposure joins the block that already names this
                            camera, rather than opening a second one about it. -->
                       <div id="op-cam-panel-bottom"></div>
                     </div>
 
-                    <!-- Shared panel (docs/architecture/PANELS.md); the module
-                         owns its markup. -->
-                    <div class="op-block" id="op-marking-host"></div>
 
                     <div class="op-gauge" id="op-gauge-bz" data-status="unknown">
                       <div class="op-gauge-head">
@@ -657,10 +656,7 @@
                       <div class="op-block-head">Light sheet</div>
                       <div class="op-actions">
                         <button class="op-btn op-btn-toggle" id="op-spim-toggle" type="button">Start view</button>
-                        <button class="op-btn op-btn-toggle" id="op-led" type="button" aria-pressed="false">LED</button>
                       </div>
-                      <div class="op-row"><span class="op-label">Focus score</span>
-                        <span class="op-num" id="op-spim-score">—</span></div>
                       <div id="op-cam-panel-spim"></div>
                     </div>
 
@@ -1285,7 +1281,9 @@
                  Shared across device tabs; placed last so it sits at the
                  bottom (was between 3D and Manual, which put it at the top
                  of the Manual view). -->
-            <section class="devices-temp-graph" id="devices-temp-graph" aria-label="Temperature trajectory"></section>
+            <!-- hidden until a sample arrives; see temperature-graph.js -->
+            <section class="devices-temp-graph" id="devices-temp-graph"
+                     aria-label="Temperature trajectory" hidden></section>
         </div>
     </div>
 
