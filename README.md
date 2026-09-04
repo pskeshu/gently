@@ -100,7 +100,9 @@ git clone git@github.com:gently-project/gently-perception.git
 #     gently-perception/  <- editable, resolved via [tool.uv.sources]
 
 cd gently
-uv sync                    # base env (add --extra ... for torch etc., see below)
+uv sync                    # base env — see 'optional extras' below before
+                           # syncing a GPU/microscope box: a bare sync there
+                           # UNINSTALLS torch and SAM
 ```
 
 > The `git@github.com:` URLs use **SSH**, which needs an
@@ -138,6 +140,33 @@ it lives in mutually-exclusive extras wired to the right PyTorch index:
 uv sync --extra torch-gpu   # CUDA 11.8 build (GPU box, e.g. the microscope PC)
 uv sync --extra torch-cpu   # CPU-only build (dev laptop / CI)
 ```
+
+SAM itself is a separate extra. Torch is what runs it, `segment-anything` is the
+model code, and detection needs both:
+
+```bash
+uv sync --extra sam
+```
+
+> [!IMPORTANT]
+> **`uv sync` makes the environment match exactly what you ask for, so it
+> UNINSTALLS extras you leave out.** Running a bare `uv sync` on a machine set
+> up with `--extra torch-gpu --extra sam` removes torch, torchvision,
+> nvidia-ml-py and segment-anything — and nothing fails until the next detection
+> attempt, mid-workflow, with `ModuleNotFoundError: No module named
+> 'segment_anything'`.
+>
+> Pass every extra you need on **every** sync. On the microscope PC that is:
+>
+> ```bash
+> uv sync --extra torch-gpu --extra sam
+> ```
+
+SAM also needs its checkpoint, `sam_vit_b_01ec64.pth`, and the default path is
+relative — it is resolved against the working directory the device layer was
+started from, so keep it at the repo root
+([download](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth),
+~375 MB).
 
 #### Running tests
 
