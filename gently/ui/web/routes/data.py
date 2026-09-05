@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException
 
+from gently.harness import calibration_gate
 from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,30 @@ def create_router(server) -> APIRouter:
         if agent is None or not hasattr(agent, "experiment"):
             raise HTTPException(status_code=503, detail="Agent not ready")
         return agent
+
+    def _require_calibrated(embryo_ids, payload):
+        """Refuse to start unless every named embryo carries a real fit.
+
+        Server-side on purpose: the agent reaches these routes too, and a check
+        that lives in operate.js is a check the agent walks past. See
+        gently/harness/calibration_gate.py for why an uncalibrated run is worse
+        than a refused one — the acquisition layer invents five numbers and
+        reports success.
+
+        `allow_uncalibrated: true` still goes through. Someone who means it
+        should be able to say so; the point is that they have to say it.
+        """
+        if payload.get("allow_uncalibrated"):
+            return
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        experiment = getattr(agent, "experiment", None) if agent else None
+        embryos = getattr(experiment, "embryos", None)
+        if not embryos:
+            return  # nothing known to check against
+        missing = calibration_gate.uncalibrated(embryos, embryo_ids)
+        if missing:
+            raise HTTPException(status_code=409, detail=calibration_gate.refusal_detail(missing))
 
     @router.put("/api/embryos/{embryo_id}/position", dependencies=[Depends(require_control)])
     async def update_embryo_position(
@@ -1389,6 +1414,7 @@ def create_router(server) -> APIRouter:
         )
 
         agent = _require_agent_with_experiment()
+        _require_calibrated(payload.get("embryo_ids") or None, payload)
         tactic = payload.get("tactic")
         lib_id = payload.get("library_id")
         if tactic is None and lib_id:
@@ -1540,6 +1566,12 @@ def create_router(server) -> APIRouter:
         can send "ALL OFF" for brightfield-safe Manual-view captures.
         piezo_center and galvo_center capture at the dialled focal plane.
         """
+        # Optional on purpose: Manual-mode snapping images the current stage
+        # position with no embryo in mind, which is legitimate. When a caller
+        # DOES name an embryo, it gets checked.
+        eid = payload.get("embryo_id")
+        if eid:
+            _require_calibrated([str(eid)], payload)
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
@@ -1617,6 +1649,9 @@ def create_router(server) -> APIRouter:
 
         stop_condition = str(payload.get("stop_condition") or "manual")
         embryo_ids = payload.get("embryo_ids") or None
+        # A timelapse is the longest-running thing this UI starts; an invented
+        # scan geometry would be baked into every timepoint of it.
+        _require_calibrated(embryo_ids, payload)
         condition_value = payload.get("condition_value")
         monitoring_mode = payload.get("monitoring_mode") or None
 

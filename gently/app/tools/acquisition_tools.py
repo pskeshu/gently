@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from gently.harness import calibration_gate
 from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
@@ -103,9 +104,17 @@ async def acquire_volume(
     num_slices: int = 50,
     exposure_ms: float = 10.0,
     z_buffer_um: float | None = None,
+    allow_uncalibrated: bool = False,
     context: dict | None = None,
 ) -> str:
-    """Acquire single volume - moves to embryo first, uses calibration"""
+    """Acquire single volume - moves to embryo first, uses calibration.
+
+    Refuses an uncalibrated embryo unless ``allow_uncalibrated``. The four
+    galvo/piezo parameters below used to fall back to literals with the comment
+    "use defaults if not calibrated" — so a volume acquired from an embryo that
+    had never been calibrated used invented geometry and reported success. The
+    resulting data is indistinguishable from real data, which is the problem.
+    """
     agent = ctx_get(context, "agent")
     client = ctx_get(context, "client")
 
@@ -116,13 +125,18 @@ async def acquire_volume(
     if err:
         return err
 
+    if not allow_uncalibrated and not calibration_gate.is_calibrated(embryo):
+        return f"Error: {calibration_gate.refusal_detail([embryo_id])}"
+
     try:
         # Move to embryo position first
         pos = embryo.stage_position
         if pos and pos.get("x") is not None and pos.get("y") is not None:
             await client.move_to_position(pos["x"], pos["y"])
 
-        # Get calibration parameters (use defaults if not calibrated)
+        # Calibrated by the time we get here, unless the caller explicitly
+        # accepted a guess. The literals below are that guess, and they are
+        # only ever reached on that path.
         cal = embryo.calibration or {}
         galvo_amplitude = cal.get("galvo_amplitude", 0.5)
         galvo_center = cal.get("galvo_center", 0.0)

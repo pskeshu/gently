@@ -1151,6 +1151,13 @@ const OperateManager = (function () {
                 _acquiring = true; renderSubnavMeta();
                 try {
                     await postJSON('/api/devices/acquire/volume', {
+                        // Say WHICH embryo. The route used to receive no id at
+                        // all, so it imaged wherever the stage happened to be
+                        // and could not check whether that embryo had ever been
+                        // calibrated. Manual-mode snapping still omits it on
+                        // purpose — a test shot at the current position is a
+                        // real thing to want.
+                        embryo_id: _selected,
                         num_slices: Math.max(1, Number(($('op-vol-slices') || {}).value) || 50),
                         exposure_ms: Math.max(1, Number(($('op-vol-exp') || {}).value) || 10),
                     });
