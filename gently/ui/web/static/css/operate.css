@@ -124,43 +124,6 @@
     flex-direction: column;
     gap: var(--op-1);
 }
-.op-erail-empty {
-    padding: var(--op-3);
-    font-size: 0.72rem;
-    line-height: 1.5;
-    color: var(--op-ink-dim);
-    text-align: center;
-}
-.op-erow {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    gap: var(--op-2);
-    padding: var(--op-2);
-    border: 1px solid transparent;
-    border-radius: 5px;
-    cursor: pointer;
-}
-.op-erow:hover { background: color-mix(in srgb, var(--op-ink) 6%, transparent); }
-.op-erow.is-sel {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.op-erow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.op-erow-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.op-erow-label { font-size: 0.78rem; color: var(--op-ink); font-weight: 600; }
-.op-erow-xy { font-family: var(--op-mono); font-size: 0.62rem; color: var(--op-ink-dim); }
-.op-erow-del {
-    border: none;
-    background: none;
-    color: var(--op-ink-dim);
-    cursor: pointer;
-    font-size: 0.95rem;
-    line-height: 1;
-    padding: 2px 5px;
-    border-radius: 4px;
-}
-.op-erow-del:hover { color: var(--op-emit); background: color-mix(in srgb, var(--op-emit) 14%, transparent); }
 
 /* ── pane shell ─────────────────────────────────────────────────────────── */
 .op-pane {
@@ -607,8 +570,7 @@
    gauge tracks. */
 .op-btn:focus-visible, .op-nbtn:focus-visible, .op-segbtn:focus-visible,
 .op-num-in:focus-visible, .op-sel:focus-visible, .op-gauge-track:focus-visible,
-.op-mark-canvas:focus-visible, .op-rrow:focus-visible, .op-libitem:focus-visible,
-.op-rrole:focus-visible {
+.op-mark-canvas:focus-visible, .op-libitem:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
@@ -630,51 +592,6 @@
 }
 
 .op-roster { display: flex; flex-direction: column; gap: var(--op-1); }
-.op-rrow {
-    display: grid;
-    grid-template-columns: 1fr auto auto auto;
-    align-items: center;
-    gap: var(--op-2);
-    padding: var(--op-2);
-    border: 1px solid var(--op-rule);
-    border-radius: 6px;
-    background: var(--op-panel);
-    cursor: pointer;
-    text-align: left;
-    color: var(--op-ink);
-    transition: background-color 0.12s ease;
-}
-.op-rrow:hover { background: var(--bg-hover); }
-.op-rrow.is-sel { border-color: var(--accent); }
-.op-rlabel { font-size: 0.72rem; font-weight: 500; }
-.op-rxy { font-family: var(--op-mono); font-size: 0.64rem; color: var(--op-ink-dim); }
-.op-rrole {
-    font-family: var(--op-ui);
-    font-size: 0.56rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 2px var(--op-2);
-    border: 1px solid var(--op-rule);
-    border-radius: 999px;
-    background: transparent;
-    color: var(--op-ink-dim);
-    cursor: pointer;
-}
-.op-rrole.is-reference { border-color: var(--accent-purple); color: var(--accent-purple); }
-.op-rcenter {
-    font-family: var(--op-ui);
-    font-size: 0.62rem;
-    padding: 3px var(--op-2);
-    border: 1px solid var(--op-rule);
-    border-radius: 6px;
-    background: var(--bg-hover);
-    color: var(--op-ink);
-    cursor: pointer;
-    transition: background-color 0.12s ease;
-}
-.op-rcenter:hover { background: var(--border); }
-.op-rcenter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .op-lib-list { display: flex; flex-direction: column; gap: var(--op-1); }
 .op-libitem {
@@ -1016,4 +933,114 @@
     display: flex;
     gap: 6px;
     justify-content: flex-end;
+}
+
+/* ── Roster panel ─────────────────────────────────────────────────────────
+   One row style for static/js/panels/roster.js, at both widths. There used to
+   be .op-erow and .op-rrow: near-identical grids differing only in border and
+   column count, because each grew its own action set. The actions are declared
+   per mount now, so the row only has to flex. */
+.rp-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--op-2);
+    padding: var(--op-2);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.rp-row + .rp-row { margin-top: 2px; }
+.rp-row:hover { background: color-mix(in srgb, var(--op-ink) 6%, transparent); }
+
+.rp-row.is-sel {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.rp-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.rp-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.rp-label {
+    font-size: 0.78rem;
+    color: var(--op-ink);
+}
+
+/* Coordinates are compared between rows, so they line up and stay monospace. */
+.rp-xy {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--op-ink-dim);
+}
+
+.rp-acts {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.rp-btn {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: var(--op-panel);
+    color: var(--op-ink);
+    cursor: pointer;
+}
+
+.rp-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Destructive, and it sits next to the select target — #113 wanted it
+   distinguishable rather than merely present. */
+.rp-del {
+    border-color: transparent;
+    background: transparent;
+    color: var(--op-ink-dim);
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+.rp-del:hover {
+    border-color: var(--accent-red, #ef4444);
+    color: var(--accent-red, #ef4444);
+}
+
+/* A reference embryo is not imaged as a subject; it should not look like one. */
+.rp-role.is-reference {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.rp-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: var(--op-3) var(--op-2);
+    font-size: 0.74rem;
+    line-height: 1.4;
+    color: var(--op-ink-dim);
+}
+
+.rp-cta {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: var(--op-panel);
+    color: var(--op-ink);
+    cursor: pointer;
 }
