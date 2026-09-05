@@ -24,8 +24,10 @@ async def flow(page, url, rec):
     modes = await dom_count(page, "#op-modes [data-mode]")
     start = await exists(page, "#op-run-start")
     # With nothing marked the roster is empty but the surface stays fully usable.
-    empty = await dom_count(page, "#op-roster .op-empty")
-    roles = await dom_count(page, ".op-rrole")
+    # The roster is one shared panel now (panels/roster.js), so both selectors
+    # moved with it: .op-empty/.op-rrole were the Acquisition-only markup.
+    empty = await dom_count(page, "#op-roster .rp-empty")
+    roles = await dom_count(page, ".rp-role")
 
     if not (on_pane and roster and modes and start):
         rec.gap("acquisition surface is missing the roster or the run-mode chooser")

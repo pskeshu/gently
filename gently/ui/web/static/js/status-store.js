@@ -98,6 +98,9 @@ const SharedState = (() => {
         // panels/marking.js — pending marks and a registered roster are two
         // different counts and were being shown as one.
         marking: null,
+        // The embryo roster itself, owned by operate.js and rendered by
+        // panels/roster.js. One value, so the copies cannot disagree (#129).
+        embryos: [],
     };
     const subs = new Map();     // key -> Set<handler>
 

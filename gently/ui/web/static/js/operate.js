@@ -991,41 +991,28 @@ const OperateManager = (function () {
         // once, as before. The set() is what makes the other copies of this
         // cursor follow.
         SharedState.set('selectedEmbryoId', id);
-        renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
+        publishRoster(); renderSpimTarget(); renderSingle(); publishRoster();
     }
 
     // Shared embryo list, left of every instrument surface. Reads the canonical
     // _embryos (bootstrapped from /api/embryos/current, kept live by
     // EMBRYOS_UPDATE), so it is the same set on Bottom / SPIM / Acquire and it
     // survives a refresh.
-    function renderEmbryoRail() {
-        const host = $('op-erail-list');
-        const count = $('op-erail-count');
-        if (count) count.textContent = _embryos.length;
-        if (!host) return;
-        host.innerHTML = '';
-        if (!_embryos.length) {
-            const box = document.createElement('div');
-            box.className = 'op-erail-empty';
-            box.textContent = 'No embryos yet — detect on the bottom camera, then register.';
-            host.appendChild(box);
-            return;
-        }
-        _embryos.forEach(emb => {
-            const xy = resolveXY(emb);
-            const row = document.createElement('div');
-            row.className = 'op-erow' + (emb.id === _selected ? ' is-sel' : '');
-            row.tabIndex = 0;
-            row.dataset.embryo = emb.id;
-            row.innerHTML =
-                '<span class="op-erow-main">' +
-                `<span class="op-erow-label">Embryo ${escapeHtml(labelFor(emb))}</span>` +
-                `<span class="op-erow-xy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>` +
-                '</span>' +
-                `<button class="op-erow-del" type="button" title="Remove this embryo (false positive)" ` +
-                `data-del="${escapeHtml(emb.id)}">×</button>`;
-            host.appendChild(row);
-        });
+    // The roster is rendered by panels/roster.js, mounted at each host. There
+    // used to be publishRoster() and publishRoster() here — the same list,
+    // twice, each with its own count element and an arbitrarily different set
+    // of buttons. Publishing is all this file does now.
+    function publishRoster() {
+        // structuredClone, not slice(). SharedState only emits on a real change,
+        // and it compares by value — so publishing a shallow copy of an array
+        // whose ELEMENTS were mutated in place stores the same objects it is
+        // comparing against, and the change is invisible. toggleRole mutates
+        // `emb.role` in place, so the role button silently did nothing.
+        //
+        // Same lesson as #126: never hand out a reference to mutable state.
+        SharedState.set('embryos', structuredClone(_embryos));
+        const rail = $('op-erail-count'); if (rail) rail.textContent = _embryos.length;
+        const ros = $('op-roster-count'); if (ros) ros.textContent = _embryos.length;
     }
 
     async function deleteEmbryo(id) {
@@ -1043,42 +1030,10 @@ const OperateManager = (function () {
                 _selected = _embryos.length ? _embryos[0].id : null;
                 SharedState.set('selectedEmbryoId', _selected);
             }
-            renderEmbryoRail(); renderRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
+            publishRoster(); publishRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
             toastFail(`Delete failed (${why(e)})`);
         }
-    }
-
-    function renderRoster() {
-        const host = $('op-roster');
-        const count = $('op-roster-count');
-        if (count) count.textContent = _embryos.length;
-        if (!host) return;
-        host.innerHTML = '';
-        if (!_embryos.length) {
-            const box = document.createElement('div');
-            box.className = 'op-empty';
-            box.innerHTML = 'No embryos marked yet.' +
-                '<button class="op-btn" type="button" data-goto="bottom">Go to Bottom cam</button>';
-            host.appendChild(box);
-            return;
-        }
-        _embryos.forEach(emb => {
-            const xy = resolveXY(emb);
-            const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
-            const row = document.createElement('div');
-            row.className = 'op-rrow' + (emb.id === _selected ? ' is-sel' : '');
-            row.tabIndex = 0;
-            row.dataset.embryo = emb.id;
-            row.innerHTML =
-                `<span class="op-rlabel">Embryo ${escapeHtml(labelFor(emb))}</span>` +
-                `<span class="op-rxy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>` +
-                `<button class="op-rrole${role === 'calibration' ? ' is-reference' : ''}" type="button" ` +
-                `data-role-for="${escapeHtml(emb.id)}">${role === 'calibration' ? 'ref' : 'subj'}</button>` +
-                `<button class="op-rcenter" type="button" title="Centre the stage on this embryo" ` +
-                `data-center="${escapeHtml(emb.id)}">Centre</button>`;
-            host.appendChild(row);
-        });
     }
 
     // Roles are read from the canonical embryo list and written through the
@@ -1090,7 +1045,7 @@ const OperateManager = (function () {
         const cur = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
         const next = cur === 'calibration' ? 'test' : 'calibration';
         emb.role = next;
-        renderRoster();
+        publishRoster();
         const roles = {};
         _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
         try { await postJSON('/api/embryos/roles', { roles }); }
@@ -1282,7 +1237,7 @@ const OperateManager = (function () {
         acquire: {
             onEnter() { renderRun(); },
             onLeave() {},
-            render() { renderRoster(); renderSingle(); },
+            render() { publishRoster(); renderSingle(); },
         },
     };
     function stopBottom() {
@@ -1321,6 +1276,19 @@ const OperateManager = (function () {
         if (typeof MarkingPanel !== 'undefined' && $('op-marking-host')) {
             MarkingPanel.mount('op-marking-host');
         }
+        if (typeof RosterPanel !== 'undefined') {
+            // Actions declared per mount. The narrow rail sits beside the frame,
+            // so removing a false positive belongs there; the Acquisition list
+            // is the pre-run review surface and gets everything. Previously the
+            // difference was an accident of where each button was added.
+            if ($('op-erail-list')) {
+                RosterPanel.mount('op-erail-list', { actions: ['remove'] });
+            }
+            if ($('op-roster')) {
+                RosterPanel.mount('op-roster',
+                    { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom' });
+            }
+        }
         if (typeof CameraPanel !== 'undefined') {
             if ($('op-cam-panel-bottom')) {
                 CameraPanel.mount('op-cam-panel-bottom', { camera: 'bottom', titled: false });
@@ -1347,7 +1315,7 @@ const OperateManager = (function () {
         if (name === 'spim') mountLightPanel();
         PANES[name].onEnter();
         PANES[name].render();
-        renderEmbryoRail();
+        publishRoster();
         renderLock();
     }
 
@@ -1390,10 +1358,10 @@ const OperateManager = (function () {
         // Render the shared rail even when the Operate view isn't the active tab,
         // so switching to it (or refreshing) shows the list immediately rather
         // than waiting for the next mutation event.
-        renderEmbryoRail();
+        publishRoster();
         publishMarking();
         if (!_active) return;
-        renderRoster(); renderSpimTarget(); renderSingle();
+        publishRoster(); renderSpimTarget(); renderSingle();
     }
 
     function wire() {
@@ -1423,76 +1391,10 @@ const OperateManager = (function () {
         if (cl) cl.addEventListener('click', clearMarks);
         const canvas = $('op-mark-canvas'); if (canvas) canvas.addEventListener('click', onCanvasClick);
 
-        // Shared embryo rail: click a row to select (delete button is guarded
-        // first so removing a false positive doesn't also select it).
-        const erail = $('op-erail-list');
-        if (erail) {
-            erail.addEventListener('click', (e) => {
-                const del = e.target.closest('[data-del]');
-                if (del) { e.stopPropagation(); deleteEmbryo(del.dataset.del); return; }
-                const row = e.target.closest('[data-embryo]');
-                if (row) selectEmbryo(row.dataset.embryo);
-            });
-            erail.addEventListener('keydown', (e) => {
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                const row = e.target.closest('[data-embryo]');
-                if (row) { e.preventDefault(); selectEmbryo(row.dataset.embryo); }
-            });
-        }
-
-        const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
-        const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
-        document.querySelectorAll('[data-gv]').forEach(b =>
-            b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
-        document.querySelectorAll('[data-pz]').forEach(b =>
-            b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
-        document.querySelectorAll('[data-backoff]').forEach(b =>
-            b.addEventListener('click', backOff));
-
-        const modes = $('op-modes');
-        if (modes) {
-            modes.addEventListener('click', e => {
-                const b = e.target.closest('[data-mode]');
-                if (b) setMode(b.dataset.mode);
-            });
-        }
-        const stop = $('op-tl-stop');
-        if (stop) {
-            stop.addEventListener('change', () => {
-                const w = $('op-tl-condwrap');
-                if (w) w.hidden = stop.value === 'manual';
-            });
-        }
-        const lib = $('op-lib-list');
-        if (lib) {
-            lib.addEventListener('click', e => {
-                const b = e.target.closest('[data-lib]');
-                if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
-            });
-        }
-        const roster = $('op-roster');
-        if (roster) {
-            roster.addEventListener('click', e => {
-                const r = e.target.closest('[data-role-for]');
-                if (r) { e.stopPropagation(); toggleRole(r.dataset.roleFor); return; }
-                const c = e.target.closest('[data-center]');
-                if (c) {
-                    e.stopPropagation();
-                    const emb = _embryos.find(x => x.id === c.dataset.center);
-                    if (emb) centerOnEmbryo(emb);
-                    return;
-                }
-                const g = e.target.closest('[data-goto]');
-                if (g) { showPane(g.dataset.goto); return; }
-                const row = e.target.closest('[data-embryo]');
-                if (row) selectEmbryo(row.dataset.embryo);
-            });
-            roster.addEventListener('keydown', e => {
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                const row = e.target.closest('[data-embryo]');
-                if (row) { e.preventDefault(); selectEmbryo(row.dataset.embryo); }
-            });
-        }
+        // Row clicks and keys are the Roster panel's business now — it owns
+        // the markup, so it owns the handlers. Two listeners on one host, one
+        // of them looking for buttons the panel no longer emits, is how a
+        // select fires twice.
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
@@ -1524,7 +1426,7 @@ const OperateManager = (function () {
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;
-            renderRoster(); renderSpimTarget(); renderSingle(); renderEmbryoRail();
+            publishRoster(); renderSpimTarget(); renderSingle(); publishRoster();
         });
 
         if (typeof ClientEventBus !== 'undefined') {
@@ -1596,6 +1498,18 @@ const OperateManager = (function () {
     // owns the readout and the verbs, not the marking itself.
     return {
         activate, deactivate, redraw: drawMarkers,
+        // panels/roster.js renders SharedState.embryos and calls these. The
+        // list, the selection and the endpoints stay here.
+        roster: {
+            select: id => selectEmbryo(id),
+            remove: id => deleteEmbryo(id),
+            centre: id => {
+                const emb = _embryos.find(e => e.id === id);
+                if (emb) centerOnEmbryo(emb);
+            },
+            toggleRole: id => toggleRole(id),
+            goTo: pane => showPane(pane),
+        },
         marking: {
             detect: () => runDetect(),
             register: () => confirmMarks(),
