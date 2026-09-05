@@ -770,7 +770,10 @@
                           starts an Operation Plan for them.</p>
                       </div>
 
-                      <button class="op-btn op-btn-primary op-btn-wide" id="op-run-start" type="button">Start</button>
+                      <!-- Label is set per mode by renderRunButton(); this is single mode's verb
+                           so there is no flash of the wrong one on load. -->
+                      <button class="op-btn op-btn-primary op-btn-wide" id="op-run-start"
+                              type="button">Acquire one volume</button>
                     </div>
 
                     <div class="op-col">

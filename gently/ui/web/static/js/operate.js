@@ -1097,6 +1097,23 @@ const OperateManager = (function () {
         catch (e) { toastFail(`Roles failed (${why(e)})`); }
     }
 
+    // What `Start` will actually do, per mode. The button used to say "Start"
+    // for all four, while `startRun` branched into four different verbs — one
+    // of which (single) acquires a volume and finishes, and is not starting an
+    // experiment at all. The mode selector sits in a block above, so an
+    // operator who chose a mode and then looked away had nothing to read.
+    const RUN_VERB = {
+        single: 'Acquire one volume',
+        adaptive: 'Start timelapse',
+        library: 'Run tactic',
+        agent: 'Brief the agent',
+    };
+
+    function renderRunButton() {
+        const b = $('op-run-start');
+        if (b && !b.disabled) b.textContent = RUN_VERB[_mode] || 'Start';
+    }
+
     function setMode(m) {
         _mode = m;
         document.querySelectorAll('#op-modes [data-mode]').forEach(b =>
@@ -1106,6 +1123,7 @@ const OperateManager = (function () {
             if (p) p.hidden = k !== m;
         });
         if (m === 'library') loadLibrary();
+        renderRunButton();
         renderSingle();
     }
 
@@ -1136,15 +1154,40 @@ const OperateManager = (function () {
         } catch (_) { host.innerHTML = '<div class="op-empty">Library unavailable</div>'; }
     }
 
+    /**
+     * The embryos a run should image: everything not marked as a reference.
+     *
+     * There used to be a fallback — `subs.length ? subs : all` — meant to be
+     * kind to a roster with no roles assigned. It could never do that. An
+     * embryo with no role, or role 'test', or 'unassigned', already passes the
+     * filter, so `subs` is empty in exactly ONE case: every embryo is marked
+     * `calibration`. The fallback therefore fired only when the operator had
+     * said "these are all references", and answered by imaging all of them as
+     * subjects — the precise opposite of the instruction.
+     *
+     * Empty now, and the caller says so.
+     */
     function subjectIds() {
-        const subs = _embryos.filter(e => e.role !== 'calibration').map(e => e.id);
-        return subs.length ? subs : _embryos.map(e => e.id);
+        return _embryos.filter(e => e.role !== 'calibration').map(e => e.id);
+    }
+
+    // Every embryo marked as a reference means there is nothing to image. Say
+    // so once, here, rather than at each mode — and say which state it is in,
+    // because "no embryos" and "no subjects among your embryos" need
+    // different fixes.
+    function haveSubjects() {
+        if (!_embryos.length) { toastFail('No embryos registered yet'); return false; }
+        if (!subjectIds().length) {
+            toastFail('Every embryo is marked as a reference — assign at least one subject');
+            return false;
+        }
+        return true;
     }
 
     async function startRun() {
         const b = $('op-run-start');
-        const done = () => { if (b) { b.disabled = false; b.textContent = 'Start'; } };
-        if (b) { b.disabled = true; b.textContent = 'Starting…'; }
+        const done = () => { if (b) { b.disabled = false; renderRunButton(); } };
+        if (b) { b.disabled = true; b.textContent = 'Working…'; }
         try {
             if (_mode === 'single') {
                 if (!_selected) { toastFail('Select an embryo first'); return; }
@@ -1166,6 +1209,7 @@ const OperateManager = (function () {
                 return;
             }
             if (_mode === 'adaptive') {
+                if (!haveSubjects()) return;
                 const interval = Math.max(1, Number(($('op-tl-interval') || {}).value) || 120);
                 const sel = ($('op-tl-stop') || {}).value || 'manual';
                 const val = Math.max(1, Number(($('op-tl-condval') || {}).value) || 1);
@@ -1187,6 +1231,7 @@ const OperateManager = (function () {
             }
             if (_mode === 'library') {
                 if (!_selectedLib) { toastFail('Pick a saved tactic'); return; }
+                if (!haveSubjects()) return;
                 const d = await postJSON('/api/operate/run-tactic',
                     { library_id: _selectedLib, embryo_ids: subjectIds() });
                 if (d.success) { toast('Tactic started'); renderRun(); }
@@ -1560,6 +1605,7 @@ const OperateManager = (function () {
         // surface would never get its zoom.
         attachImageViews();
         mountPanels();
+        renderRunButton();
         if (_active) return;
         _active = true;
         showPaneInitial();
