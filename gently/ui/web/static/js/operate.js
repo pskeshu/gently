@@ -965,6 +965,26 @@ const OperateManager = (function () {
         } finally {
             clearInterval(tick);
             if (b) { b.disabled = false; b.textContent = 'Calibrate'; }
+            renderCalTarget();
+        }
+    }
+
+    // The calibration pane names its subject and reports the fit it has, if any
+    // — the same field the server-side gate checks, so the pane shows what a run
+    // would refuse rather than leaving it to be discovered at Start.
+    function renderCalTarget() {
+        const t = $('op-cal-target');
+        const emb = _embryos.find(e => e.id === _selected);
+        if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        const out = $('op-cal-result');
+        if (!out || !emb) return;
+        const slope = Number(((emb.calibration || {}).slope_um_per_deg));
+        if (Number.isFinite(slope) && slope !== 0) {
+            const r2 = (emb.calibration || {}).r_squared;
+            out.textContent = `${slope.toFixed(1)} µm/deg`
+                + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
+        } else {
+            out.textContent = 'not calibrated';
         }
     }
 
@@ -991,7 +1011,7 @@ const OperateManager = (function () {
         // once, as before. The set() is what makes the other copies of this
         // cursor follow.
         SharedState.set('selectedEmbryoId', id);
-        publishRoster(); renderSpimTarget(); renderSingle(); publishRoster();
+        publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle();
     }
 
     // Shared embryo list, left of every instrument surface. Reads the canonical
@@ -1030,7 +1050,7 @@ const OperateManager = (function () {
                 _selected = _embryos.length ? _embryos[0].id : null;
                 SharedState.set('selectedEmbryoId', _selected);
             }
-            publishRoster(); publishRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
+            publishRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
             toastFail(`Delete failed (${why(e)})`);
         }
@@ -1268,6 +1288,11 @@ const OperateManager = (function () {
     // contend for MMCore, and the client swaps .src per frame with no throttle,
     // so two live decoders is the condition that risks a Video-TDR freeze. "The
     // camera is live while you are looking at it" guarantees at most one.
+    // Workflow order, and the single list. It used to be spelled out in
+    // showPane and again in showPaneInitial, so adding a pane meant remembering
+    // both.
+    const PANE_ORDER = ['bottom', 'spim', 'cal', 'acquire'];
+
     const PANES = {
         bottom: {
             onEnter() { if (_bottomWasOn && !_bottomOn) toggleBottomCam(); drawMarkers(); },
@@ -1278,6 +1303,14 @@ const OperateManager = (function () {
             onEnter() { if (_spimWasOn && !_spimOn) toggleSpim(); },
             onLeave() { _spimWasOn = _spimOn; if (_spimOn) stopSpim(); forceLedOff(); },
             render() { renderSpimTarget(); fd.render(); },
+        },
+        cal: {
+            // The light-sheet view is what calibration reads, so entering here
+            // brings it back the same way the SPIM pane does, and leaving closes
+            // the LED — the calibrate path never did (#106).
+            onEnter() { if (_spimWasOn && !_spimOn) toggleSpim(); renderCalTarget(); },
+            onLeave() { _spimWasOn = _spimOn; if (_spimOn) stopSpim(); forceLedOff(); },
+            render() { renderCalTarget(); },
         },
         acquire: {
             onEnter() { renderRun(); },
@@ -1327,7 +1360,10 @@ const OperateManager = (function () {
             // is the pre-run review surface and gets everything. Previously the
             // difference was an accident of where each button was added.
             if ($('op-erail-list')) {
-                RosterPanel.mount('op-erail-list', { actions: ['remove'] });
+                // showFit: the rail is beside every pane, so calibration state is
+                // visible wherever you are — including before you reach the run
+                // and discover the gate refusing it.
+                RosterPanel.mount('op-erail-list', { actions: ['remove'], showFit: true });
             }
             if ($('op-roster')) {
                 RosterPanel.mount('op-roster',
@@ -1349,7 +1385,7 @@ const OperateManager = (function () {
         const prev = _pane;
         _pane = name;
         if (PANES[prev]) PANES[prev].onLeave();
-        ['bottom', 'spim', 'acquire'].forEach(p => {
+        PANE_ORDER.forEach(p => {
             const el = $(`op-pane-${p}`);
             if (el) el.hidden = p !== name;
         });
@@ -1471,7 +1507,7 @@ const OperateManager = (function () {
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;
-            publishRoster(); renderSpimTarget(); renderSingle(); publishRoster();
+            publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle();
         });
 
         if (typeof ClientEventBus !== 'undefined') {
@@ -1518,7 +1554,7 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
     function showPaneInitial() {
-        ['bottom', 'spim', 'acquire'].forEach(p => {
+        PANE_ORDER.forEach(p => {
             const el = $(`op-pane-${p}`);
             if (el) el.hidden = p !== _pane;
         });
