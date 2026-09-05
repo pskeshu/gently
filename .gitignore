@@ -159,3 +159,7 @@ config/dashboard_defaults.json
 # UI crawler generated output
 tools/ui_crawler/out*/
 
+# Local offline mirror of the GitHub issues (tools regenerate it). Not tracked:
+# ruff 0.16 formats Python code blocks inside markdown, so committing verbatim
+# issue text means the formatter rewrites the snippets people quoted.
+notes/issues-cache/
