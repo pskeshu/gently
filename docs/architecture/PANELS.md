@@ -124,6 +124,13 @@ constraint.
 | ImageView | zoom, pan, contrast, brightness | both camera surfaces | view state, stays local |
 | Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
 | Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |
+| Roster | the embryo list | rail + Acquisition | actions declared per mount; `showFit` reads the gate's field |
+
+The Roster panel is the clearest case of rule 1 paying off: it replaced
+`renderEmbryoRail` and `renderRoster`, which were ~80% the same code with
+**arbitrarily** different action sets — delete on one pane, Centre and role on
+the other, for no reason either pane justified. Actions are declared per mount
+now, so the difference is a decision someone made.
 
 Note what Marking does *not* own: `_markers`, the canvas and the frame
 geometry stay in `operate.js`, because marks are placed in stage coordinates

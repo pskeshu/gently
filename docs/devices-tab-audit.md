@@ -1,5 +1,10 @@
 # Devices tab — component audit
 
+> **Status, 2026-09-06.** Findings 1, 4, 5, 6, 7 and #108 are fixed — see the
+> pull requests referenced inline. What remains needs the rig, or is
+> presentation work listed at the end. The findings are kept rather than
+> deleted, because the reasoning is what stops them coming back.
+
 A read of every surface in the Devices tab, from the bottom camera through to
 starting an experiment, judged against `docs/architecture/PANELS.md`.
 
@@ -10,7 +15,10 @@ microscope to confirm.
 
 ## Cross-cutting
 
-### 1. Three renderings of one roster
+### 1. Three renderings of one roster — FIXED
+
+One `panels/roster.js`, mounted twice with actions declared per mount.
+
 
 | function | host | shows | actions |
 |---|---|---|---|
@@ -31,7 +39,10 @@ just where each button happened to be added.
 `CameraPanel` takes `{titled}`. It also becomes the thing the Atrium's EMBRYOS
 window mounts.
 
-### 2. The helpful empty state is on the pane you reach second
+### 2. The helpful empty state is on the pane you reach second — FIXED
+
+The panel's empty state names the fix at every mount; the CTA is opt-in.
+
 
 - Bottom cam: *"No embryos yet — detect on the bottom camera, then register."*
   — describes the fix, offers no way to do it. This is the pane you are already
@@ -84,7 +95,11 @@ Remaining:
 This is the weakest surface, and two of the findings are workflow correctness
 rather than presentation.
 
-### 4. `Start` is four different verbs behind one label
+### 4. `Start` is four different verbs behind one label — FIXED
+
+The label is the verb: *Acquire one volume* / *Start timelapse* /
+*Run tactic* / *Brief the agent*.
+
 
 `startRun` (`operate.js:1144`) branches on `_mode`:
 
@@ -100,13 +115,22 @@ takes one image and finishes. The label never changes, and the mode selector
 sits in a different block above. An operator who has chosen a mode and then
 looked away has no way to read what the button will now do.
 
-### 5. `single` mode silently ignores the roster you built
+### 5. `single` mode silently ignores the roster you built — FIXED
+
+It now names the embryo it images, which is also what made the
+calibration gate possible on that route.
+
 
 Every other mode passes `subjectIds()`. `single` uses `_selected` alone. So the
 roster — the thing the whole preceding workflow exists to produce — matters or
 does not depending on a segmented control, with nothing saying so.
 
-### 6. Nothing anywhere checks that calibration has been done
+### 6. Nothing anywhere checks that calibration has been done — FIXED
+
+`gently/harness/calibration_gate.py`, enforced server-side on
+`timelapse/start`, `run-tactic`, `acquire/volume` and the agent tool.
+The rail shows `CAL`/`UNCAL` so a refusal is visible beforehand.
+
 
 Neither `startRun` nor `POST /api/devices/timelapse/start` looks at whether the
 selected embryos carry a calibration fit. The route validates
@@ -125,7 +149,11 @@ workflow has a hard dependency and the code enforces none of it.
 embryo has no calibration. Server-side, so the agent path cannot route around
 it.
 
-### 7. `subjectIds()` falls back to imaging the references
+### 7. `subjectIds()` falls back to imaging the references — FIXED
+
+The fallback is gone and `haveSubjects()` refuses, distinguishing
+"no embryos" from "no subjects among your embryos".
+
 
 ```js
 const subs = _embryos.filter(e => e.role !== 'calibration').map(e => e.id);
@@ -163,12 +191,18 @@ Not audited in depth; each has open issues already.
 
 In order:
 
-1. **The calibration preflight (6).** Data acquired from an uncalibrated stage
-   is worse than a refusal, and it contradicts the team's own stated ordering.
-2. **`Start`'s four meanings (4) and the roster it ignores (5).** The last
-   action in the workflow is the one an operator can least predict.
-3. **One roster component (1).** Everything else in the tab is now a panel;
-   this is the last duplicated surface, and it is the one #129 is about.
+All three are done. What is left needs the microscope:
+
+1. **#106** — whether the beam actually fires. The Light panel separates
+   *armed* from *routed* from *powered*, and
+   `GET /api/devices/properties?device=Coherent-Scientific%20Remote` reports
+   what the controller says about itself, which works without the specimen in
+   focus.
+2. **#125** — camera ROI readout, for seeing nuclei well enough to calibrate.
+3. **#149** — the per-frame display range. The histogram panel now makes the
+   problem visible; the fix is server-side.
+4. `AT_TOL_UM = 50` and `PREVIEW_IDLE_MS = 45000` carry `RIG-NOTE` markers and
+   are still guesses.
 
 Presentation items — the empty states, the three-meaning caption, the Map
 legibility work — are real but do not stop a run from being trustworthy.
