@@ -55,6 +55,7 @@ const RosterPanel = (() => {
         mounts.set(hostId, {
             actions: (opts && opts.actions) || [],
             emptyAction: opts && opts.emptyAction,
+            showFit: !!(opts && opts.showFit),
         });
         if (mounts.size === 1) {
             SharedState.on('embryos', render);
@@ -80,6 +81,20 @@ const RosterPanel = (() => {
         const c = emb && emb.position_coarse;
         if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) return c;
         return null;
+    }
+
+    /**
+     * Does this embryo carry a galvo/piezo fit?
+     *
+     * The same field the server-side gate checks — a finite non-zero
+     * `slope_um_per_deg` (see gently/harness/calibration_gate.py). Showing it
+     * in the rail means an operator can see what a run is about to refuse,
+     * from any pane, instead of discovering it at Start.
+     */
+    function fitOf(emb) {
+        const cal = (emb && emb.calibration) || {};
+        const slope = Number(cal.slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0 ? slope : null;
     }
 
     function labelOf(emb) {
@@ -134,11 +149,19 @@ const RosterPanel = (() => {
         return `<div class="rp-row${emb.id === selected ? ' is-sel' : ''}" tabindex="0"
                  data-embryo="${esc(emb.id)}">
                   <span class="rp-main">
-                    <span class="rp-label">Embryo ${esc(labelOf(emb))}</span>
+                    <span class="rp-label">Embryo ${esc(labelOf(emb))}${fitBadge(emb, opts)}</span>
                     <span class="rp-xy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>
                   </span>
                   <span class="rp-acts">${buttons}</span>
                 </div>`;
+    }
+
+    function fitBadge(emb, opts) {
+        if (!opts.showFit) return '';
+        const slope = fitOf(emb);
+        return slope == null
+            ? '<span class="rp-fit rp-fit-none" title="Not calibrated — a run will refuse this embryo">uncal</span>'
+            : `<span class="rp-fit" title="Calibrated: ${slope.toFixed(1)} µm/deg">cal</span>`;
     }
 
     function wire(host) {

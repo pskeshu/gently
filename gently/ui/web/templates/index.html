@@ -536,6 +536,11 @@
                   <div class="view-switcher op-subviews" id="operate-subtab-switcher">
                     <button class="view-btn active" data-view="bottom" title="Bottom camera">Bottom cam</button>
                     <button class="view-btn" data-view="spim" title="SPIM head">SPIM head</button>
+                    <!-- #108: the step between finding the embryo and setting up the
+                         run. Ryan on 2026-08-07: "you find the embryos on the bottom
+                         camera, you find them with the SPIM head, you calibrate it,
+                         and then you set up your acquisition parameters." -->
+                    <button class="view-btn" data-view="cal" title="Calibration">Calibration</button>
                     <button class="view-btn" data-view="acquire" title="Acquisition setup">Acquisition</button>
                   </div>
                   <span class="op-subnav-meta" id="op-subnav-meta"></span>
@@ -636,23 +641,11 @@
                     </div>
                     <div class="op-bar">
                       <span class="op-cap" id="op-spim-target">No embryo selected</span>
-                      <span class="op-bar-r">
-                        <span class="op-label">Piezo–galvo</span>
-                        <span class="op-num" id="op-cal-result">—</span>
-                        <button class="op-btn" id="op-calibrate" type="button">Calibrate</button>
-                      </span>
                     </div>
                     <!-- Seats itself while a routine is producing images and retires
                          when they stop. No open or close control on purpose: an
                          operator watching the scope should not have to ask for it. -->
                     <div class="op-block op-block-display" id="op-display-spim"></div>
-                    <figure class="op-preview" id="op-preview" hidden>
-                      <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
-                      <figcaption class="op-preview-cap">
-                        <span class="op-preview-title" id="op-preview-title"></span>
-                        <span class="op-preview-meta" id="op-preview-meta"></span>
-                      </figcaption>
-                    </figure>
                   </div>
 
                   <aside class="op-inst">
@@ -714,6 +707,49 @@
 
                 <!-- ══ ACQUISITION ══ roster + what to run. Reads the canonical embryo
                      list; nothing here is sequenced after anything else. -->
+                <!-- #108. Between SPIM head and Acquisition, because that is where
+                     it sits in the work: find the embryo, then calibrate it, then set
+                     up the run. Ryan at 25:30 on the walkthrough: "after setting up
+                     the bottom camera and SPIM head, I feel like I'm not quite sure
+                     what to do in gently at this point." This is what came next. -->
+                <section class="op-pane" id="op-pane-cal" data-pane="cal" hidden>
+                  <div class="op-lock" id="op-lock-cal" hidden>
+                    <span class="op-lock-txt">Sample at objective · XY locked ·
+                      <b class="op-num" id="op-lock-cal-d">—</b> <i>µm to floor</i></span>
+                    <button class="op-btn op-btn-warn" data-backoff="1" type="button">Back off 100 µm</button>
+                  </div>
+                  <div class="op-main">
+                    <div class="op-block">
+                      <div class="op-block-head">Calibrate</div>
+                      <!-- Declares the method before it runs. Kesavan on the
+                           walkthrough: "when there is a calibrate option, it should
+                           show what is the method it is going to use to calibrate."
+                           There is one method on this rig, so it is named rather
+                           than offered as a choice. -->
+                      <p class="op-cap" id="op-cal-method">
+                        Lineaging-embryo method — a galvo sweep read by the
+                        light-sheet camera, then a piezo focus sweep. Needs the
+                        laser: the LED alone gives a DIC-like image with no nuclei
+                        to find.
+                      </p>
+                      <div class="op-row"><span class="op-label">Selected</span>
+                        <span class="op-num" id="op-cal-target">no embryo selected</span></div>
+                      <div class="op-row"><span class="op-label">Piezo–galvo</span>
+                        <span class="op-num" id="op-cal-result">—</span></div>
+                      <div class="op-actions">
+                        <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
+                      </div>
+                    </div>
+                    <figure class="op-preview" id="op-preview" hidden>
+                      <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
+                      <figcaption class="op-preview-cap">
+                        <span class="op-preview-title" id="op-preview-title"></span>
+                        <span class="op-preview-meta" id="op-preview-meta"></span>
+                      </figcaption>
+                    </figure>
+                  </div>
+                </section>
+
                 <section class="op-pane op-pane-acquire" id="op-pane-acquire" data-pane="acquire" hidden>
                   <div class="op-main op-main-cols">
                     <div class="op-col">

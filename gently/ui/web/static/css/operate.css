@@ -1044,3 +1044,33 @@
     color: var(--op-ink);
     cursor: pointer;
 }
+
+/* Calibration state in the shared rail — visible from every pane, so an
+   operator sees what a run will refuse before reaching Start rather than
+   after. The field is the one the server-side gate checks
+   (gently/harness/calibration_gate.py). */
+.rp-fit {
+    margin-left: 6px;
+    padding: 0 4px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Not an error — an embryo you have not got to yet. Muted, not red. */
+.rp-fit-none {
+    color: var(--op-ink-dim);
+    background: color-mix(in srgb, var(--op-ink) 8%, transparent);
+}
+
+/* The method the Calibrate button will run, stated before it runs. */
+#op-cal-method {
+    margin: 0 0 var(--op-2);
+    max-width: 52ch;
+    line-height: 1.45;
+}
