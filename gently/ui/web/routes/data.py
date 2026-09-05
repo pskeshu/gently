@@ -820,6 +820,23 @@ def create_router(server) -> APIRouter:
             logger.exception("Laser off command failed")
             raise HTTPException(status_code=502, detail=f"laser off failed: {exc}") from exc
 
+    @router.get("/api/devices/properties")
+    async def device_properties(device: str | None = None):
+        """Every Micro-Manager property of one device, or the device list.
+
+        Read-only diagnostic. No `require_control`: it commands nothing, and it
+        is most needed exactly when someone is trying to work out what the
+        hardware is doing without being able to look at it.
+        """
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_properties(device)
+        except Exception as exc:
+            logger.exception("Device property read failed")
+            raise HTTPException(status_code=502, detail=f"property read failed: {exc}") from exc
+
     @router.get("/api/devices/beam")
     async def beam_get():
         """Is the beam armed, per side? Read from hardware. Read-only route."""

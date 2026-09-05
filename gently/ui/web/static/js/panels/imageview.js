@@ -42,7 +42,7 @@ const ImageView = (() => {
 
     const views = new Map();   // containerId -> {z, tx, ty, fit, badge}
 
-    function attach(containerId) {
+    function attach(containerId, opts) {
         if (views.has(containerId)) return;
         const box = document.getElementById(containerId);
         if (!box) return;
@@ -50,7 +50,8 @@ const ImageView = (() => {
         if (!fit) return;
 
         const v = { z: 1, tx: 0, ty: 0, fit, box, badge: null, drag: null,
-                    lo: 0, hi: 1, bar: null, filterId: `iv-win-${containerId}` };
+                    lo: 0, hi: 1, panel: null, hist: null,
+                    filterId: `iv-win-${containerId}` };
         views.set(containerId, v);
 
         // Zoom about the cursor, so the thing under the pointer stays under it.
@@ -127,95 +128,224 @@ const ImageView = (() => {
         // uses (PANELS.md rule 6 — nothing to open or close).
         box.addEventListener('dblclick', e => { e.preventDefault(); reset(containerId); });
 
-        buildBar(v, containerId);
+        // Controls go in a host OUTSIDE the frame. Nothing sits on the pixels:
+        // the image is the instrument, and an overlay both hides data and eats
+        // clicks meant for markers.
+        const host = opts && opts.controlsHost && document.getElementById(opts.controlsHost);
+        if (host) buildPanel(v, containerId, host);
         apply(v);
     }
 
     /**
-     * The display window: a black point and a white point on one track.
+     * The display panel: a histogram with the transfer line drawn across it.
      *
-     * This replaced two abstract "contrast" and "brightness" sliders. Those are
-     * not how anyone reading a microscope image thinks — a microscopist sets a
-     * display range, the way ImageJ's Brightness/Contrast or Micro-Manager's
-     * histogram does, and asking them to reach that through two multiplicative
-     * knobs is arithmetic homework.
+     * Modelled on ImageJ/Fiji's Brightness/Contrast, which is the tool every
+     * microscopist already knows. Its insight is that the histogram and the
+     * mapping belong in one picture: you see where the data actually sits, and
+     * you see the line that decides what black and white mean, together. That
+     * is why B&C needs no numeric status readout — the artefact is the status.
+     *
+     * Two abstract "contrast" and "brightness" sliders were the opposite of
+     * this: they asked the operator to guess where the data was and then reach
+     * it through multiplication.
      *
      * It also cannot be done with CSS. `brightness()` and `contrast()` are both
      * multiplicative about their own origin, so composing them gives
-     * `out = in·b·c + k` where k is pinned by c — there is no free intercept,
-     * and an arbitrary window needs one. An SVG feComponentTransfer with
-     * type="linear" has slope AND intercept, so it maps the window exactly:
+     * `out = in·b·c + k` with k pinned by c — no free intercept, and a window
+     * needs one. An SVG feComponentTransfer with type="linear" has slope AND
+     * intercept, so it maps the window exactly:
      *
      *     out = (in - lo) / (hi - lo)   →   slope = 1/(hi-lo), intercept = -lo·slope
      *
      * `color-interpolation-filters="sRGB"` matters: the SVG default is
-     * linearRGB, which would silently apply a gamma the operator did not ask
-     * for and make the readout a lie.
+     * linearRGB, which would apply a gamma the operator did not ask for.
+     *
+     * The histogram is of the frame as displayed, which is 8-bit and already
+     * percentile-stretched by the device layer before JPEG encoding. It is not
+     * raw camera counts, and it is labelled as such — the honest fix for that
+     * is #149, and this panel is what will make the case visible.
      */
-    function buildBar(v, containerId) {
+    function buildPanel(v, containerId, host) {
         ensureFilter(v);
 
-        const bar = document.createElement('div');
-        bar.className = 'iv-bar';
-        bar.innerHTML = `
-          <span class="iv-lbl">display</span>
-          <div class="iv-win" data-win tabindex="0" role="group"
-               aria-label="Display range: black point and white point">
-            <div class="iv-win-track"></div>
-            <div class="iv-win-span" data-span></div>
-            <div class="iv-win-h iv-win-lo" data-h="lo" role="slider" tabindex="0"
-                 aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
-            <div class="iv-win-h iv-win-hi" data-h="hi" role="slider" tabindex="0"
-                 aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
-          </div>
-          <span class="iv-read" data-read></span>
-          <button type="button" class="iv-reset" title="Reset zoom and display range">reset</button>`;
+        host.innerHTML = `
+          <div class="lp">
+            <div class="lp-head">
+              <span class="lp-title">Display</span>
+              <span class="iv-src" title="Histogram of the displayed 8-bit frame, which the device layer has already percentile-stretched. Not raw camera counts (#149).">as displayed</span>
+            </div>
+            <div class="iv-hist" data-hist>
+              <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
+              <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
+                   aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
+              <div class="iv-h iv-h-hi" data-h="hi" role="slider" tabindex="0"
+                   aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <div class="iv-acts">
+              <button type="button" class="lp-btn" data-auto>Auto</button>
+              <button type="button" class="lp-btn" data-reset>Reset</button>
+            </div>
+          </div>`;
 
-        ['pointerdown', 'pointerup', 'click', 'dblclick', 'wheel'].forEach(ev =>
-            bar.addEventListener(ev, e => e.stopPropagation()));
-
-        const win = bar.querySelector('[data-win]');
+        const hist = host.querySelector('[data-hist]');
         let dragging = null;
-
         const fromX = clientX => {
-            const r = win.getBoundingClientRect();
+            const r = hist.getBoundingClientRect();
             return Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)));
         };
 
-        win.addEventListener('pointerdown', e => {
+        hist.addEventListener('pointerdown', e => {
             const h = e.target.closest('[data-h]');
-            // Grab the nearer handle when the track itself is pressed, so the
-            // operator does not have to hit an 8 px target.
             const at = fromX(e.clientX);
+            // Grab the nearer handle when the histogram itself is pressed, so
+            // the operator does not have to hit an 8 px target.
             dragging = h ? h.dataset.h
                 : (Math.abs(at - v.lo) <= Math.abs(at - v.hi) ? 'lo' : 'hi');
             moveHandle(v, dragging, at);
-            win.setPointerCapture(e.pointerId);
+            hist.setPointerCapture(e.pointerId);
         });
-        win.addEventListener('pointermove', e => {
-            if (!dragging) return;
-            moveHandle(v, dragging, fromX(e.clientX));
+        hist.addEventListener('pointermove', e => {
+            if (dragging) moveHandle(v, dragging, fromX(e.clientX));
         });
-        win.addEventListener('pointerup', e => {
+        hist.addEventListener('pointerup', e => {
             dragging = null;
-            try { win.releasePointerCapture(e.pointerId); } catch (_) { /* fine */ }
+            try { hist.releasePointerCapture(e.pointerId); } catch (_) { /* fine */ }
         });
-
-        // Keyboard: the window is a real control, not a mouse-only flourish.
-        win.addEventListener('keydown', e => {
+        hist.addEventListener('keydown', e => {
             const step = e.shiftKey ? 0.10 : 0.02;
             const which = (document.activeElement && document.activeElement.dataset.h) || 'hi';
             if (e.key === 'ArrowLeft') { moveHandle(v, which, v[which] - step); e.preventDefault(); }
             else if (e.key === 'ArrowRight') { moveHandle(v, which, v[which] + step); e.preventDefault(); }
         });
 
-        bar.querySelector('.iv-reset').addEventListener('click', () => {
+        host.querySelector('[data-auto]').addEventListener('click', () => autoWindow(v));
+        host.querySelector('[data-reset]').addEventListener('click', () => {
             v.lo = 0; v.hi = 1;
             reset(containerId);
         });
 
-        v.bar = bar;
-        v.box.appendChild(bar);
+        v.panel = host;
+        // Frames stream, so recompute on arrival but not on every one.
+        const img = v.fit.querySelector('.op-cam-img');
+        if (img) img.addEventListener('load', () => scheduleHistogram(v));
+        scheduleHistogram(v);
+    }
+
+    /* ── histogram ───────────────────────────────────────────────────────── */
+
+    // RIG-NOTE: 400ms between recomputes. The frame rate is higher than any eye
+    // needs from a histogram, and each pass is a full readback of the decoded
+    // image. Lower it if the histogram feels laggy while hunting focus.
+    const HIST_MS = 400;
+    let histTimer = null;
+    let histPending = null;
+
+    function scheduleHistogram(v) {
+        histPending = v;
+        if (histTimer) return;
+        histTimer = setTimeout(() => {
+            histTimer = null;
+            const target = histPending;
+            histPending = null;
+            if (target) computeHistogram(target);
+        }, HIST_MS);
+    }
+
+    function computeHistogram(v) {
+        const img = v.fit.querySelector('.op-cam-img');
+        if (!img || !img.naturalWidth) { v.hist = null; drawHistogram(v); return; }
+        try {
+            // Downsampled: a histogram does not need every pixel, and reading
+            // back a full frame every 400ms would be the expensive part.
+            const W = 256, H = Math.max(1, Math.round(256 * img.naturalHeight / img.naturalWidth));
+            const c = histCanvas(W, H);
+            const ctx = c.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, W, H);
+            const d = ctx.getImageData(0, 0, W, H).data;
+            const bins = new Uint32Array(256);
+            for (let i = 0; i < d.length; i += 4) {
+                // Rec. 601 luma. The frames are greyscale, so any channel would
+                // do, but this stays right if a colour overlay ever arrives.
+                bins[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++;
+            }
+            v.hist = bins;
+        } catch (_) {
+            v.hist = null;      // tainted or not yet decodable
+        }
+        drawHistogram(v);
+    }
+
+    let _histCanvas = null;
+    function histCanvas(w, h) {
+        if (!_histCanvas) _histCanvas = document.createElement('canvas');
+        if (_histCanvas.width !== w || _histCanvas.height !== h) {
+            _histCanvas.width = w; _histCanvas.height = h;
+        }
+        return _histCanvas;
+    }
+
+    function drawHistogram(v) {
+        if (!v.panel) return;
+        const c = v.panel.querySelector('[data-hist-c]');
+        if (!c) return;
+        const ctx = c.getContext('2d');
+        const W = c.width, H = c.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (v.hist) {
+            // Log counts: a microscopy histogram is dominated by background, and
+            // on a linear axis the signal that matters is a flat line at zero.
+            let max = 0;
+            for (let i = 0; i < 256; i++) max = Math.max(max, v.hist[i]);
+            const norm = Math.log1p(max) || 1;
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            for (let i = 0; i < 256; i++) {
+                const h = (Math.log1p(v.hist[i]) / norm) * (H - 2);
+                if (h > 0) ctx.fillRect((i / 256) * W, H - h, Math.ceil(W / 256), h);
+            }
+        } else {
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.fillText('no frame', 6, H / 2);
+        }
+
+        // The transfer line: what black and white currently mean, drawn over the
+        // data it applies to. This is the readout — ImageJ's B&C insight.
+        ctx.strokeStyle = 'rgba(96,165,250,0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, H - 1);
+        ctx.lineTo(v.lo * W, H - 1);
+        ctx.lineTo(v.hi * W, 1);
+        ctx.lineTo(W, 1);
+        ctx.stroke();
+    }
+
+    /**
+     * Auto: put the window around the data actually present.
+     *
+     * The 0.1st and 99.9th percentiles of the displayed histogram, not min/max
+     * — a handful of hot pixels should not define white.
+     */
+    function autoWindow(v) {
+        if (!v.hist) return;
+        let total = 0;
+        for (let i = 0; i < 256; i++) total += v.hist[i];
+        if (!total) return;
+        const lowCut = total * 0.001, highCut = total * 0.999;
+        let acc = 0, lo = 0, hi = 255;
+        for (let i = 0; i < 256; i++) {
+            acc += v.hist[i];
+            if (acc >= lowCut) { lo = i; break; }
+        }
+        acc = 0;
+        for (let i = 0; i < 256; i++) {
+            acc += v.hist[i];
+            if (acc >= highCut) { hi = i; break; }
+        }
+        v.lo = lo / 255;
+        v.hi = Math.max(v.lo + MIN_SPAN, hi / 255);
+        apply(v);
     }
 
     // Handles cannot cross, and cannot meet: hi === lo is an infinite slope.
@@ -274,16 +404,14 @@ const ImageView = (() => {
             });
         }
 
-        if (!v.bar) return;
-        const lo = v.bar.querySelector('[data-h="lo"]');
-        const hi = v.bar.querySelector('[data-h="hi"]');
-        const span = v.bar.querySelector('[data-span]');
-        const read = v.bar.querySelector('[data-read]');
+        if (!v.panel) return;
+        // The handles are the only numeric readout there is, and the transfer
+        // line over the histogram is the rest — ImageJ's B&C carries no status
+        // text either, because the picture already says it.
+        const lo = v.panel.querySelector('[data-h="lo"]');
+        const hi = v.panel.querySelector('[data-h="hi"]');
         if (lo) { lo.style.left = `${v.lo * 100}%`; lo.setAttribute('aria-valuenow', Math.round(v.lo * 100)); }
         if (hi) { hi.style.left = `${v.hi * 100}%`; hi.setAttribute('aria-valuenow', Math.round(v.hi * 100)); }
-        if (span) { span.style.left = `${v.lo * 100}%`; span.style.right = `${(1 - v.hi) * 100}%`; }
-        // Presence-driven: the numbers appear only once the window is not full.
-        if (read) read.textContent = wide ? '' : `${Math.round(v.lo * 100)}–${Math.round(v.hi * 100)}`;
     }
 
     const clamp = z => Math.min(MAX_Z, Math.max(MIN_Z, z));
@@ -295,6 +423,7 @@ const ImageView = (() => {
         // On the <img>, not the fit box: the marker canvas is a sibling inside
         // it and must NOT be filtered, or green markers dim with the frame.
         applyWindow(v);
+        drawHistogram(v);
         v.box.style.cursor = v.z > 1 ? 'grab' : '';
         badge(v);
     }
