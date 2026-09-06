@@ -1076,6 +1076,25 @@ async def calibrate_embryo(
     total_exposures = 0
 
     try:
+        # Close the LED before the first frame. #106: nothing on this path ever
+        # did, so a session that had used brightfield to find embryos left the
+        # LED open and every vision frame was brightfield with a 50 ms laser
+        # gate on top -- Claude was asked to find nuclei in a DIC-like image.
+        # Both callers (the Operate pane's route and the agent tool) come
+        # through here, which is why it belongs here and not in either.
+        #
+        # A failed shutter close is logged, not fatal: the cost is a poor fit,
+        # and refusing to calibrate because a status call timed out is worse
+        # mid-session. The Light panel shows the LED state throughout.
+        try:
+            await client.set_led("Closed")
+        except Exception as led_err:
+            logger.warning(
+                "Could not close the LED before calibration (%s) -- if it is open, "
+                "edge detection is looking at brightfield, not fluorescence",
+                led_err,
+            )
+
         # First move to embryo position
         pos = embryo.stage_position
         if pos and pos.get("x") is not None and pos.get("y") is not None:
