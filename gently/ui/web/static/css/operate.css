@@ -1093,3 +1093,51 @@
     opacity: 0.45;
     cursor: default;
 }
+
+/* ── Agent-initiated marking session ─────────────────────────────────────
+   Present only while the agent is waiting on an answer, so it seats and
+   retires with the session rather than standing there empty. */
+.mk-session {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--op-rule);
+    grid-column: 1 / -1;
+}
+
+.mk-shead {
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+}
+
+/* One row per pending marker: the contract carries a role for each, so each
+   needs to be settable before the answer goes back. */
+.mk-prow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.mk-pnum {
+    flex: 0 0 18px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.72rem;
+    color: var(--op-ink);
+}
+
+.mk-psrc {
+    flex: 1 1 auto;
+    font-size: 0.64rem;
+    color: var(--op-ink-dim);
+}
+
+.mk-prole.is-reference {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.mk-session .mk-acts { margin-top: 8px; }
