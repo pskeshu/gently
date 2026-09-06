@@ -1141,3 +1141,40 @@
 }
 
 .mk-session .mk-acts { margin-top: 8px; }
+
+/* ── Light panel: the laser's own settings ────────────────────────────────
+   Indented under the Laser row because Beam and power only MATTER once a line
+   is routed — scope, not dependency. They are not caused by the config, and
+   #106 is what happens when someone assumes they are, which is why the
+   contradiction below gets its own line rather than being softened by the
+   indent. */
+.lp-sub {
+    margin: 2px 0 4px 10px;
+    padding-left: 10px;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Routed lines with the beam off: configured, and will not emit. Not a hazard
+   — the opposite — but the single most misleading state this panel can be in,
+   so it is stated rather than left to be inferred from two rows. */
+.lp-warn {
+    margin: 0;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--accent-amber, #d97706);
+    background: color-mix(in srgb, var(--accent-amber, #d97706) 12%, transparent);
+}
+
+/* Armed with nothing routed — safe, surprising, and the state the rig is left
+   in. Muted, because nothing is wrong. */
+.lp-note {
+    margin: 0 0 2px 10px;
+    font-size: 0.66rem;
+    line-height: 1.35;
+    color: var(--op-ink-dim);
+}
