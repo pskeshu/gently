@@ -1,0 +1,237 @@
+- generic [active] [ref=f49e1]:
+  - generic [ref=f49e2]:
+    - generic [ref=f49e3]:
+      - link "Dashboard" [ref=f49e4] [cursor=pointer]:
+        - /url: /
+      - heading "Settings" [level=1] [ref=f49e7]
+    - button "Toggle theme" [ref=f49e9] [cursor=pointer]
+  - generic [ref=f49e12]:
+    - navigation [ref=f49e13]:
+      - generic [ref=f49e14]:
+        - generic [ref=f49e15]: Dashboard
+        - link "Views" [ref=f49e16] [cursor=pointer]:
+          - /url: "#views"
+        - link "Alerts" [ref=f49e17] [cursor=pointer]:
+          - /url: "#alerts"
+        - link "Ambient Pulse" [ref=f49e18] [cursor=pointer]:
+          - /url: "#ambient"
+      - generic [ref=f49e19]:
+        - generic [ref=f49e20]: View Settings
+        - link "Board View" [ref=f49e21] [cursor=pointer]:
+          - /url: "#board"
+        - link "Filmstrip View" [ref=f49e22] [cursor=pointer]:
+          - /url: "#filmstrip"
+        - link "Vitals View" [ref=f49e23] [cursor=pointer]:
+          - /url: "#vitals"
+        - link "Default View" [ref=f49e24] [cursor=pointer]:
+          - /url: "#detail"
+      - generic [ref=f49e25]:
+        - generic [ref=f49e26]: Hardware
+        - link "Device layer" [ref=f49e27] [cursor=pointer]:
+          - /url: "#devicelayer"
+        - link "Thermalizer" [ref=f49e28] [cursor=pointer]:
+          - /url: "#thermalizer"
+        - link "Effective config" [ref=f49e29] [cursor=pointer]:
+          - /url: "#effective"
+        - link "Advanced" [ref=f49e30] [cursor=pointer]:
+          - /url: "#advanced"
+    - main [ref=f49e31]:
+      - generic [ref=f49e32]:
+        - heading "Dashboard Views" [level=2] [ref=f49e33]
+        - generic [ref=f49e34]:
+          - generic [ref=f49e35]: Default view on load
+          - generic [ref=f49e36]:
+            - generic [ref=f49e37] [cursor=pointer]: Default
+            - generic [ref=f49e38] [cursor=pointer]: Board
+            - generic [ref=f49e39] [cursor=pointer]: Filmstrip
+            - generic [ref=f49e40] [cursor=pointer]: Vitals
+      - generic [ref=f49e41]:
+        - heading "Alert Thresholds" [level=2] [ref=f49e42]
+        - generic [ref=f49e43]:
+          - generic [ref=f49e44]: Warn (amber) when overtime ratio exceeds
+          - generic [ref=f49e45]:
+            - spinbutton [ref=f49e46]: "1.5"
+            - generic [ref=f49e47]: x
+        - generic [ref=f49e48]:
+          - generic [ref=f49e49]: Critical (red) when overtime ratio exceeds
+          - generic [ref=f49e50]:
+            - spinbutton [ref=f49e51]: "2.5"
+            - generic [ref=f49e52]: x
+      - generic [ref=f49e53]:
+        - heading "Device layer" [level=2] [ref=f49e54]
+        - paragraph [ref=f49e55]: Install-time settings for the microscope control process. Most rigs never change these — they're kept off the launch screen on purpose.
+        - generic [ref=f49e56]:
+          - generic [ref=f49e57]: Device layer port
+          - spinbutton [ref=f49e59]: "60610"
+        - generic [ref=f49e60]:
+          - generic [ref=f49e61]: Image analysis (SAM) runs on
+          - generic [ref=f49e62]:
+            - generic [ref=f49e63] [cursor=pointer]: Auto-detect
+            - generic [ref=f49e64] [cursor=pointer]: GPU (CUDA)
+            - generic [ref=f49e65] [cursor=pointer]: CPU
+          - paragraph [ref=f49e66]: "Detected: CPU — no GPU found, so image analysis will be slower"
+        - paragraph
+      - generic [ref=f49e67]:
+        - heading "Ambient Pulse" [level=2] [ref=f49e68]
+        - generic [ref=f49e70] [cursor=pointer]:
+          - checkbox "Enable background health pulse" [checked] [ref=f49e71]
+          - text: Enable background health pulse
+        - generic [ref=f49e73] [cursor=pointer]:
+          - checkbox "Audio tick on acquisition" [ref=f49e74]
+          - text: Audio tick on acquisition
+        - generic [ref=f49e75]:
+          - generic [ref=f49e76]: Sensitivity
+          - generic [ref=f49e77]:
+            - generic [ref=f49e78] [cursor=pointer]: Low
+            - generic [ref=f49e79] [cursor=pointer]: Normal
+            - generic [ref=f49e80] [cursor=pointer]: High
+      - generic [ref=f49e81]:
+        - heading "Board View" [level=2] [ref=f49e82]
+        - generic [ref=f49e83]:
+          - generic [ref=f49e84]: Visible columns
+          - generic [ref=f49e85]:
+            - generic [ref=f49e86] [cursor=pointer]:
+              - checkbox "Stage" [checked] [ref=f49e87]
+              - text: Stage
+            - generic [ref=f49e88] [cursor=pointer]:
+              - checkbox "Confidence" [checked] [ref=f49e89]
+              - text: Confidence
+            - generic [ref=f49e90] [cursor=pointer]:
+              - checkbox "Rate" [checked] [ref=f49e91]
+              - text: Rate
+            - generic [ref=f49e92] [cursor=pointer]:
+              - checkbox "ETA" [checked] [ref=f49e93]
+              - text: ETA
+            - generic [ref=f49e94] [cursor=pointer]:
+              - checkbox "Sparkline" [checked] [ref=f49e95]
+              - text: Sparkline
+            - generic [ref=f49e96] [cursor=pointer]:
+              - checkbox "Alert" [checked] [ref=f49e97]
+              - text: Alert
+        - generic [ref=f49e98]:
+          - generic [ref=f49e99]: Sparkline length (evaluations)
+          - spinbutton [ref=f49e101]: "20"
+      - generic [ref=f49e102]:
+        - heading "Filmstrip View" [level=2] [ref=f49e103]
+        - generic [ref=f49e104]:
+          - generic [ref=f49e105]: Thumbnail size
+          - generic [ref=f49e106]:
+            - generic [ref=f49e107] [cursor=pointer]: Small
+            - generic [ref=f49e108] [cursor=pointer]: Medium
+            - generic [ref=f49e109] [cursor=pointer]: Large
+        - generic [ref=f49e111] [cursor=pointer]:
+          - checkbox "Show stage labels below thumbnails" [checked] [ref=f49e112]
+          - text: Show stage labels below thumbnails
+        - generic [ref=f49e113]:
+          - generic [ref=f49e114]: Show every Nth timepoint
+          - generic [ref=f49e115]:
+            - spinbutton [ref=f49e116]: "1"
+            - generic [ref=f49e117]: 1 = show all
+        - generic [ref=f49e118]:
+          - generic [ref=f49e119]: Border color encoding
+          - generic [ref=f49e120]:
+            - generic [ref=f49e121] [cursor=pointer]: Stage
+            - generic [ref=f49e122] [cursor=pointer]: Confidence
+      - generic [ref=f49e123]:
+        - heading "Vitals View" [level=2] [ref=f49e124]
+        - generic [ref=f49e125]:
+          - generic [ref=f49e126]: Developmental-timing reference
+          - generic [ref=f49e127]:
+            - generic [ref=f49e128] [cursor=pointer]: 20°C
+            - generic [ref=f49e129] [cursor=pointer]: 25°C
+          - generic [ref=f49e130]: C. elegans staging reference curve for the vitals chart — not the hardware controller (see Hardware → Thermalizer).
+        - generic [ref=f49e132] [cursor=pointer]:
+          - checkbox "Show expected timing reference line" [checked] [ref=f49e133]
+          - text: Show expected timing reference line
+        - generic [ref=f49e134]:
+          - generic [ref=f49e135]: Time axis
+          - generic [ref=f49e136]:
+            - generic [ref=f49e137] [cursor=pointer]: Elapsed
+            - generic [ref=f49e138] [cursor=pointer]: Clock time
+      - generic [ref=f49e139]:
+        - heading "Default View" [level=2] [ref=f49e140]
+        - generic [ref=f49e141]:
+          - generic [ref=f49e142]: Image / reasoning split ratio
+          - generic [ref=f49e143]:
+            - slider [ref=f49e144]: "40"
+            - generic [ref=f49e145]: 40 / 60
+        - generic [ref=f49e147] [cursor=pointer]:
+          - checkbox "Auto-advance to latest evaluation" [ref=f49e148]
+          - text: Auto-advance to latest evaluation
+        - generic [ref=f49e150] [cursor=pointer]:
+          - checkbox "Show contrastive reasoning" [checked] [ref=f49e151]
+          - text: Show contrastive reasoning
+      - generic [ref=f49e152]:
+        - heading "Thermalizer (ACUITYnano)" [level=2] [ref=f49e153]
+        - generic [ref=f49e154]: Machine-wide hardware setting, saved on the server (not this browser). Requires control.
+        - generic [ref=f49e155]:
+          - generic [ref=f49e156]: Live status
+          - generic [ref=f49e157]: Controller not available (device layer offline or no thermalizer configured).
+        - generic [ref=f49e158]:
+          - generic [ref=f49e159]: Connection
+          - generic [ref=f49e160]:
+            - generic [ref=f49e161] [cursor=pointer]: Serial (COM)
+            - generic [ref=f49e162] [cursor=pointer]: MQTT (HiveMQ)
+        - generic [ref=f49e163]:
+          - generic [ref=f49e164]:
+            - generic [ref=f49e165]: COM port
+            - textbox "COM port" [ref=f49e166]:
+              - /placeholder: COM8
+          - generic [ref=f49e167]:
+            - generic [ref=f49e168]: Baud rate
+            - spinbutton "Baud rate" [ref=f49e169]: "115200"
+        - generic [ref=f49e170]:
+          - generic [ref=f49e171]: Stabilize timeout (s)
+          - spinbutton "Stabilize timeout (s)" [ref=f49e172]: "600"
+        - generic [ref=f49e174] [cursor=pointer]:
+          - checkbox "Control off the Peltier sensor (else water)" [ref=f49e175]
+          - text: Control off the Peltier sensor (else water)
+        - generic [ref=f49e176]:
+          - button "Test connection" [ref=f49e177] [cursor=pointer]
+          - button "Apply" [ref=f49e178] [cursor=pointer]
+      - generic [ref=f49e180]:
+        - heading "Effective config (read-only)" [level=2] [ref=f49e181]
+        - generic [ref=f49e182]: The server's live configuration, secrets redacted. Editing these needs a restart / env override.
+        - generic [ref=f49e183]: "{ \"note\": \"settings.py values are read from env at startup; changing them needs a restart.\", \"network\": { \"viz_host\": \"0.0.0.0\", \"viz_port\": 8080, \"device_host\": \"127.0.0.1\", \"device_port\": 60610, \"mesh_port\": 19547 }, \"models\": { \"main\": \"claude-opus-4-8\", \"perception\": \"claude-opus-4-8\", \"fast\": \"claude-sonnet-4-6\", \"medium\": \"claude-opus-4-8\", \"refusal_fallback\": \"claude-opus-4-8\" }, \"storage\": { \"base_path\": \"/tmp/gently-dev\" }, \"timeouts\": { \"plan_execution\": 300, \"volume_acquisition\": 15, \"api_call\": 10 }, \"ml\": { \"default_batch_size\": 32, \"default_epochs\": 50, \"default_lr\": 0.0001, \"model_cache_dir\": \"models\" }, \"transfer\": { \"transfer_port\": 19548, \"chunk_size\": 1048576, \"max_concurrent_transfers\": 4 }, \"mesh\": { \"broadcast_interval_s\": 5, \"stale_threshold_s\": 15, \"dead_threshold_s\": 30 }, \"ui\": { \"ux_v2\": true }, \"api\": { \"ncbi_tool\": \"gently\" }, \"secrets_present\": { \"anthropic_api_key\": true, \"control_token\": false } }"
+      - generic [ref=f49e184]:
+        - heading "Advanced (restart required)" [level=2] [ref=f49e185]
+        - generic [ref=f49e186]:
+          - text: System tunables persisted to
+          - code [ref=f49e187]: config/settings.local.yml
+          - text: . Saved values take effect on the next server restart. Requires control.
+        - generic [ref=f49e188]:
+          - generic [ref=f49e189]: Timeouts
+          - generic [ref=f49e190]:
+            - generic [ref=f49e191]: Volume acquisition (s) (override set)
+            - spinbutton [ref=f49e192]: "15"
+          - generic [ref=f49e193]:
+            - generic [ref=f49e194]: External API call (s) (override set)
+            - spinbutton [ref=f49e195]: "10"
+          - generic [ref=f49e196]: Mesh network
+          - generic [ref=f49e197]:
+            - generic [ref=f49e198]: Broadcast interval (s) (override set)
+            - spinbutton [ref=f49e199]: "5"
+          - generic [ref=f49e200]:
+            - generic [ref=f49e201]: Stale threshold (s) (override set)
+            - spinbutton [ref=f49e202]: "15"
+          - generic [ref=f49e203]:
+            - generic [ref=f49e204]: Dead threshold (s) (override set)
+            - spinbutton [ref=f49e205]: "30"
+          - generic [ref=f49e206]: Interface
+          - generic [ref=f49e208] [cursor=pointer]:
+            - checkbox "UX v2 dashboard (override set)" [checked] [ref=f49e209]
+            - text: UX v2 dashboard
+            - generic [ref=f49e210]: (override set)
+          - generic [ref=f49e211]: NCBI (Entrez)
+          - generic [ref=f49e212]:
+            - generic [ref=f49e213]: Tool name (override set)
+            - textbox [ref=f49e214]: gently
+          - generic [ref=f49e215]:
+            - generic [ref=f49e216]: Contact email (override set)
+            - textbox [ref=f49e217]: pskeshu@gmail.com
+        - button "Save (restart required)" [ref=f49e219] [cursor=pointer]
+      - generic [ref=f49e222]:
+        - button "Save as rig defaults" [ref=f49e223] [cursor=pointer]
+        - button "Reset to defaults" [ref=f49e224] [cursor=pointer]
+        - button "Export" [ref=f49e225] [cursor=pointer]
+        - button "Import" [ref=f49e226] [cursor=pointer]

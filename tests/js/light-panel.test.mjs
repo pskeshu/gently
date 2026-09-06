@@ -77,3 +77,35 @@ test('emitting: unread power under an armed beam is unknown', () => {
 test('emitting: nothing read at all is unknown', () => {
     assert.equal(P.emitting({}), null);
 });
+
+/**
+ * `mode()` — the root of the panel's decision tree.
+ *
+ * The one rule with teeth: `both` must be reachable. LED and laser are two
+ * independent Micro-Manager config groups, so nothing in the hardware stops
+ * both being open, and #106 is that state going unnoticed for weeks — every
+ * vision frame LED brightfield with a 50 ms laser gate on top, the detector
+ * hunting nuclei in a DIC-like image. A mode selector that collapsed the pair
+ * into an either/or would have made its own founding bug unrepresentable.
+ */
+test('mode: the LED alone is LED mode', () => {
+    assert.equal(P.mode({ led: 'Open', config: 'ALL OFF' }), 'led');
+});
+
+test('mode: a routed line alone is laser mode', () => {
+    assert.equal(P.mode({ led: 'Closed', config: '488 only' }), 'laser');
+});
+
+test('mode: neither is off', () => {
+    assert.equal(P.mode({ led: 'Closed', config: 'ALL OFF' }), 'off');
+});
+
+test('mode: both open is a state, not an impossibility (#106)', () => {
+    assert.equal(P.mode({ led: 'Open', config: '488 only' }), 'both');
+});
+
+test('mode: an unread source is unknown, never off', () => {
+    assert.equal(P.mode({ led: null, config: 'ALL OFF' }), null);
+    assert.equal(P.mode({ led: 'Closed', config: null }), null);
+    assert.equal(P.mode({}), null);
+});

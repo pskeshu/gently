@@ -82,6 +82,15 @@ def test_an_armed_beam_is_never_hidden_by_the_disclosure() -> None:
     assert "armed" in body
     assert "nothing emits" in body
 
+    # And it must sit at the panel root. `mode()` calls armed-with-nothing-routed
+    # `off`, so the laser branch is closed — a note inside it would be invisible
+    # in the exact state it describes. It was, until the browser showed it.
+    mk = src[src.index("function markup(s, em)") :]
+    mk = mk[: mk.index("\n    }")]
+    assert "idleBeamNote(s, armed, lines)" in mk, (
+        "the armed-beam note is not rendered by markup() — it is hidden inside a branch"
+    )
+
 
 def test_the_config_select_shows_what_is_actually_set() -> None:
     """The preset list 503s without a device layer; the read-back config does not.
@@ -112,3 +121,67 @@ def test_the_device_layer_buttons_do_not_borrow_marking_classes() -> None:
     css = (CSS / "main.css").read_text(encoding="utf-8")
     assert ".devices-layer-btn" in css, "the device-layer buttons have no styling"
     assert ".devices-layer-btn.is-primary" in css, "Start lost its primary treatment"
+
+
+def test_the_config_is_read_back_not_echoed() -> None:
+    """It used to be whatever this panel last wrote.
+
+    `readAll` polled beam and led from hardware; `config` was set by the select's
+    own `onchange`, so the entire laser branch was an echo of a request that
+    returned 200 — the assumption #106 is made of. `DiSPIMLightSource.read()`
+    had the answer all along and no route exposed it.
+    """
+    src = _light()
+    body = src[src.index("async function readAll()") :]
+    body = body[: body.index("\n    /**")]
+    assert "'/api/devices/laser/configs', 'config'" in body, (
+        "the current laser config is not read from the device"
+    )
+    assert "d.current !== 'unknown'" in body, (
+        'read() returns the string "unknown" when the group cannot be queried; '
+        "that must stay an em dash, not become a preset name"
+    )
+
+    wired = src[src.index("[data-config]") :]
+    wired = wired[: wired.index("\n\n")]
+    assert "SharedState.set" not in wired, "the select is writing its own command back as state"
+
+
+def test_mode_can_report_both_sources_open() -> None:
+    """The fault the mode selector exists for must not be unrepresentable.
+
+    LED and Laser are separate Micro-Manager config groups (`devices/optical.py`)
+    and both can be open — `spim_head_focus` opens the LED on the SPIM camera by
+    design, calibration wants the laser. #106 is the two overlapping unnoticed.
+    An either/or would hide it.
+    """
+    src = _light()
+    body = src[src.index("function mode(s)") :]
+    body = body[: body.index("\n    }")]
+    assert "'both'" in body
+    assert "return null" in body, "an unread source must be unknown, not off"
+
+
+def test_entering_a_mode_closes_the_other_source() -> None:
+    """Otherwise it is two switches side by side, which is what it replaced."""
+    src = _light()
+    body = src[src.index("async function enter(to)") :]
+    body = body[: body.index("\n    }")]
+    assert "'ALL OFF'" in body, "entering LED/off mode does not gate the laser lines"
+    assert "led/set" in body
+    # Routing a line is an emission decision and stays explicit.
+    assert "config: 'ALL OFF'" in body
+    assert "wavelength" not in body, "entering laser mode must not route a line by itself"
+    # BeamEnabled left alone: setting it No here recreates the #106 state.
+    assert "beam" not in body
+
+
+def test_engaged_and_disclosed_are_distinguishable() -> None:
+    """One is read back from the device; the other is just what is on screen."""
+    src = _light()
+    body = src[src.index("function modeRow(m, show)") :]
+    body = body[: body.index("\n    }")]
+    assert "is-on" in body and "is-open" in body
+    css = (CSS / "operate.css").read_text(encoding="utf-8")
+    assert ".lp-mbtn.is-on" in css
+    assert ".lp-mbtn.is-open:not(.is-on)" in css, "a viewed branch looks engaged"

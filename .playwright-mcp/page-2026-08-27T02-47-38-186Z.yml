@@ -1,0 +1,19 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]: Sample at objective · XY locked · 1970 µm to floor
+    - button "Back off 100 µm" [ref=e6] [cursor=pointer]
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]: Sample → objective
+      - generic [ref=e11]: 2000.0µm
+    - generic [ref=e12]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: "100"
+        - generic [ref=e16]: "1000"
+        - generic [ref=e17]: "10000"
+      - generic [ref=e19]:
+        - generic [ref=e20]: "25000"
+        - generic [ref=e21]: "30"
+    - generic [ref=e22]:
+      - generic [ref=e23]: approach
+      - generic [ref=e24]: 1970 µm left · log scale

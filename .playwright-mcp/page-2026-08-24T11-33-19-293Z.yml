@@ -1,0 +1,187 @@
+- generic [ref=f41e1]:
+  - generic "Welcome to Gently" [ref=f41e2]:
+    - button "Toggle theme" [ref=f41e3] [cursor=pointer]
+    - generic [ref=f41e7]:
+      - generic [ref=f41e8]: Good afternoon.What are we doing today?
+      - generic [ref=f41e11]:
+        - button "guided Plan an experiment Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch. Start planning" [ref=f41e12] [cursor=pointer]:
+          - generic [ref=f41e13]: guided
+          - heading "Plan an experiment" [level=3] [ref=f41e17]
+          - paragraph [ref=f41e18]: Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.
+          - generic [ref=f41e19]: Start planning
+        - button "standalone Take a quick look Straight to the scope to see what's there — no plan, no commitment. Open the scope" [ref=f41e22] [cursor=pointer]:
+          - generic [ref=f41e23]: standalone
+          - heading "Take a quick look" [level=3] [ref=f41e28]
+          - paragraph [ref=f41e29]: Straight to the scope to see what's there — no plan, no commitment.
+          - generic [ref=f41e30]: Open the scope
+      - generic [ref=f41e33]:
+        - button "or just tell me what you need" [ref=f41e34] [cursor=pointer]
+        - generic:
+          - textbox "e.g. watch these embryos overnight and ping me if one stalls" [ref=f41e40]
+          - button "Send" [ref=f41e41] [cursor=pointer]
+      - button "Skip to workspace ›" [ref=f41e44] [cursor=pointer]
+  - generic [ref=f41e45]:
+    - generic [ref=f41e46]:
+      - link "Gently Microscopy" [ref=f41e47] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f41e48]:
+        - link "2fa715ae" [ref=f41e49] [cursor=pointer]:
+          - /url: /review?session=2fa715ae
+        - button "Copy session ID" [ref=f41e50] [cursor=pointer]
+    - generic [ref=f41e54]:
+      - generic [ref=f41e55]: R
+      - button "Open process console" [ref=f41e57]
+      - link "Dashboard settings" [ref=f41e61] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f41e65] [cursor=pointer]
+      - button "Scope offline" [ref=f41e69] [cursor=pointer]
+  - generic [ref=f41e74]:
+    - complementary [ref=f41e75]:
+      - navigation [ref=f41e76]:
+        - generic [ref=f41e77]:
+          - generic [ref=f41e78]: Now
+          - button "Home" [ref=f41e79] [cursor=pointer]
+          - button "Operations" [ref=f41e80] [cursor=pointer]
+          - button "Embryos" [ref=f41e81] [cursor=pointer]
+        - generic [ref=f41e82]:
+          - generic [ref=f41e83]: Library
+          - button "Plans" [ref=f41e84] [cursor=pointer]
+          - button "Sessions" [ref=f41e85] [cursor=pointer]
+          - button "Notebook" [ref=f41e86] [cursor=pointer]
+          - button "Gallery" [ref=f41e87] [cursor=pointer]
+        - generic [ref=f41e88]:
+          - generic [ref=f41e89]: System
+          - button "Devices" [ref=f41e90] [cursor=pointer]
+          - button "Calibration" [ref=f41e91] [cursor=pointer]
+          - button "Logs" [ref=f41e92] [cursor=pointer]
+      - button "Talk to Gently" [ref=f41e93] [cursor=pointer]
+    - generic [ref=f41e95]:
+      - generic [ref=f41e96]:
+        - generic [ref=f41e97]: LIVE
+        - generic [ref=f41e99]: 0 embryos · Online
+      - contentinfo [ref=f41e100]:
+        - generic [ref=f41e101]: 0 embryos · 0 images · 8 events
+        - generic [ref=f41e102]: No active timelapse
+    - complementary "Agent chat" [ref=f41e103]:
+      - generic [ref=f41e105]:
+        - generic [ref=f41e106]: Agent
+        - generic [ref=f41e108]: Connected · v1.0.0.dev0
+        - button "Collapse agent panel" [ref=f41e109] [cursor=pointer]
+      - generic [ref=f41e113]:
+        - textbox "Message Gently… ( / commands · @ tools )" [active] [ref=f41e114]:
+          - /placeholder: Message Gently…   ( / commands · @ tools )
+        - button "Send message" [disabled] [ref=f41e115]
+  - generic [ref=f41e119]:
+    - generic:
+      - generic [ref=f41e121]:
+        - button "▼" [ref=f41e122] [cursor=pointer]
+        - generic [ref=f41e123]: HOME
+      - generic [ref=f41e124]:
+        - generic [ref=f41e125]:
+          - button "▼" [ref=f41e126] [cursor=pointer]
+          - generic [ref=f41e127]: EMBRYOS
+        - generic [ref=f41e128]:
+          - generic [ref=f41e129] [cursor=pointer]: default
+          - generic [ref=f41e130] [cursor=pointer]: board
+          - generic [ref=f41e131] [cursor=pointer]: filmstrip
+          - generic [ref=f41e132] [cursor=pointer]: vitals
+        - generic [ref=f41e136]:
+          - generic [ref=f41e139] [cursor=pointer]:
+            - heading "Embryo Monitoring" [level=2] [ref=f41e140]
+            - generic [ref=f41e141]: No active timelapse
+          - generic [ref=f41e145]:
+            - generic [ref=f41e146]: Embryos
+            - generic [ref=f41e150]:
+              - generic [ref=f41e151]: 🔬
+              - generic [ref=f41e152]: No embryos yet
+              - generic [ref=f41e153]: Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Calibration tab.
+              - button "Go to Calibration" [ref=f41e154] [cursor=pointer]
+      - generic [ref=f41e155]:
+        - generic [ref=f41e156]:
+          - button "▼" [ref=f41e157] [cursor=pointer]
+          - generic [ref=f41e158]: CALIBRATION
+        - generic [ref=f41e159]:
+          - generic [ref=f41e160] [cursor=pointer]: profile
+          - generic [ref=f41e161] [cursor=pointer]: gallery
+        - generic [ref=f41e163]:
+          - heading "Calibration" [level=2] [ref=f41e165]
+          - generic [ref=f41e166]:
+            - generic [ref=f41e167]:
+              - generic [ref=f41e168]: Embryos
+              - generic [ref=f41e169]: No calibration images yet
+            - generic [ref=f41e172]:
+              - generic [ref=f41e173]: 📷
+              - generic [ref=f41e174]: Select an embryo to view calibration images
+      - generic [ref=f41e175]:
+        - generic [ref=f41e176]:
+          - button "▼" [ref=f41e177] [cursor=pointer]
+          - generic [ref=f41e178]: EXPERIMENT
+        - generic [ref=f41e179]:
+          - generic [ref=f41e180] [cursor=pointer]: overview
+          - generic [ref=f41e181] [cursor=pointer]: rules
+        - heading "Operations" [level=2] [ref=f41e185]
+      - generic [ref=f41e188]:
+        - button "▼" [ref=f41e189] [cursor=pointer]
+        - generic [ref=f41e190]: EVENTS
+      - generic [ref=f41e191]:
+        - generic [ref=f41e192]:
+          - button "▼" [ref=f41e193] [cursor=pointer]
+          - generic [ref=f41e194]: PLANS
+        - generic [ref=f41e195]:
+          - generic [ref=f41e196] [cursor=pointer]: document
+          - generic [ref=f41e197] [cursor=pointer]: graph
+          - generic [ref=f41e198] [cursor=pointer]: board
+          - generic [ref=f41e199] [cursor=pointer]: decisions
+          - generic [ref=f41e200] [cursor=pointer]: matrix
+          - generic [ref=f41e201] [cursor=pointer]: timeline
+        - generic [ref=f41e203]:
+          - generic [ref=f41e205]:
+            - generic [ref=f41e206]: Campaigns
+            - text: ›
+          - generic [ref=f41e207]:
+            - navigation [ref=f41e208]
+            - main [ref=f41e210]:
+              - paragraph [ref=f41e213]: Loading campaigns...
+            - complementary [ref=f41e214]:
+              - generic [ref=f41e215]:
+                - button "Close" [ref=f41e216] [cursor=pointer]
+                - heading [level=2]
+      - generic [ref=f41e222]:
+        - button "▼" [ref=f41e223] [cursor=pointer]
+        - generic [ref=f41e224]: SESSIONS
+      - generic [ref=f41e226]:
+        - button "▼" [ref=f41e227] [cursor=pointer]
+        - generic [ref=f41e228]: NOTEBOOK
+      - generic [ref=f41e230]:
+        - button "▼" [ref=f41e231] [cursor=pointer]
+        - generic [ref=f41e232]: GALLERY
+  - generic:
+    - generic [ref=f41e234]:
+      - button "▼" [ref=f41e235] [cursor=pointer]
+      - generic [ref=f41e236]: DEVICES
+    - generic:
+      - generic [ref=f41e237]:
+        - generic [ref=f41e238]:
+          - text: Atrium · drag to pan · wheel to zoom · Backspace back
+          - link "exit" [ref=f41e239] [cursor=pointer]:
+            - /url: "#"
+        - generic [ref=f41e240]:
+          - button "←" [disabled] [ref=f41e241]
+          - button "⌂ start" [ref=f41e242] [cursor=pointer]
+          - button "all" [ref=f41e243] [cursor=pointer]
+          - button "home" [ref=f41e244] [cursor=pointer]
+          - button "embryos" [ref=f41e245] [cursor=pointer]
+          - button "devices" [ref=f41e246] [cursor=pointer]
+          - button "calibration" [ref=f41e247] [cursor=pointer]
+          - button "experiment" [ref=f41e248] [cursor=pointer]
+          - button "events" [ref=f41e249] [cursor=pointer]
+          - button "plans" [ref=f41e250] [cursor=pointer]
+          - button "sessions" [ref=f41e251] [cursor=pointer]
+          - button "notebook" [ref=f41e252] [cursor=pointer]
+          - button "gallery" [ref=f41e253] [cursor=pointer]
+      - generic [ref=f41e254]:
+        - generic [ref=f41e255]: 58%
+        - generic [ref=f41e256]:
+          - text: density
+          - slider "density 4" [ref=f41e257]: "4"
+          - generic [ref=f41e258]: "4"

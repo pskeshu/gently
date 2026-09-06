@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gently — Instrument Dark</title>
+<!--
+  ============================================================================
+  GENTLY · VISUAL DIRECTION A — "INSTRUMENT DARK" (the scope room)
+  ============================================================================
+  The microscope lives in a darkened room; the only light is the laser.
+  The UI is the instrument. Telemetry, not SaaS.
+
+  PALETTE (named hexes)
+    bg        #0a0e12   near-black room
+    panel     #10161d   instrument housing
+    hairline  #1f2a33   engraved rules
+    ink       #e7eef4   primary readout text
+    muted     #7d8b97   secondary labels
+    488 GFP   #39d0ff / #14b8c4   cyan-green laser line (primary accent)
+    561       #ffb347           amber laser line (secondary accent)
+    Accent is used with restraint — light is precious in a dark room.
+
+  TYPE PAIRING
+    JetBrains Mono — ALL data/readouts/numerics (µm, °C, timepoints, λ).
+                     Microscopy is tabular; numbers read as telemetry.
+    Inter Tight    — UI labels, headings, prose. Tight grotesque, set in
+                     uppercase tracking for instrument-panel discipline.
+
+  SIGNATURE ELEMENT
+    The LIGHT SHEET is the agent's presence — not an orb. A thin luminous
+    horizontal plane of 488 laser light that breathes and sweeps subtly
+    across the hero. The agent IS the sheet. Everything else is the dark
+    room around it.
+
+  THE ONE RISK
+    The greeting is rendered as an OSCILLOSCOPE / ACQUISITION READOUT: the
+    light sheet draws a live trace, the greeting types out as if printed by
+    the acquisition firmware, and a fine graticule grid sits behind it. The
+    agent speaks in the instrument's own voice.
+  ============================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #0a0e12;
+    --panel:     #10161d;
+    --panel-hi:  #141c25;
+    --hairline:  #1f2a33;
+    --hairline-2:#2a3845;
+    --ink:       #e7eef4;
+    --muted:     #7d8b97;
+    --muted-dim: #4f5d68;
+    --c488:      #39d0ff;
+    --c488-deep: #14b8c4;
+    --c561:      #ffb347;
+    --red:       #ff5d6c;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --ui:   "Inter Tight", system-ui, -apple-system, sans-serif;
+    --ease: cubic-bezier(.22, 1, .36, 1);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--ui);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* faint room vignette — the darkness has depth */
+    background-image:
+      radial-gradient(120% 80% at 50% -10%, rgba(57,208,255,.05), transparent 55%),
+      radial-gradient(140% 100% at 50% 120%, rgba(0,0,0,.6), transparent 60%);
+  }
+
+  ::selection { background: rgba(57,208,255,.28); color: #fff; }
+
+  a { color: inherit; text-decoration: none; }
+
+  .label {
+    font-family: var(--ui);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* keyboard focus — always visible, in laser cyan */
+  :focus-visible {
+    outline: 1.5px solid var(--c488);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* ===================== TOP RAIL ===================== */
+  .rail {
+    position: sticky; top: 0; z-index: 40;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 26px; height: 52px;
+    background: linear-gradient(180deg, rgba(10,14,18,.96), rgba(10,14,18,.78));
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .glyph {
+    width: 30px; height: 30px; position: relative; flex: none;
+  }
+  /* brand mark = an end-on light sheet: a thin bright line through an aperture */
+  .brand .glyph::before {
+    content: ""; position: absolute; inset: 0;
+    border: 1px solid var(--hairline-2); border-radius: 6px;
+    background: var(--panel);
+  }
+  .brand .glyph::after {
+    content: ""; position: absolute; left: 5px; right: 5px; top: 50%;
+    height: 1.5px; transform: translateY(-50%);
+    background: linear-gradient(90deg, transparent, var(--c488), transparent);
+    box-shadow: 0 0 6px var(--c488), 0 0 12px rgba(57,208,255,.5);
+  }
+  .brand .name { font-family: var(--ui); font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+  .brand .name b { color: var(--c488); font-weight: 700; }
+  .brand .sub { font-family: var(--mono); font-size: 10px; color: var(--muted-dim); letter-spacing: .04em; }
+
+  .rail-right { display: flex; align-items: center; gap: 18px; }
+  .rail-stat { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .rail-stat .v { color: var(--ink); }
+  .rail-sep { width: 1px; height: 20px; background: var(--hairline); }
+  .led { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .led.ok { background: var(--c488-deep); box-shadow: 0 0 6px var(--c488); animation: pulse 3.2s var(--ease) infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* ===================== HERO ===================== */
+  .hero {
+    position: relative;
+    min-height: calc(100vh - 52px);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* graticule — fine acquisition grid behind everything */
+  .graticule {
+    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--hairline) 1px, transparent 1px),
+      linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(120% 90% at 50% 42%, #000 0%, transparent 78%);
+            mask-image: radial-gradient(120% 90% at 50% 42%, #000 0%, transparent 78%);
+    opacity: .5;
+  }
+  .graticule::after {
+    /* finer subdivisions */
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(31,42,51,.5) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(31,42,51,.5) 1px, transparent 1px);
+    background-size: 16px 16px;
+    -webkit-mask-image: radial-gradient(80% 60% at 50% 42%, #000 0%, transparent 72%);
+            mask-image: radial-gradient(80% 60% at 50% 42%, #000 0%, transparent 72%);
+  }
+
+  /* ===== THE LIGHT SHEET — the signature, the agent's presence ===== */
+  .sheet-stage {
+    position: absolute; left: 0; right: 0; top: 38%;
+    height: 2px; z-index: 1; pointer-events: none;
+    transform: translateY(-50%);
+  }
+  .sheet {
+    position: absolute; left: -5%; right: -5%; top: 50%;
+    height: 2px; transform: translateY(-50%);
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(20,184,196,.0) 8%,
+      rgba(57,208,255,.7) 28%,
+      var(--c488) 50%,
+      rgba(57,208,255,.7) 72%,
+      rgba(20,184,196,0) 92%,
+      transparent 100%);
+    box-shadow:
+      0 0 8px rgba(57,208,255,.7),
+      0 0 22px rgba(57,208,255,.45),
+      0 0 60px rgba(57,208,255,.22);
+    animation: sheetBreathe 6.5s var(--ease) infinite;
+  }
+  /* the beam's volumetric glow — a thin plane of light, vertical falloff */
+  .sheet-glow {
+    position: absolute; left: -10%; right: -10%; top: 50%;
+    height: 200px; transform: translateY(-50%);
+    background: radial-gradient(60% 100% at 50% 50%, rgba(57,208,255,.16), rgba(57,208,255,.04) 40%, transparent 70%);
+    filter: blur(2px);
+    animation: glowBreathe 6.5s var(--ease) infinite;
+  }
+  /* sweep — a bright scanning node travels along the sheet (the acquisition head) */
+  .sheet-scan {
+    position: absolute; top: 50%; left: 0;
+    width: 120px; height: 4px; transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side, #ffffff, var(--c488) 35%, transparent 75%);
+    box-shadow: 0 0 14px var(--c488), 0 0 30px rgba(57,208,255,.7);
+    border-radius: 50%;
+    animation: sweep 9s var(--ease) infinite;
+  }
+  @keyframes sheetBreathe {
+    0%,100% { opacity: .85; }
+    50%     { opacity: 1; }
+  }
+  @keyframes glowBreathe {
+    0%,100% { opacity: .7; transform: translateY(-50%) scaleY(1); }
+    50%     { opacity: 1;  transform: translateY(-50%) scaleY(1.18); }
+  }
+  @keyframes sweep {
+    0%   { left: 18%; opacity: 0; }
+    12%  { opacity: 1; }
+    50%  { left: 82%; opacity: 1; }
+    62%  { opacity: 0; }
+    100% { left: 82%; opacity: 0; }
+  }
+
+  /* hero content */
+  .hero-inner {
+    position: relative; z-index: 3;
+    width: 100%; max-width: 1180px; margin: 0 auto;
+    padding: 0 40px;
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+  }
+
+  /* greeting = oscilloscope acquisition readout */
+  .greeting { margin: 0 0 38px; }
+  .greeting .meta {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 18px; flex-wrap: wrap;
+  }
+  .greeting .meta .tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .05em;
+    color: var(--c488);
+    border: 1px solid rgba(57,208,255,.3); border-radius: 3px;
+    padding: 3px 8px;
+    background: rgba(57,208,255,.06);
+  }
+  .greeting .meta .tag.amber { color: var(--c561); border-color: rgba(255,179,71,.3); background: rgba(255,179,71,.06); }
+  .greeting .meta .stamp { font-family: var(--mono); font-size: 11px; color: var(--muted-dim); }
+
+  .greeting h1 {
+    font-family: var(--ui); font-weight: 600;
+    font-size: clamp(34px, 5.4vw, 62px);
+    line-height: 1.02; letter-spacing: -.025em;
+    margin: 0 0 6px; color: var(--ink);
+  }
+  .greeting h1 .dim { color: var(--muted); }
+  .greeting .prompt {
+    font-family: var(--mono); font-size: clamp(15px, 1.8vw, 19px);
+    color: var(--c488); letter-spacing: -.01em;
+    display: inline-flex; align-items: baseline; gap: 2px;
+  }
+  .greeting .prompt::before { content: "› "; color: var(--muted-dim); }
+  .caret {
+    display: inline-block; width: 9px; height: 1.05em; transform: translateY(2px);
+    background: var(--c488); margin-left: 4px;
+    box-shadow: 0 0 8px var(--c488);
+    animation: blink 1.15s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* choice cards = illuminated channels */
+  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .channel {
+    position: relative;
+    background:
+      linear-gradient(180deg, var(--panel-hi), var(--panel));
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 22px 24px 20px;
+    text-align: left; cursor: pointer;
+    transition: border-color .35s var(--ease), transform .35s var(--ease), box-shadow .35s var(--ease);
+    overflow: hidden;
+    display: flex; flex-direction: column; min-height: 200px;
+    font: inherit; color: inherit;
+    appearance: none;
+  }
+  /* the channel's edge-light — a thin colored line at top, like a lit laser channel */
+  .channel::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: var(--accent, var(--c488));
+    opacity: .55; transition: opacity .35s var(--ease), box-shadow .35s var(--ease);
+  }
+  .channel.c-561 { --accent: var(--c561); }
+  .channel:hover, .channel:focus-visible {
+    border-color: color-mix(in srgb, var(--accent, var(--c488)) 55%, var(--hairline));
+    transform: translateY(-3px);
+    box-shadow: 0 14px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.02) inset;
+  }
+  .channel:hover::before, .channel:focus-visible::before {
+    opacity: 1;
+    box-shadow: 0 0 14px var(--accent, var(--c488));
+  }
+  /* faint radial wash matching the channel's wavelength */
+  .channel::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--accent, var(--c488)) 8%, transparent), transparent 55%);
+    opacity: 0; transition: opacity .35s var(--ease);
+  }
+  .channel:hover::after, .channel:focus-visible::after { opacity: 1; }
+
+  .channel .ch-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .channel .eyebrow { color: var(--accent, var(--c488)); }
+  .channel .lambda { font-family: var(--mono); font-size: 10.5px; color: var(--muted-dim); }
+  .channel h2 { font-family: var(--ui); font-weight: 600; font-size: 21px; letter-spacing: -.015em; margin: 0 0 10px; }
+  .channel p { font-family: var(--ui); font-size: 13.5px; line-height: 1.55; color: var(--muted); margin: 0; max-width: 42ch; }
+  .channel .cta {
+    margin-top: auto; padding-top: 16px;
+    font-family: var(--mono); font-size: 13px; font-weight: 500;
+    color: var(--accent, var(--c488));
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: gap .25s var(--ease);
+  }
+  .channel:hover .cta, .channel:focus-visible .cta { gap: 12px; }
+
+  /* footer of hero: chat escape + live status */
+  .hero-foot {
+    position: relative; z-index: 3;
+    width: 100%; max-width: 1180px; margin: 0 auto;
+    padding: 26px 40px 30px;
+    display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  }
+  .chat-escape {
+    appearance: none; background: transparent; border: none; cursor: pointer;
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted-dim);
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 8px 2px; transition: color .25s;
+    border-bottom: 1px dashed transparent;
+  }
+  .chat-escape:hover, .chat-escape:focus-visible { color: var(--muted); }
+  .chat-escape .blip { width: 5px; height: 5px; border-radius: 50%; background: var(--muted-dim); }
+
+  .live-status {
+    display: flex; align-items: center; gap: 14px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    border: 1px solid var(--hairline); border-radius: 4px;
+    padding: 8px 14px; background: rgba(16,22,29,.5);
+  }
+  .live-status .seg { display: inline-flex; align-items: center; gap: 7px; }
+  .live-status .seg .v { color: var(--ink); }
+  .live-status .dot-sep { color: var(--hairline-2); }
+
+  .scroll-cue {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 3; font-family: var(--mono); font-size: 10px; letter-spacing: .25em;
+    color: var(--muted-dim); text-transform: uppercase;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    animation: bob 2.6s var(--ease) infinite;
+  }
+  .scroll-cue svg { stroke: var(--muted-dim); }
+  @keyframes bob { 0%,100% { transform: translate(-50%,0);} 50% { transform: translate(-50%,5px);} }
+
+  /* ===================== WORKSPACE PEEK ===================== */
+  .workspace {
+    position: relative;
+    border-top: 1px solid var(--hairline);
+    background:
+      linear-gradient(180deg, rgba(16,22,29,.4), transparent 30%),
+      var(--bg);
+    padding: 0 0 70px;
+  }
+  .ws-inner { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 40px; }
+
+  /* session-context strip */
+  .session-strip {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 18px; margin: 34px 0 26px;
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 5px;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+  .session-strip .live {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--red); font-weight: 600; letter-spacing: .04em;
+  }
+  .session-strip .live .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); animation: pulse 2s var(--ease) infinite; }
+  .session-strip .desc { color: var(--ink); }
+  .session-strip .params { color: var(--muted); }
+  .session-strip .params b { color: var(--c488); font-weight: 500; }
+  .session-strip .params b.amber { color: var(--c561); }
+  .session-strip .clock { margin-left: auto; color: var(--muted); }
+  .session-strip .clock .v { color: var(--ink); }
+  .session-strip .sep { width: 1px; height: 16px; background: var(--hairline-2); }
+
+  .ws-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 22px; align-items: start; }
+
+  .ws-block-label { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .ws-block-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+
+  /* embryo cards — biology primary */
+  .embryos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .embryo {
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 5px;
+    overflow: hidden;
+  }
+  .embryo .viz {
+    position: relative; height: 96px;
+    background:
+      radial-gradient(closest-side, rgba(57,208,255,.10), transparent 70%),
+      #0c1218;
+    border-bottom: 1px solid var(--hairline);
+    display: grid; place-items: center; overflow: hidden;
+  }
+  .embryo .viz .grid-fade {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(31,42,51,.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(31,42,51,.6) 1px, transparent 1px);
+    background-size: 14px 14px; opacity: .5;
+  }
+  .embryo svg { position: relative; z-index: 1; }
+  .embryo .body { padding: 12px 14px 14px; }
+  .embryo .id { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 7px; letter-spacing: .04em; }
+  .embryo .state { font-family: var(--ui); font-size: 14px; font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+  .embryo .state .pip { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .embryo .note { font-family: var(--mono); font-size: 11px; color: var(--muted-dim); margin-top: 5px; }
+  .embryo.ok    .pip { background: var(--c488-deep); box-shadow: 0 0 7px var(--c488); }
+  .embryo.fast  .pip { background: var(--c561); box-shadow: 0 0 7px var(--c561); }
+  .embryo.stall .pip { background: var(--red); box-shadow: 0 0 7px var(--red); }
+  .embryo.fast  .note b { color: var(--c561); }
+
+  /* AGENT'S VIEW — the agent's mind */
+  .agent-view {
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 5px;
+    overflow: hidden;
+    /* one lit edge — the sheet touches the panel */
+    box-shadow: inset 0 1px 0 rgba(57,208,255,.18);
+  }
+  .agent-view .av-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 16px; border-bottom: 1px solid var(--hairline);
+    background: linear-gradient(90deg, rgba(57,208,255,.05), transparent);
+  }
+  .agent-view .av-head .ttl { display: flex; align-items: center; gap: 9px; }
+  .agent-view .av-head .ttl .led { background: var(--c488-deep); box-shadow: 0 0 6px var(--c488); }
+  .agent-view .av-head .ttl .label { color: var(--c488); }
+  .agent-view .av-head .since { font-family: var(--mono); font-size: 10px; color: var(--muted-dim); }
+
+  .av-item { padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
+  .av-item:last-child { border-bottom: none; }
+  .av-item .kind {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+    margin-bottom: 7px; display: inline-block;
+  }
+  .av-item.expect   .kind { color: var(--c488); }
+  .av-item.watch    .kind { color: var(--c561); }
+  .av-item.question .kind { color: var(--muted); }
+  .av-item .txt { font-family: var(--ui); font-size: 13px; line-height: 1.5; color: var(--ink); }
+  .av-item .txt .num { font-family: var(--mono); color: var(--ink); }
+  .av-item.question .txt { color: var(--muted); font-style: italic; }
+
+  .ws-foot {
+    margin-top: 30px; text-align: center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted-dim);
+    letter-spacing: .04em;
+  }
+
+  /* ===================== RESPONSIVE ===================== */
+  @media (max-width: 900px) {
+    .ws-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .rail { padding: 0 16px; }
+    .rail-right .rail-stat:not(:last-child) { display: none; }
+    .hero-inner, .hero-foot, .ws-inner { padding-left: 20px; padding-right: 20px; }
+    .channels { grid-template-columns: 1fr; }
+    .embryos { grid-template-columns: 1fr; }
+    .session-strip .clock { margin-left: 0; width: 100%; }
+    .hero-foot { justify-content: flex-start; }
+    .scroll-cue { display: none; }
+  }
+
+  /* ===================== REDUCED MOTION ===================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+      scroll-behavior: auto !important;
+    }
+    .sheet, .sheet-glow { opacity: 1; }
+    .sheet-scan { left: 50%; opacity: 1; }
+    .caret { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===================== TOP RAIL ===================== -->
+  <header class="rail">
+    <div class="brand">
+      <span class="glyph" aria-hidden="true"></span>
+      <span>
+        <span class="name">gently<b>.</b></span><br />
+        <span class="sub">diSPIM · light-sheet · C. elegans</span>
+      </span>
+    </div>
+    <div class="rail-right">
+      <span class="rail-stat"><span class="led ok"></span> scope ready</span>
+      <span class="rail-sep" aria-hidden="true"></span>
+      <span class="rail-stat">488<span class="v">&nbsp;nm</span> · 561<span class="v">&nbsp;nm</span></span>
+      <span class="rail-sep" aria-hidden="true"></span>
+      <span class="rail-stat">stage <span class="v">idle</span></span>
+    </div>
+  </header>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero">
+    <div class="graticule" aria-hidden="true"></div>
+
+    <!-- THE SIGNATURE: the light sheet = the agent -->
+    <div class="sheet-stage" aria-hidden="true">
+      <div class="sheet-glow"></div>
+      <div class="sheet"></div>
+      <div class="sheet-scan"></div>
+    </div>
+
+    <div class="hero-inner">
+      <div class="greeting">
+        <div class="meta">
+          <span class="tag">488 GFP</span>
+          <span class="tag amber">561 mCherry</span>
+          <span class="stamp" id="stamp">ACQ · ready · t0000</span>
+        </div>
+        <h1 id="greet"><span class="dim">Good</span> evening.</h1>
+        <div class="prompt">What are we doing today?<span class="caret" aria-hidden="true"></span></div>
+      </div>
+
+      <div class="channels">
+        <button class="channel" type="button">
+          <div class="ch-head">
+            <span class="label eyebrow">Guided</span>
+            <span class="lambda">CH · 488</span>
+          </div>
+          <h2>Plan an experiment</h2>
+          <p>Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.</p>
+          <span class="cta">Start planning →</span>
+        </button>
+
+        <button class="channel c-561" type="button">
+          <div class="ch-head">
+            <span class="label eyebrow">Standalone</span>
+            <span class="lambda">CH · 561</span>
+          </div>
+          <h2>Take a quick look</h2>
+          <p>Straight to the scope to see what's there — no plan, no commitment.</p>
+          <span class="cta">Open the scope →</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="hero-foot">
+      <button class="chat-escape" type="button">
+        <span class="blip" aria-hidden="true"></span>
+        or just tell me what you need
+      </button>
+      <div class="live-status" role="status" aria-live="polite">
+        <span class="seg"><span class="led ok" aria-hidden="true"></span> scope <span class="v">ready</span></span>
+        <span class="dot-sep">·</span>
+        <span class="seg"><span class="v">36.9</span>&nbsp;°C</span>
+        <span class="dot-sep">·</span>
+        <span class="seg">stage <span class="v">idle</span></span>
+      </div>
+    </div>
+
+    <a class="scroll-cue" href="#workspace" aria-label="Scroll to workspace">
+      <span>workspace</span>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke-width="1.4"><path d="M7 2v9M3 7l4 4 4-4"/></svg>
+    </a>
+  </section>
+
+  <!-- ===================== WORKSPACE PEEK ===================== -->
+  <section class="workspace" id="workspace">
+    <div class="ws-inner">
+
+      <!-- session context strip -->
+      <div class="session-strip">
+        <span class="live"><span class="rec" aria-hidden="true"></span> LIVE</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span class="desc">developmental time-lapse</span>
+        <span class="params">· every <b>2 min</b> · <b>6 h</b> · <b>GFP</b>+<b class="amber">mCherry</b></span>
+        <span class="clock"><span class="v">0h 12m</span> elapsed · next <span class="v">1:43</span></span>
+      </div>
+
+      <div class="ws-grid">
+        <!-- biology primary -->
+        <div>
+          <div class="ws-block-label"><span class="label">Embryos · 3 tracked</span></div>
+          <div class="embryos">
+
+            <div class="embryo ok">
+              <div class="viz" aria-hidden="true">
+                <div class="grid-fade"></div>
+                <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+                  <ellipse cx="30" cy="30" rx="22" ry="16" stroke="#1f2a33" stroke-width="1"/>
+                  <circle cx="22" cy="26" r="6.5" fill="none" stroke="#39d0ff" stroke-width="1.3"/>
+                  <circle cx="38" cy="26" r="6.5" fill="none" stroke="#39d0ff" stroke-width="1.3"/>
+                  <circle cx="22" cy="38" r="6.5" fill="none" stroke="#39d0ff" stroke-width="1.3"/>
+                  <circle cx="38" cy="38" r="6.5" fill="none" stroke="#39d0ff" stroke-width="1.3"/>
+                </svg>
+              </div>
+              <div class="body">
+                <div class="id">EMBRYO · 01</div>
+                <div class="state"><span class="pip" aria-hidden="true"></span> on track</div>
+                <div class="note">4-cell · GFP nuclei resolved</div>
+              </div>
+            </div>
+
+            <div class="embryo fast">
+              <div class="viz" aria-hidden="true">
+                <div class="grid-fade"></div>
+                <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+                  <ellipse cx="30" cy="30" rx="22" ry="16" stroke="#1f2a33" stroke-width="1"/>
+                  <circle cx="24" cy="30" r="9" fill="none" stroke="#ffb347" stroke-width="1.3"/>
+                  <circle cx="36" cy="30" r="9" fill="none" stroke="#ffb347" stroke-width="1.3"/>
+                  <line x1="30" y1="21" x2="30" y2="39" stroke="#ffb347" stroke-width="1.1" stroke-dasharray="2 2"/>
+                </svg>
+              </div>
+              <div class="body">
+                <div class="id">EMBRYO · 02</div>
+                <div class="state"><span class="pip" aria-hidden="true"></span> dividing</div>
+                <div class="note">cadence <b>sped to 30 s</b></div>
+              </div>
+            </div>
+
+            <div class="embryo stall">
+              <div class="viz" aria-hidden="true">
+                <div class="grid-fade"></div>
+                <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+                  <ellipse cx="30" cy="30" rx="22" ry="16" stroke="#1f2a33" stroke-width="1"/>
+                  <circle cx="30" cy="30" r="11" fill="none" stroke="#3a4a55" stroke-width="1.3"/>
+                  <circle cx="30" cy="30" r="3" fill="#3a4a55"/>
+                </svg>
+              </div>
+              <div class="body">
+                <div class="id">EMBRYO · 03</div>
+                <div class="state"><span class="pip" aria-hidden="true"></span> stalled</div>
+                <div class="note">40 min quiet · flagged</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- agent's mind -->
+        <div>
+          <div class="ws-block-label"><span class="label">Agent telemetry</span></div>
+          <div class="agent-view">
+            <div class="av-head">
+              <span class="ttl"><span class="led" aria-hidden="true"></span><span class="label">Agent's View</span></span>
+              <span class="since">updated 4 s ago</span>
+            </div>
+            <div class="av-item expect">
+              <span class="kind">Expectation</span>
+              <div class="txt">Embryo 01 should reach the <span class="num">8-cell</span> stage within the next <span class="num">~12 min</span> at current cadence.</div>
+            </div>
+            <div class="av-item watch">
+              <span class="kind">Watchpoint</span>
+              <div class="txt">Embryo 02 is dividing fast — holding <span class="num">30 s</span> cadence and watching <span class="num">561</span> for photobleaching.</div>
+            </div>
+            <div class="av-item question">
+              <span class="kind">Open question</span>
+              <div class="txt">Is Embryo 03 arrested, or just out of focus? Queueing a calibration sweep to decide.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ws-foot">— the agent keeps watch · you don't have to —</div>
+    </div>
+  </section>
+
+  <script>
+    // Time-aware greeting — the agent reads the room clock.
+    (function () {
+      var h = new Date().getHours();
+      var part = h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night";
+      var el = document.getElementById("greet");
+      if (el) el.innerHTML = '<span class="dim">Good</span> ' + part + ".";
+
+      // Acquisition stamp ticks like a readout counter (cosmetic telemetry).
+      var stamp = document.getElementById("stamp");
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (stamp && !reduce) {
+        var t = 0;
+        setInterval(function () {
+          t = (t + 1) % 10000;
+          stamp.textContent = "ACQ · ready · t" + String(t).padStart(4, "0");
+        }, 1400);
+      }
+    })();
+  </script>
+
+</body>
+</html>

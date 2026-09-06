@@ -730,6 +730,7 @@
 .lp-btn {
     font-size: 0.72rem;
     padding: 2px 8px;
+    white-space: nowrap;   /* "Set No" wrapped to two lines in a narrow panel */
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--bg-card);
@@ -1177,4 +1178,45 @@
     font-size: 0.66rem;
     line-height: 1.35;
     color: var(--op-ink-dim);
+}
+
+/* ── Light panel: mode as the root of the control ─────────────────────────
+   LED and laser are two independent Micro-Manager config groups, so their
+   exclusivity is a policy this panel asserts, not an interlock the hardware
+   enforces. `is-on` is read back from the device; `is-open` is only which
+   branch is on screen. They are different things and look different: a mode
+   that is actually engaged is filled, a branch merely being viewed is outlined.
+   Both light up together when both sources are open, which is the #106 fault
+   and gets its own .lp-warn line. */
+.lp-seg {
+    display: inline-flex;
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.lp-mbtn {
+    font-size: 0.72rem;
+    padding: 2px 10px;
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.lp-mbtn:first-child { border-left: 0; }
+
+/* Engaged: the device says this source is open. */
+.lp-mbtn.is-on {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Disclosed but not engaged — viewing the branch to configure it. */
+.lp-mbtn.is-open:not(.is-on) {
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--accent);
 }

@@ -1,0 +1,66 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e45]:
+    - generic [ref=f3e46]:
+      - link "Gently Microscopy" [ref=f3e47] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f3e48]:
+        - link "215b41df" [ref=f3e49] [cursor=pointer]:
+          - /url: /review?session=215b41df
+        - button "Copy session ID" [ref=f3e50] [cursor=pointer]
+    - generic [ref=f3e54]:
+      - generic [ref=f3e55]: R
+      - button "Open process console" [ref=f3e57]
+      - link "Dashboard settings" [ref=f3e61] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f3e65] [cursor=pointer]
+      - button "Scope offline" [ref=f3e69] [cursor=pointer]
+  - generic [ref=f3e74]:
+    - complementary [ref=f3e75]:
+      - navigation [ref=f3e76]:
+        - generic [ref=f3e77]:
+          - generic [ref=f3e78]: Now
+          - button "Home" [ref=f3e79] [cursor=pointer]
+          - button "Operations" [ref=f3e80] [cursor=pointer]
+          - button "Embryos" [ref=f3e81] [cursor=pointer]
+        - generic [ref=f3e82]:
+          - generic [ref=f3e83]: Library
+          - button "Plans" [ref=f3e84] [cursor=pointer]
+          - button "Sessions" [ref=f3e85] [cursor=pointer]
+          - button "Notebook" [ref=f3e86] [cursor=pointer]
+          - button "Gallery" [ref=f3e87] [cursor=pointer]
+        - generic [ref=f3e88]:
+          - generic [ref=f3e89]: System
+          - button "Devices" [ref=f3e90] [cursor=pointer]
+          - button "Calibration" [ref=f3e91] [cursor=pointer]
+          - button "Logs" [ref=f3e92] [cursor=pointer]
+      - button "Talk to Gently" [ref=f3e93] [cursor=pointer]
+    - generic [ref=f3e95]:
+      - generic [ref=f3e96]:
+        - generic [ref=f3e97]: LIVE
+        - generic [ref=f3e99]: 0 embryos · Online
+      - generic [ref=f3e147]:
+        - generic [ref=f3e148]:
+          - heading "Calibration" [level=2] [ref=f3e149]
+          - generic [ref=f3e150]:
+            - button "Profile" [ref=f3e151] [cursor=pointer]
+            - button "Gallery" [ref=f3e152] [cursor=pointer]
+        - generic [ref=f3e153]:
+          - generic [ref=f3e154]:
+            - generic [ref=f3e155]: Embryos
+            - generic [ref=f3e156]: No calibration images yet
+          - generic [ref=f3e159]:
+            - generic [ref=f3e160]: 📷
+            - generic [ref=f3e161]: Select an embryo to view calibration images
+      - text: ›
+      - contentinfo [ref=f3e129]:
+        - generic [ref=f3e130]: 0 embryos · 0 images · 12 events
+        - generic [ref=f3e131]: No active timelapse
+    - complementary "Agent chat" [ref=f3e132]:
+      - generic [ref=f3e134]:
+        - generic [ref=f3e135]: Agent
+        - generic [ref=f3e137]: Connected · v1.0.0.dev0
+        - button "Collapse agent panel" [ref=f3e138] [cursor=pointer]
+      - generic [ref=f3e142]:
+        - textbox "Message Gently… ( / commands · @ tools )" [ref=f3e143]:
+          - /placeholder: Message Gently…   ( / commands · @ tools )
+        - button "Send message" [disabled] [ref=f3e144]

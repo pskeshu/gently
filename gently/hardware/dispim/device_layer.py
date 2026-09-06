@@ -2684,7 +2684,10 @@ class DeviceLayerServer(Service):
             )
 
     async def handle_get_laser_configs(self, request):
-        """GET /api/laser/configs — list available Laser config-group presets."""
+        """GET /api/laser/configs — available Laser presets and the current one.
+
+        Returns ``{"configs": [...], "current": "<preset>"}``.
+        """
         try:
             light_source = self.devices.get("light_source") or self.devices.get("laser_control")
             if light_source is None:
@@ -2693,7 +2696,14 @@ class DeviceLayerServer(Service):
                     status=503,
                 )
             configs = light_source._get_available_configs()
-            return web.json_response({"configs": configs})
+            # The preset that is actually set, not the one last commanded. The
+            # UI had no way to ask, so its config readout was an echo of its own
+            # last write -- and a write that returned 200 is not a state (#106).
+            try:
+                current = light_source.read().get(light_source.name, {}).get("value")
+            except Exception:
+                current = None
+            return web.json_response({"configs": configs, "current": current})
         except Exception as e:
             import traceback
 

@@ -1,0 +1,30 @@
+- generic [active] [ref=f2e1]:
+  - generic:
+    - generic [ref=f2e3]:
+      - button "←" [disabled] [ref=f2e4]
+      - button "0 home" [ref=f2e5] [cursor=pointer]
+      - button "1 detect" [ref=f2e6] [cursor=pointer]
+      - button "2 position" [ref=f2e7] [cursor=pointer]
+      - button "3 calibrate" [ref=f2e8] [cursor=pointer]
+      - button "4 acquire" [ref=f2e9] [cursor=pointer]
+      - button "5 curator" [ref=f2e10] [cursor=pointer]
+      - button "bench" [ref=f2e11] [cursor=pointer]
+      - generic [ref=f2e12]:
+        - text: density
+        - slider [ref=f2e13]: "5"
+        - generic [ref=f2e14]: "5"
+      - generic [ref=f2e15]:
+        - generic [ref=f2e16]: t+0s
+        - text: ×
+        - combobox [ref=f2e17]:
+          - option "1"
+          - option "10" [selected]
+          - option "60"
+    - generic:
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: everything exists · attention travels · 0–5 · surface zoom ≠ frame zoom
+        - generic [ref=f2e20]:
+          - button "survey" [ref=f2e21] [cursor=pointer]
+          - button "operate" [ref=f2e22] [cursor=pointer]
+          - button "acquire" [ref=f2e23] [cursor=pointer]
+      - generic [ref=f2e24]: 100%

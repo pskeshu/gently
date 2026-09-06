@@ -1,0 +1,107 @@
+- generic [ref=f20e1]:
+  - generic "Welcome to Gently" [ref=f20e2]:
+    - button "Toggle theme" [ref=f20e3] [cursor=pointer]
+    - generic [ref=f20e7]:
+      - generic [ref=f20e8]: Good afternoon.What are we doing today?
+      - generic [ref=f20e11]:
+        - button "guided Plan an experiment Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch. Start planning" [ref=f20e12] [cursor=pointer]:
+          - generic [ref=f20e13]: guided
+          - heading "Plan an experiment" [level=3] [ref=f20e17]
+          - paragraph [ref=f20e18]: Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.
+          - generic [ref=f20e19]: Start planning
+        - button "standalone Take a quick look Straight to the scope to see what's there — no plan, no commitment. Open the scope" [ref=f20e22] [cursor=pointer]:
+          - generic [ref=f20e23]: standalone
+          - heading "Take a quick look" [level=3] [ref=f20e28]
+          - paragraph [ref=f20e29]: Straight to the scope to see what's there — no plan, no commitment.
+          - generic [ref=f20e30]: Open the scope
+      - generic [ref=f20e33]:
+        - button "or just tell me what you need" [ref=f20e34] [cursor=pointer]
+        - generic:
+          - textbox "e.g. watch these embryos overnight and ping me if one stalls" [ref=f20e40]
+          - button "Send" [ref=f20e41] [cursor=pointer]
+      - button "Skip to workspace ›" [ref=f20e44] [cursor=pointer]
+  - generic [ref=f20e45]:
+    - generic [ref=f20e46]:
+      - link "Gently Microscopy" [ref=f20e47] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f20e48]:
+        - link "2fa715ae" [ref=f20e49] [cursor=pointer]:
+          - /url: /review?session=2fa715ae
+        - button "Copy session ID" [ref=f20e50] [cursor=pointer]
+    - generic [ref=f20e54]:
+      - generic [ref=f20e55]: R
+      - button "Open process console" [ref=f20e57]
+      - link "Dashboard settings" [ref=f20e61] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f20e65] [cursor=pointer]
+      - button "Scope offline" [ref=f20e69] [cursor=pointer]
+  - generic [ref=f20e74]:
+    - complementary [ref=f20e75]:
+      - navigation [ref=f20e76]:
+        - generic [ref=f20e77]:
+          - generic [ref=f20e78]: Now
+          - button "Home" [ref=f20e79] [cursor=pointer]
+          - button "Operations" [ref=f20e80] [cursor=pointer]
+          - button "Embryos" [ref=f20e81] [cursor=pointer]
+        - generic [ref=f20e82]:
+          - generic [ref=f20e83]: Library
+          - button "Plans" [ref=f20e84] [cursor=pointer]
+          - button "Sessions" [ref=f20e85] [cursor=pointer]
+          - button "Notebook" [ref=f20e86] [cursor=pointer]
+          - button "Gallery" [ref=f20e87] [cursor=pointer]
+        - generic [ref=f20e88]:
+          - generic [ref=f20e89]: System
+          - button "Devices" [ref=f20e90] [cursor=pointer]
+          - button "Calibration" [ref=f20e91] [cursor=pointer]
+          - button "Logs" [ref=f20e92] [cursor=pointer]
+      - button "Talk to Gently" [ref=f20e93] [cursor=pointer]
+    - generic [ref=f20e95]:
+      - generic [ref=f20e96]:
+        - generic [ref=f20e97]: LIVE
+        - generic [ref=f20e99]: 0 embryos · Online
+      - generic [ref=f20e101]:
+        - complementary [ref=f20e102]:
+          - generic [ref=f20e103]: Agent’s view
+          - generic [ref=f20e104]: Nothing yet — the agent’s notes, expectations, and open questions appear here as it works.
+        - generic [ref=f20e105]:
+          - generic [ref=f20e106]:
+            - generic [ref=f20e107]:
+              - generic [ref=f20e108]: Recent sessions
+              - link "All" [ref=f20e109] [cursor=pointer]:
+                - /url: "#sessions"
+            - generic [ref=f20e110]:
+              - generic [ref=f20e112]:
+                - generic [ref=f20e113]:
+                  - generic [ref=f20e114]: 2fa715ae
+                  - generic [ref=f20e115]: live
+                - generic [ref=f20e116]: 13m ago · 0 embryos
+              - generic [ref=f20e117]:
+                - generic [ref=f20e118]:
+                  - generic [ref=f20e119]: 215b41df
+                  - generic [ref=f20e121]: 44m ago · 0 embryos
+                - button "Resume" [ref=f20e122] [cursor=pointer]
+          - generic [ref=f20e123]:
+            - generic [ref=f20e124]:
+              - generic [ref=f20e125]: Recent plans
+              - link "All" [ref=f20e126] [cursor=pointer]:
+                - /url: "#plans"
+            - generic [ref=f20e127]: No plans yet.
+          - generic [ref=f20e129]:
+            - generic [ref=f20e130]:
+              - generic [ref=f20e131]: Recent images
+              - link "All" [ref=f20e132] [cursor=pointer]:
+                - /url: "#embryos"
+            - generic [ref=f20e133]: No images yet — they appear once a session has captured volumes.
+      - text: ›
+      - contentinfo [ref=f20e135]:
+        - generic [ref=f20e136]: 0 embryos · 0 images · 8 events
+        - generic [ref=f20e137]: No active timelapse
+    - complementary "Agent chat" [ref=f20e138]:
+      - generic [ref=f20e140]:
+        - generic [ref=f20e141]: Agent
+        - generic [ref=f20e143]: Connected · v1.0.0.dev0
+        - button "Collapse agent panel" [ref=f20e144] [cursor=pointer]
+      - generic [ref=f20e148]:
+        - textbox "Message Gently… ( / commands · @ tools )" [active] [ref=f20e149]:
+          - /placeholder: Message Gently…   ( / commands · @ tools )
+        - button "Send message" [disabled] [ref=f20e150]

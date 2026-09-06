@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gently — calm instrument re-skin</title>
+<!--
+  CALM RE-SKIN — keep the prototype's spare layout, change only the identity.
+  Palette : paper #f6f5f2 · ink #17191c · muted #8b9097 · line #e7e4dd · card #fff
+            one accent = 488 light-sheet teal #0e9aa7 (glow #19c2cf). No 2nd accent.
+  Type    : Instrument Serif (agent voice) · Inter Tight (body) · JetBrains Mono (data/eyebrows)
+  Signature: the agent presence is a still, softly-breathing LIGHT-SHEET LINE (not an orb).
+  Risk     : the voice is set in a serif italic and the agent is a line of laser light,
+             not a glowing ball — distinctive but quiet. Everything else is whitespace.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f6f5f2; --ink:#17191c; --muted:#8b9097; --line:#e7e4dd; --card:#ffffff;
+    --sheet:#0e9aa7; --sheet-glow:#19c2cf; --sheet-soft:rgba(14,154,167,.10);
+    --serif:"Instrument Serif",Georgia,serif;
+    --sans:"Inter Tight",system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:var(--sans); color:var(--ink); background:var(--paper);
+    -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; min-height:100%;
+  }
+
+  /* top bar — quiet, mono status */
+  .top{ display:flex; align-items:center; justify-content:space-between; padding:20px 28px; }
+  .brand{ font-family:var(--serif); font-size:22px; letter-spacing:.01em; }
+  .status{ font-family:var(--mono); font-size:12px; color:var(--muted); display:inline-flex; align-items:center; gap:9px; }
+  .status .live{ width:6px; height:6px; border-radius:50%; background:var(--sheet); box-shadow:0 0 0 0 var(--sheet-soft); animation:pulse 3.6s var(--ease) infinite; }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(14,154,167,.35);} 50%{ box-shadow:0 0 0 5px rgba(14,154,167,0);} }
+
+  /* centered stage, lots of air */
+  .stage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0 24px 9vh; }
+  .rise{ animation:rise .7s var(--ease) backwards; }
+  .rise.d1{ animation-delay:.08s; } .rise.d2{ animation-delay:.16s; } .rise.d3{ animation-delay:.24s; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(12px);} to{ opacity:1; transform:none; } }
+
+  /* SIGNATURE — the light sheet (replaces the orb) */
+  .sheet{ position:relative; width:132px; height:30px; margin-bottom:30px; }
+  .sheet .plane{
+    position:absolute; left:0; right:0; top:50%; height:2px; transform:translateY(-50%);
+    background:linear-gradient(90deg, transparent, var(--sheet-glow) 18%, var(--sheet-glow) 82%, transparent);
+    box-shadow:0 0 14px 1px rgba(25,194,207,.55);
+    animation:breathe 4.5s ease-in-out infinite;
+  }
+  .sheet .haze{
+    position:absolute; left:14%; right:14%; top:50%; height:22px; transform:translateY(-50%);
+    background:radial-gradient(ellipse 60% 100% at 50% 50%, var(--sheet-soft), transparent 70%);
+    filter:blur(2px);
+  }
+  @keyframes breathe{ 0%,100%{ opacity:.78; } 50%{ opacity:1; } }
+
+  .say{ font-family:var(--serif); font-size:clamp(30px,4.4vw,46px); line-height:1.12; text-align:center; letter-spacing:.005em; max-width:18ch; }
+  .say .q{ font-style:italic; color:var(--muted); display:block; margin-top:2px; }
+
+  /* two calm choice cards */
+  .choices{ display:grid; grid-template-columns:1fr 1fr; gap:18px; width:min(680px,92vw); margin-top:42px; }
+  @media (max-width:600px){ .choices{ grid-template-columns:1fr; } }
+  .choice{
+    text-align:left; cursor:pointer; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:24px 22px 20px; font:inherit; color:var(--ink);
+    transition:border-color .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .choice:hover{ transform:translateY(-3px); border-color:#d6d2c8; box-shadow:0 14px 36px rgba(23,25,28,.07); }
+  .choice:focus-visible{ outline:2px solid var(--sheet); outline-offset:3px; }
+  .eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  .choice h3{ font-family:var(--serif); font-weight:400; font-size:23px; margin:14px 0 7px; letter-spacing:.01em; }
+  .choice p{ margin:0; font-size:13.5px; line-height:1.55; color:#5c616a; }
+  .choice .go{ margin-top:16px; font-family:var(--mono); font-size:12px; color:var(--sheet); opacity:0; transform:translateX(-4px); transition:.25s var(--ease); }
+  .choice:hover .go, .choice:focus-visible .go{ opacity:1; transform:none; }
+
+  /* escape — chat as last resort, demoted to a quiet line */
+  .escape{ margin-top:30px; font-family:var(--mono); font-size:12.5px; color:var(--muted); background:none; border:0; cursor:pointer; padding:6px; letter-spacing:.01em; transition:color .2s; }
+  .escape:hover{ color:var(--ink); }
+  .escape u{ text-decoration-color:var(--line); text-underline-offset:3px; }
+
+  .skip{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:11px; color:var(--muted); background:none; border:0; cursor:pointer; opacity:.7; }
+  .skip:hover{ opacity:1; color:var(--ink); }
+
+  @media (prefers-reduced-motion:reduce){
+    *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">Gently</div>
+    <div class="status"><span class="live"></span>scope ready · 36.9 °C · stage idle</div>
+  </div>
+
+  <main class="stage">
+    <div class="sheet rise"><div class="haze"></div><div class="plane"></div></div>
+    <h1 class="say rise d1" id="say">Good evening.<span class="q">What are we doing today?</span></h1>
+
+    <div class="choices">
+      <button class="choice rise d2">
+        <span class="eyebrow">Guided</span>
+        <h3>Plan an experiment</h3>
+        <p>Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.</p>
+        <div class="go">start planning →</div>
+      </button>
+      <button class="choice rise d2">
+        <span class="eyebrow">Standalone</span>
+        <h3>Take a quick look</h3>
+        <p>Straight to the scope to see what's there — no plan, no commitment.</p>
+        <div class="go">open the scope →</div>
+      </button>
+    </div>
+
+    <button class="escape rise d3">or just <u>tell me what you need</u></button>
+  </main>
+
+  <button class="skip">skip to workspace ›</button>
+
+  <script>
+    (function(){
+      var h = new Date().getHours();
+      var t = h < 5 ? "Still here." : h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
+      document.getElementById('say').firstChild.textContent = t;
+    })();
+  </script>
+</body>
+</html>

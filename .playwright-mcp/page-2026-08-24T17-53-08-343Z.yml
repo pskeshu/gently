@@ -1,0 +1,94 @@
+- generic [active] [ref=f80e1]:
+  - generic [ref=f80e2]:
+    - generic [ref=f80e3]:
+      - link "Gently Microscopy" [ref=f80e4] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f80e5]:
+        - link "db03fcbc" [ref=f80e6] [cursor=pointer]:
+          - /url: /review?session=db03fcbc
+        - button "Copy session ID" [ref=f80e7] [cursor=pointer]
+    - generic [ref=f80e11]:
+      - generic [ref=f80e12]: P
+      - button "Open process console" [ref=f80e14]
+      - link "Dashboard settings" [ref=f80e18] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f80e22] [cursor=pointer]
+      - button "Scope offline" [ref=f80e26] [cursor=pointer]
+  - generic [ref=f80e31]:
+    - complementary [ref=f80e32]:
+      - navigation [ref=f80e33]:
+        - generic [ref=f80e34]:
+          - generic [ref=f80e35]: Now
+          - button "Home" [ref=f80e36] [cursor=pointer]
+          - button "Operations" [ref=f80e37] [cursor=pointer]
+          - button "Embryos" [ref=f80e38] [cursor=pointer]
+        - generic [ref=f80e39]:
+          - generic [ref=f80e40]: Library
+          - button "Plans" [ref=f80e41] [cursor=pointer]
+          - button "Sessions" [ref=f80e42] [cursor=pointer]
+          - button "Notebook" [ref=f80e43] [cursor=pointer]
+          - button "Gallery" [ref=f80e44] [cursor=pointer]
+        - generic [ref=f80e45]:
+          - generic [ref=f80e46]: System
+          - button "Devices" [ref=f80e47] [cursor=pointer]
+          - button "Calibration" [ref=f80e48] [cursor=pointer]
+          - button "Logs" [ref=f80e49] [cursor=pointer]
+      - button "Talk to Gently" [ref=f80e50] [cursor=pointer]
+    - generic [ref=f80e52]:
+      - generic [ref=f80e53]:
+        - generic [ref=f80e54]: LIVE
+        - generic [ref=f80e56]: 0 embryos · Online
+      - generic [ref=f80e59]:
+        - generic [ref=f80e60]:
+          - generic [ref=f80e61]:
+            - generic [ref=f80e62]: Recent sessions
+            - link "All" [ref=f80e63] [cursor=pointer]:
+              - /url: "#sessions"
+          - generic [ref=f80e64]:
+            - generic [ref=f80e66]:
+              - generic [ref=f80e67]:
+                - generic [ref=f80e68]: seeded demo
+                - generic [ref=f80e69]: live
+              - generic [ref=f80e70]: 3m ago · 4 embryos
+            - generic [ref=f80e71]:
+              - generic [ref=f80e72]:
+                - generic [ref=f80e73]: 4ebb40a7
+                - generic [ref=f80e75]: 3m ago · 0 embryos
+              - button "Resume" [ref=f80e76] [cursor=pointer]
+            - generic [ref=f80e77]:
+              - generic [ref=f80e78]:
+                - generic [ref=f80e79]: ced24add
+                - generic [ref=f80e81]: 22m ago · 0 embryos
+              - button "Resume" [ref=f80e82] [cursor=pointer]
+            - generic [ref=f80e83]:
+              - generic [ref=f80e84]:
+                - generic [ref=f80e85]: 5aaf1f3c
+                - generic [ref=f80e87]: 22m ago · 0 embryos
+              - button "Resume" [ref=f80e88] [cursor=pointer]
+            - generic [ref=f80e89]:
+              - generic [ref=f80e90]:
+                - generic [ref=f80e91]: 7f12d51b
+                - generic [ref=f80e93]: 23m ago · 0 embryos
+              - button "Resume" [ref=f80e94] [cursor=pointer]
+        - generic [ref=f80e95]:
+          - generic [ref=f80e96]:
+            - generic [ref=f80e97]: Recent plans
+            - link "All" [ref=f80e98] [cursor=pointer]:
+              - /url: "#plans"
+          - generic [ref=f80e99]: timing-variance
+        - generic [ref=f80e102]:
+          - generic [ref=f80e103]:
+            - generic [ref=f80e104]: Recent images
+            - link "All" [ref=f80e105] [cursor=pointer]:
+              - /url: "#embryos"
+          - generic [ref=f80e106]: No images yet — they appear once a session is active.
+      - text: ›
+      - contentinfo [ref=f80e108]
+    - complementary "Agent chat" [ref=f80e109]:
+      - generic [ref=f80e111]:
+        - generic [ref=f80e112]: Agent
+        - generic [ref=f80e114]: Connected
+        - button "Collapse agent panel" [ref=f80e115] [cursor=pointer]
+      - generic [ref=f80e119]:
+        - textbox "Message Gently…" [ref=f80e120]
+        - button "Send message" [disabled] [ref=f80e121]

@@ -1,0 +1,120 @@
+- generic [active] [ref=f5e1]:
+  - generic [ref=f5e2]:
+    - generic:
+      - generic [ref=f5e4]:
+        - button "▼" [ref=f5e5] [cursor=pointer]
+        - generic [ref=f5e6]: EMBRYOS · 4
+        - generic [ref=f5e7]: 4 · e02 sel
+        - generic [ref=f5e8]: "0.462"
+        - generic [ref=f5e9]: live
+      - generic [ref=f5e10]:
+        - generic [ref=f5e11]:
+          - button "▼" [ref=f5e12] [cursor=pointer]
+          - generic [ref=f5e13]: BOTTOM CAMERA
+          - generic [ref=f5e14]: "0.935"
+          - generic [ref=f5e15]: live
+        - generic [ref=f5e19]:
+          - button "−" [ref=f5e20] [cursor=pointer]
+          - generic [ref=f5e21]: 1.0×
+          - button "+" [ref=f5e22] [cursor=pointer]
+      - generic [ref=f5e23]:
+        - generic [ref=f5e24]:
+          - button "▼" [ref=f5e25] [cursor=pointer]
+          - generic [ref=f5e26]: SPIM HEAD
+          - generic [ref=f5e27]: "0.52"
+          - generic [ref=f5e28]: ready
+        - generic [ref=f5e29]:
+          - generic [ref=f5e30]:
+            - generic [ref=f5e31]: laser
+            - slider [ref=f5e32]: "35"
+            - generic [ref=f5e33]: 35%
+          - generic [ref=f5e34]:
+            - generic [ref=f5e35]: exposure
+            - slider [ref=f5e36]: "40"
+            - generic [ref=f5e37]: 40ms
+          - generic [ref=f5e38]:
+            - generic [ref=f5e39]: step
+            - slider [ref=f5e40]: "50"
+            - generic [ref=f5e41]: 50µm
+          - generic [ref=f5e42]:
+            - button "go to e02" [ref=f5e43] [cursor=pointer]
+            - button "HALT" [ref=f5e44] [cursor=pointer]
+      - generic [ref=f5e45]:
+        - generic [ref=f5e46]:
+          - button "▼" [ref=f5e47] [cursor=pointer]
+          - generic [ref=f5e48]: STAGE
+          - generic [ref=f5e49]: "0.565"
+          - generic [ref=f5e50]: live
+        - generic [ref=f5e51]:
+          - generic [ref=f5e52]:
+            - generic [ref=f5e53]: x
+            - generic [ref=f5e54]: 1610.4 µm
+          - generic [ref=f5e55]:
+            - generic [ref=f5e56]: "y"
+            - generic [ref=f5e57]: 905.2 µm
+          - generic [ref=f5e58]:
+            - generic [ref=f5e59]: z
+            - generic [ref=f5e60]: "-12.8 µm"
+      - generic [ref=f5e61]:
+        - generic [ref=f5e62]:
+          - button "▼" [ref=f5e63] [cursor=pointer]
+          - generic [ref=f5e64]: CALIBRATION · two-point
+          - generic [ref=f5e65]: "0.617"
+          - generic [ref=f5e66]: stale
+        - generic [ref=f5e67]:
+          - generic [ref=f5e68]:
+            - generic [ref=f5e69]: source
+            - generic [ref=f5e70]: laser 488
+          - generic [ref=f5e71]:
+            - generic [ref=f5e72]: point 1
+            - generic [ref=f5e73]: captured
+          - generic [ref=f5e74]:
+            - generic [ref=f5e75]: point 2
+            - generic [ref=f5e76]: —
+          - generic [ref=f5e77]:
+            - button "capture point 2" [ref=f5e78] [cursor=pointer]
+            - button "solve transform" [ref=f5e79] [cursor=pointer]
+      - generic [ref=f5e81]:
+        - button "▼" [ref=f5e82] [cursor=pointer]
+        - generic [ref=f5e83]: ACQUISITION
+        - generic [ref=f5e84]: idle · 120s × 60
+        - generic [ref=f5e85]: "0.325"
+        - generic [ref=f5e86]: ready
+      - generic [ref=f5e87]:
+        - generic [ref=f5e88]:
+          - button "▼" [ref=f5e89] [cursor=pointer]
+          - generic [ref=f5e90]: CURATOR
+          - generic [ref=f5e91]: "0.588"
+          - generic [ref=f5e92]: live
+        - generic [ref=f5e93]:
+          - generic [ref=f5e94]:
+            - generic [ref=f5e95]: tracking
+            - generic [ref=f5e96]: e02 · bottom cam · stage
+          - generic [ref=f5e97]:
+            - generic [ref=f5e98]: stale
+            - generic [ref=f5e99]: calibration transform
+          - generic [ref=f5e100]: Calibration never completed. Acquisition would put e02 off-centre.
+          - generic [ref=f5e101]:
+            - button "show me" [ref=f5e102] [cursor=pointer]
+            - button "dismiss" [ref=f5e103] [cursor=pointer]
+            - generic [ref=f5e104]: "rule 5: keys 0–5 do this without me"
+      - generic [ref=f5e106]:
+        - button "▼" [ref=f5e107] [cursor=pointer]
+        - generic [ref=f5e108]: EVENTS
+        - generic [ref=f5e109]: none
+        - generic [ref=f5e110]: "0.134"
+        - generic [ref=f5e111]: ready
+  - generic [ref=f5e112]: everything exists · attention travels · 0–5 · surface zoom ≠ frame zoom
+  - generic [ref=f5e113]:
+    - button "0 home" [ref=f5e114] [cursor=pointer]
+    - button "1 detect" [ref=f5e115] [cursor=pointer]
+    - button "2 position" [ref=f5e116] [cursor=pointer]
+    - button "3 calibrate" [ref=f5e117] [cursor=pointer]
+    - button "4 acquire" [ref=f5e118] [cursor=pointer]
+    - button "5 curator" [ref=f5e119] [cursor=pointer]
+    - button "bench" [ref=f5e120] [cursor=pointer]
+    - generic [ref=f5e121]:
+      - text: density
+      - slider [ref=f5e122]: "5"
+      - generic [ref=f5e123]: "5"
+  - generic [ref=f5e124]: 90%

@@ -1,0 +1,135 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic:
+      - generic [ref=e3]:
+        - generic [ref=e4]:
+          - button "▼" [ref=e5] [cursor=pointer]
+          - generic [ref=e6]: EMBRYOS · 4
+          - generic [ref=e7]: "0.70"
+          - generic [ref=e8]: live
+        - generic [ref=e9]:
+          - generic [ref=e10] [cursor=pointer]: board ⇱
+          - generic [ref=e11] [cursor=pointer]: filmstrip ⇱
+          - generic [ref=e12] [cursor=pointer]: vitals ⇱
+        - generic [ref=e13]:
+          - generic [ref=e14]:
+            - generic [ref=e15] [cursor=pointer]: e01 1420, 880
+            - generic [ref=e16] [cursor=pointer]: e02 1610, 905
+            - generic [ref=e17] [cursor=pointer]: e03 1755, 1120
+            - generic [ref=e18] [cursor=pointer]: e04 2010, 860
+          - generic [ref=e19]:
+            - button "remap region" [ref=e20] [cursor=pointer]
+            - generic [ref=e21]: µm
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - button "▼" [ref=e24] [cursor=pointer]
+          - generic [ref=e25]: BOTTOM CAMERA
+          - generic [ref=e26]: "0.90"
+          - generic [ref=e27]: live
+        - generic [ref=e31]:
+          - button "−" [ref=e32] [cursor=pointer]
+          - generic [ref=e33]: 1.0×
+          - button "+" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - button "▼" [ref=e37] [cursor=pointer]
+          - generic [ref=e38]: CALIBRATION · two-point
+          - generic [ref=e39]: "0.95"
+          - generic [ref=e40]: stale
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]: source
+            - generic [ref=e44]: laser 488
+          - generic [ref=e45]:
+            - generic [ref=e46]: point 1
+            - generic [ref=e47]: captured
+          - generic [ref=e48]:
+            - generic [ref=e49]: point 2
+            - generic [ref=e50]: —
+          - generic [ref=e51]:
+            - button "capture point 2" [ref=e52] [cursor=pointer]
+            - button "solve transform" [ref=e53] [cursor=pointer]
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - button "▼" [ref=e56] [cursor=pointer]
+          - generic [ref=e57]: ACQUISITION
+          - generic [ref=e58]: "0.50"
+          - generic [ref=e59]: ready
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e62]: interval
+            - slider [ref=e63]: "100"
+            - generic [ref=e64]: 120s
+          - generic [ref=e65]:
+            - generic [ref=e66]: timepoints
+            - slider [ref=e67]: "60"
+            - generic [ref=e68]: "60"
+          - button "start" [ref=e70] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "▼" [ref=e73] [cursor=pointer]
+        - generic [ref=e74]: RELEASES
+        - generic [ref=e75]: none
+        - generic [ref=e76]: "0.40"
+        - generic [ref=e77]: live
+      - generic [ref=e79]:
+        - button "▼" [ref=e80] [cursor=pointer]
+        - generic [ref=e81]: COURTYARD
+        - generic [ref=e82]: rail · deck
+        - generic [ref=e83]: "0.30"
+        - generic [ref=e84]: ready
+      - generic [ref=e86]:
+        - button "▼" [ref=e87] [cursor=pointer]
+        - generic [ref=e88]: EVENTS
+        - generic [ref=e89]: none
+        - generic [ref=e90]: "0.20"
+        - generic [ref=e91]: ready
+  - generic:
+    - generic:
+      - generic [ref=e93]:
+        - button "▼" [ref=e94] [cursor=pointer]
+        - generic [ref=e95]: SPIM HEAD
+        - generic [ref=e96]: 35% · 40ms
+        - generic [ref=e97]: "0.80"
+        - generic [ref=e98]: PIN
+        - generic [ref=e99]: ready
+      - generic [ref=e101]:
+        - button "▼" [ref=e102] [cursor=pointer]
+        - generic [ref=e103]: STAGE
+        - generic [ref=e104]: 1610.4, 905.2, -12.8
+        - generic [ref=e105]: "0.60"
+        - generic [ref=e106]: PIN
+        - generic [ref=e107]: live
+      - generic [ref=e109]:
+        - button "▼" [ref=e110] [cursor=pointer]
+        - generic [ref=e111]: CURATOR
+        - generic [ref=e112]: 1 needs you
+        - generic [ref=e113]: "0.85"
+        - generic [ref=e114]: PIN
+        - generic [ref=e115]: live
+    - generic [ref=e116]:
+      - button "0 home" [ref=e117] [cursor=pointer]
+      - button "1 detect" [ref=e118] [cursor=pointer]
+      - button "2 position" [ref=e119] [cursor=pointer]
+      - button "3 calibrate" [ref=e120] [cursor=pointer]
+      - button "4 acquire" [ref=e121] [cursor=pointer]
+      - button "5 curator" [ref=e122] [cursor=pointer]
+      - button "bench" [ref=e123] [cursor=pointer]
+      - generic [ref=e124]:
+        - text: density
+        - slider [ref=e125]: "4"
+        - generic [ref=e126]: "4"
+      - generic [ref=e127]:
+        - generic [ref=e128]: t+0s
+        - text: ×
+        - combobox [ref=e129]:
+          - option "1"
+          - option "10" [selected]
+          - option "60"
+    - generic:
+      - generic [ref=e130]:
+        - generic [ref=e131]: everything exists · attention travels · 0–5 · surface zoom ≠ frame zoom
+        - generic [ref=e132]:
+          - button "survey" [ref=e133] [cursor=pointer]
+          - button "operate" [ref=e134] [cursor=pointer]
+          - button "acquire" [ref=e135] [cursor=pointer]
+      - generic [ref=e136]: 100%

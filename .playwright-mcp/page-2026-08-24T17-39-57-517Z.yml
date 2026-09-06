@@ -1,0 +1,15 @@
+- generic [ref=f56e2]:
+  - generic [ref=f56e3]: Gently
+  - paragraph [ref=f56e6]: What are we doing today?
+  - switch "Microscope" [ref=f56e7] [cursor=pointer]:
+    - generic [ref=f56e12]:
+      - generic [ref=f56e13]: Microscope
+      - generic [ref=f56e14]: Not this session — saved data only.
+  - switch "Assistant" [checked] [ref=f56e16] [cursor=pointer]:
+    - generic [ref=f56e20]:
+      - generic [ref=f56e21]: Assistant
+      - generic [ref=f56e22]: Help find embryos and watch the timelapse.
+  - button "Open →" [ref=f56e24] [cursor=pointer]:
+    - text: Open
+    - generic [ref=f56e25]: →
+  - generic [ref=f56e27]: Remembers your last choice

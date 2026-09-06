@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gently — The Living Specimen</title>
+<!--
+  ============================================================================
+  GENTLY · VISUAL IDENTITY · DIRECTION C — "THE LIVING SPECIMEN"
+  ============================================================================
+  The instrument exists for the embryo developing in real time. So the
+  embryo IS the page: its cell-division sequence is the structural spine,
+  and the agent's presence is the act of watching it.
+
+  PALETTE (dark-field fluorescence, not SaaS)
+    --ground   #0c120f   deep dark-field incubator ground (committed)
+    --well     #0a0d0b   deeper recess for cards / panels
+    --ink      #f3efe6   transmitted-light off-white
+    --gfp      #5dd39e   GFP green — the agent's signal / primary accent
+    --gfp-deep #27ae60   saturated GFP for emphasis
+    --yolk     #e0a458   yolk / transmitted warm
+    --mem      #e0559a   membrane magenta-561
+
+  TYPE PAIRING
+    Display / voice  : Fraunces  — humanist, organic, optical sizing (the agent speaks)
+    Data / utility   : IBM Plex Mono — clinical instrument readout (the scope reports)
+
+  SIGNATURE ELEMENT
+    The developmental-stage spine: generative SVG cell-stage glyphs
+    (1-cell → 2 → 4 → 8 → morula → comma → hatch) running as the literal
+    backbone of both sections — true developmental sequence, not decoration.
+    The agent is an iris/aperture that watches, GFP pupil breathing.
+
+  THE RISK I TOOK
+    The cell-stage spine is the navigation AND the progress device, and the
+    agent has no orb/avatar — it is only an iris. The live "now" position is
+    a glowing node planted ON the spine where development currently sits.
+  ============================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #0c120f;
+    --well: #0a0d0b;
+    --ink: #f3efe6;
+    --ink-dim: #a9b0a6;
+    --ink-faint: #6c7568;
+    --line: rgba(243, 239, 230, 0.10);
+    --line-soft: rgba(243, 239, 230, 0.055);
+    --gfp: #5dd39e;
+    --gfp-deep: #27ae60;
+    --yolk: #e0a458;
+    --mem: #e0559a;
+    --display: "Fraunces", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(120% 80% at 18% -10%, rgba(93, 211, 158, 0.07), transparent 55%),
+      radial-gradient(90% 70% at 92% 8%, rgba(224, 85, 154, 0.05), transparent 50%),
+      var(--ground);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: rgba(93, 211, 158, 0.28); color: #fff; }
+
+  a { color: inherit; }
+
+  /* ---- focus ---- */
+  a:focus-visible,
+  button:focus-visible,
+  .choice:focus-visible,
+  .chip:focus-visible {
+    outline: 2px solid var(--gfp);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  /* ===================================================================
+     MASTHEAD
+     =================================================================== */
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 26px 0 22px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .brand .name {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: 0.01em;
+  }
+  .brand .latin {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-style: normal;
+  }
+  .scope-state {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+  }
+  .scope-state .dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--gfp);
+    margin-right: 7px;
+    box-shadow: 0 0 0 0 rgba(93, 211, 158, 0.6);
+    animation: pulse 3.4s ease-out infinite;
+    vertical-align: middle;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(93, 211, 158, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(93, 211, 158, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(93, 211, 158, 0); }
+  }
+  .scope-state .sep { color: var(--ink-faint); }
+
+  /* ===================================================================
+     HERO
+     =================================================================== */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 64px;
+    align-items: center;
+    padding: 74px 0 30px;
+  }
+
+  /* --- the iris / aperture: the agent watching --- */
+  .iris-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 360px;
+  }
+  .iris {
+    width: 340px;
+    height: 340px;
+    display: block;
+  }
+  .iris .pupil-glow { animation: breathe 6.5s ease-in-out infinite; transform-origin: center; }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.55; transform: scale(0.96); }
+    50%      { opacity: 1;    transform: scale(1.06); }
+  }
+  .iris .ring-rot { animation: spin 80s linear infinite; transform-origin: 170px 170px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .watch-label {
+    position: absolute;
+    bottom: 6px; left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .greeting {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--gfp);
+    margin: 0 0 18px;
+  }
+  .ask {
+    font-family: var(--display);
+    font-weight: 400;
+    font-optical-sizing: auto;
+    font-size: clamp(2.7rem, 5.4vw, 4.1rem);
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    margin: 0 0 12px;
+  }
+  .ask em {
+    font-style: italic;
+    color: var(--gfp);
+  }
+  .hero-sub {
+    color: var(--ink-dim);
+    font-size: 14px;
+    max-width: 30ch;
+    margin: 0 0 38px;
+  }
+
+  /* --- choice cards --- */
+  .choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .choice {
+    position: relative;
+    display: block;
+    text-align: left;
+    text-decoration: none;
+    background: linear-gradient(180deg, rgba(243,239,230,0.022), rgba(0,0,0,0.18));
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 22px 22px 20px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color .35s ease, transform .35s ease, background .35s ease;
+  }
+  .choice::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent, var(--gfp));
+    opacity: 0.55;
+    transition: opacity .35s ease, width .35s ease;
+  }
+  .choice:hover, .choice:focus-visible {
+    border-color: rgba(243,239,230,0.22);
+    transform: translateY(-3px);
+    background: linear-gradient(180deg, rgba(243,239,230,0.045), rgba(0,0,0,0.18));
+  }
+  .choice:hover::before, .choice:focus-visible::before { opacity: 1; width: 3px; }
+  .choice .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--accent, var(--gfp));
+    margin-bottom: 12px;
+  }
+  .choice h3 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 21px;
+    line-height: 1.1;
+    margin: 0 0 10px;
+  }
+  .choice p {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-dim);
+    margin: 0 0 22px;
+  }
+  .choice .cta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .choice .cta .arr { transition: transform .3s ease; color: var(--accent, var(--gfp)); }
+  .choice:hover .cta .arr, .choice:focus-visible .cta .arr { transform: translateX(5px); }
+  .choice--standalone { --accent: var(--yolk); }
+
+  .escape {
+    margin-top: 22px;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+  .escape button {
+    background: none;
+    border: none;
+    border-bottom: 1px dotted var(--ink-faint);
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 0 0 1px;
+    cursor: pointer;
+    transition: color .25s ease, border-color .25s ease;
+  }
+  .escape button:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* ===================================================================
+     THE SPINE — developmental-stage backbone
+     =================================================================== */
+  .spine {
+    margin-top: 56px;
+    padding: 30px 0 34px;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .spine-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 22px;
+  }
+  .spine-head .now { color: var(--gfp); }
+  .stages {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    align-items: end;
+    position: relative;
+  }
+  .stages::before {
+    content: "";
+    position: absolute;
+    left: 6%; right: 6%;
+    top: 39px;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent,
+      var(--line) 8%,
+      var(--line) 30%,
+      var(--gfp) 31%,
+      var(--gfp) 33%,
+      var(--line) 34%,
+      var(--line) 92%,
+      transparent);
+    z-index: 0;
+  }
+  .stage {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+  }
+  .stage svg { display: block; }
+  .stage .glyph-wrap {
+    width: 80px; height: 80px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stage .lab {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .stage.is-now .lab { color: var(--gfp); }
+  .stage.is-now::after {
+    content: "now";
+    position: absolute;
+    top: -16px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--gfp);
+  }
+  .stage.is-past .glyph-wrap { opacity: 0.42; }
+  .stage.is-future .glyph-wrap { opacity: 0.6; }
+
+  /* ===================================================================
+     WORKSPACE PEEK
+     =================================================================== */
+  .workspace {
+    padding: 70px 0 30px;
+  }
+  .section-tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 22px;
+  }
+  .section-tag span { color: var(--ink-dim); }
+
+  /* live session-context strip */
+  .live-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px 20px;
+    padding: 16px 20px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--mem);
+    border-radius: 3px;
+    background: rgba(0,0,0,0.22);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    color: var(--ink-dim);
+    margin-bottom: 32px;
+  }
+  .live-badge {
+    color: var(--mem);
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .live-badge .blink {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--mem);
+    animation: blink 1.6s steps(2, jump-none) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  .live-strip .v { color: var(--ink); }
+  .live-strip .sep { color: var(--ink-faint); }
+  .live-strip .push { margin-left: auto; color: var(--ink-faint); }
+  .live-strip .push b { color: var(--gfp); font-weight: 500; }
+
+  /* biology-primary grid */
+  .work-grid {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+  .embryo-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .embryo-card {
+    background: var(--well);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 16px 16px 18px;
+    transition: border-color .3s ease, transform .3s ease;
+  }
+  .embryo-card:hover { border-color: rgba(243,239,230,0.2); transform: translateY(-2px); }
+  .embryo-card .ec-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 14px;
+  }
+  .embryo-card .ec-id {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .embryo-card .ec-art {
+    width: 100%; height: 84px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+  }
+  .embryo-card .ec-status {
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.15;
+    margin: 0 0 4px;
+  }
+  .embryo-card .ec-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+  }
+  .tag--ok   { color: var(--gfp); }
+  .tag--fast { color: var(--mem); }
+  .tag--slow { color: var(--yolk); }
+  .embryo-card.is-ok   { border-left: 2px solid var(--gfp); }
+  .embryo-card.is-fast { border-left: 2px solid var(--mem); }
+  .embryo-card.is-slow { border-left: 2px solid var(--yolk); }
+
+  /* agent's view panel */
+  .agent-view {
+    background: linear-gradient(180deg, rgba(93,211,158,0.045), rgba(0,0,0,0.2));
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 22px 22px 24px;
+  }
+  .agent-view .av-head {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--gfp);
+    margin-bottom: 20px;
+  }
+  .av-head .mini-iris {
+    width: 18px; height: 18px; flex: none;
+  }
+  .av-item { margin-bottom: 18px; }
+  .av-item:last-child { margin-bottom: 0; }
+  .av-item .av-kind {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+  }
+  .av-item .av-body {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.35;
+    color: var(--ink);
+  }
+  .av-item.expectation .av-kind { color: var(--gfp); }
+  .av-item.watchpoint .av-kind { color: var(--yolk); }
+  .av-item.question .av-kind { color: var(--mem); }
+  .av-item.question .av-body { font-style: italic; }
+
+  /* footer */
+  .foot {
+    padding: 40px 0 50px;
+    border-top: 1px solid var(--line-soft);
+    margin-top: 56px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  }
+
+  /* ===================================================================
+     RESPONSIVE
+     =================================================================== */
+  @media (max-width: 900px) {
+    .wrap { padding: 0 24px; }
+    .hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 0 20px; }
+    .iris-stage { order: -1; min-height: 280px; }
+    .iris { width: 240px; height: 240px; }
+    .work-grid { grid-template-columns: 1fr; }
+    .stages { grid-template-columns: repeat(7, 1fr); overflow-x: auto; }
+    .stage .glyph-wrap { width: 56px; height: 56px; }
+  }
+  @media (max-width: 640px) {
+    .masthead { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .choices { grid-template-columns: 1fr; }
+    .embryo-row { grid-template-columns: 1fr; }
+    .scope-state { font-size: 10.5px; gap: 12px; }
+    .stage .lab { font-size: 8.5px; }
+    .live-strip .push { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- reusable SVG defs: glow filter + gradients -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="gfpGrad" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#bff4d8"/>
+      <stop offset="40%" stop-color="#5dd39e"/>
+      <stop offset="100%" stop-color="#1c5a3c"/>
+    </radialGradient>
+    <radialGradient id="memGrad" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#f6b9d6"/>
+      <stop offset="45%" stop-color="#e0559a"/>
+      <stop offset="100%" stop-color="#5e2245"/>
+    </radialGradient>
+    <radialGradient id="yolkGrad" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#f3d6a6"/>
+      <stop offset="45%" stop-color="#e0a458"/>
+      <stop offset="100%" stop-color="#6b4a1c"/>
+    </radialGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.1"/>
+    </filter>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <!-- ================= MASTHEAD ================= -->
+  <header class="masthead">
+    <div class="brand">
+      <span class="name">Gently</span>
+      <span class="latin">Caenorhabditis elegans · diSPIM</span>
+    </div>
+    <div class="scope-state" role="status" aria-label="Instrument status">
+      <span><span class="dot"></span>scope ready</span>
+      <span class="sep">·</span>
+      <span>36.9&nbsp;&deg;C</span>
+      <span class="sep">·</span>
+      <span>stage idle</span>
+    </div>
+  </header>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="greeting">Good evening.</p>
+      <h1 class="ask">What are we <em>doing</em> today?</h1>
+      <p class="hero-sub">I have the scope warm and the stage clear. Point me at a specimen and I'll keep watch.</p>
+
+      <div class="choices">
+        <a class="choice choice--guided" href="#" aria-label="Plan an experiment, guided">
+          <div class="eyebrow">Guided</div>
+          <h3>Plan an experiment</h3>
+          <p>Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.</p>
+          <span class="cta">Start planning <span class="arr">&rarr;</span></span>
+        </a>
+        <a class="choice choice--standalone" href="#" aria-label="Take a quick look, standalone">
+          <div class="eyebrow">Standalone</div>
+          <h3>Take a quick look</h3>
+          <p>Straight to the scope to see what's there — no plan, no commitment.</p>
+          <span class="cta">Open the scope <span class="arr">&rarr;</span></span>
+        </a>
+      </div>
+
+      <p class="escape">…or just <button type="button">tell me what you need</button>.</p>
+    </div>
+
+    <!-- the agent: an iris that watches -->
+    <div class="iris-stage">
+      <svg class="iris" viewBox="0 0 340 340" role="img" aria-label="The agent — an aperture, watching">
+        <!-- outer rim -->
+        <circle cx="170" cy="170" r="154" fill="none" stroke="rgba(243,239,230,0.10)" stroke-width="1"/>
+        <circle cx="170" cy="170" r="138" fill="none" stroke="rgba(243,239,230,0.06)" stroke-width="1"/>
+        <!-- rotating aperture blades / tick ring -->
+        <g class="ring-rot">
+          <circle cx="170" cy="170" r="118" fill="none" stroke="rgba(93,211,158,0.18)" stroke-width="1" stroke-dasharray="2 10"/>
+          <circle cx="170" cy="170" r="100" fill="none" stroke="rgba(243,239,230,0.08)" stroke-width="1" stroke-dasharray="1 22"/>
+        </g>
+        <!-- aperture leaves (hexagonal iris) -->
+        <g fill="none" stroke="rgba(93,211,158,0.30)" stroke-width="1.1">
+          <polygon points="170,78 251,124 251,216 170,262 89,216 89,124"/>
+          <polygon points="170,98 234,134 234,206 170,242 106,206 106,134"/>
+        </g>
+        <!-- pupil: the GFP nucleus the agent is fixed on -->
+        <g class="pupil-glow">
+          <circle cx="170" cy="170" r="58" fill="url(#gfpGrad)" filter="url(#soft)"/>
+          <circle cx="170" cy="170" r="58" fill="none" stroke="rgba(191,244,216,0.5)" stroke-width="1"/>
+          <circle cx="158" cy="156" r="11" fill="rgba(243,239,230,0.85)"/>
+        </g>
+      </svg>
+      <span class="watch-label">perceiving</span>
+    </div>
+  </section>
+
+  <!-- ================= THE SPINE: developmental sequence ================= -->
+  <section class="spine" aria-label="Developmental stage timeline">
+    <div class="spine-head">
+      <span>Developmental sequence</span>
+      <span class="now">now &mdash; 4-cell · 0h 12m elapsed</span>
+    </div>
+    <div class="stages">
+
+      <!-- 1-cell (zygote) -->
+      <div class="stage is-past">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="28" cy="28" r="20" fill="none" stroke="var(--gfp)" stroke-width="1.4"/>
+            <circle cx="28" cy="28" r="7" fill="url(#gfpGrad)" opacity="0.8"/>
+          </svg>
+        </div>
+        <span class="lab">1-cell</span>
+      </div>
+
+      <!-- 2-cell -->
+      <div class="stage is-past">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(243,239,230,0.16)" stroke-width="1"/>
+            <circle cx="19" cy="28" r="12" fill="none" stroke="var(--gfp)" stroke-width="1.3"/>
+            <circle cx="37" cy="28" r="12" fill="none" stroke="var(--gfp)" stroke-width="1.3"/>
+            <circle cx="19" cy="28" r="4" fill="url(#gfpGrad)" opacity="0.8"/>
+            <circle cx="37" cy="28" r="4" fill="url(#gfpGrad)" opacity="0.8"/>
+          </svg>
+        </div>
+        <span class="lab">2-cell</span>
+      </div>
+
+      <!-- 4-cell — NOW -->
+      <div class="stage is-now">
+        <div class="glyph-wrap">
+          <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
+            <circle cx="32" cy="32" r="27" fill="none" stroke="rgba(93,211,158,0.4)" stroke-width="1"/>
+            <circle cx="22" cy="22" r="11" fill="url(#gfpGrad)" opacity="0.9"/>
+            <circle cx="42" cy="22" r="11" fill="url(#memGrad)" opacity="0.9"/>
+            <circle cx="22" cy="42" r="11" fill="url(#memGrad)" opacity="0.9"/>
+            <circle cx="42" cy="42" r="11" fill="url(#gfpGrad)" opacity="0.9"/>
+          </svg>
+        </div>
+        <span class="lab">4-cell</span>
+      </div>
+
+      <!-- 8-cell -->
+      <div class="stage is-future">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <g fill="none" stroke="rgba(243,239,230,0.28)" stroke-width="1">
+              <circle cx="17" cy="17" r="8"/><circle cx="33" cy="15" r="8"/>
+              <circle cx="14" cy="35" r="8"/><circle cx="31" cy="33" r="8"/>
+              <circle cx="42" cy="28" r="8"/><circle cx="24" cy="44" r="8"/>
+              <circle cx="40" cy="42" r="8"/><circle cx="28" cy="26" r="8"/>
+            </g>
+          </svg>
+        </div>
+        <span class="lab">8-cell</span>
+      </div>
+
+      <!-- morula -->
+      <div class="stage is-future">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(243,239,230,0.28)" stroke-width="1"/>
+            <g fill="rgba(243,239,230,0.18)">
+              <circle cx="22" cy="20" r="5"/><circle cx="34" cy="20" r="5"/>
+              <circle cx="16" cy="30" r="5"/><circle cx="28" cy="30" r="5"/>
+              <circle cx="40" cy="30" r="5"/><circle cx="22" cy="40" r="5"/>
+              <circle cx="34" cy="40" r="5"/>
+            </g>
+          </svg>
+        </div>
+        <span class="lab">morula</span>
+      </div>
+
+      <!-- comma stage -->
+      <div class="stage is-future">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(243,239,230,0.18)" stroke-width="1"/>
+            <path d="M16 22 C26 14, 40 18, 40 30 C40 40, 30 44, 24 40"
+                  fill="none" stroke="rgba(243,239,230,0.34)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="lab">comma</span>
+      </div>
+
+      <!-- hatch -->
+      <div class="stage is-future">
+        <div class="glyph-wrap">
+          <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+            <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(243,239,230,0.14)" stroke-width="1" stroke-dasharray="3 4"/>
+            <path d="M14 30 C20 18, 30 16, 36 22 C42 28, 40 38, 32 40 C24 42, 18 38, 18 30"
+                  fill="none" stroke="rgba(243,239,230,0.4)" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="34" cy="24" r="2.4" fill="rgba(243,239,230,0.5)"/>
+          </svg>
+        </div>
+        <span class="lab">hatch</span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= WORKSPACE PEEK ================= -->
+  <section class="workspace">
+    <div class="section-tag">Workspace <span>— a session in progress</span></div>
+
+    <div class="live-strip" role="status">
+      <span class="live-badge"><span class="blink"></span>Live</span>
+      <span>developmental time-lapse</span>
+      <span class="sep">·</span>
+      <span class="v">every 2 min</span>
+      <span class="sep">·</span>
+      <span class="v">6 h</span>
+      <span class="sep">·</span>
+      <span class="v">GFP + mCherry</span>
+      <span class="push">0h 12m elapsed &nbsp;·&nbsp; next <b>1:43</b></span>
+    </div>
+
+    <div class="work-grid">
+
+      <!-- biology-primary: three embryos -->
+      <div class="embryo-row">
+
+        <article class="embryo-card is-ok">
+          <div class="ec-head">
+            <span class="ec-id">Embryo 1</span>
+            <span class="tag tag--ok">on track</span>
+          </div>
+          <div class="ec-art">
+            <svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+              <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(93,211,158,0.35)" stroke-width="1"/>
+              <circle cx="26" cy="26" r="12" fill="url(#gfpGrad)" opacity="0.9"/>
+              <circle cx="46" cy="26" r="12" fill="url(#gfpGrad)" opacity="0.9"/>
+              <circle cx="26" cy="46" r="12" fill="url(#gfpGrad)" opacity="0.9"/>
+              <circle cx="46" cy="46" r="12" fill="url(#gfpGrad)" opacity="0.9"/>
+            </svg>
+          </div>
+          <p class="ec-status">4-cell</p>
+          <p class="ec-meta">dividing on schedule</p>
+        </article>
+
+        <article class="embryo-card is-fast">
+          <div class="ec-head">
+            <span class="ec-id">Embryo 2</span>
+            <span class="tag tag--fast">dividing</span>
+          </div>
+          <div class="ec-art">
+            <svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+              <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(224,85,154,0.4)" stroke-width="1"/>
+              <ellipse cx="26" cy="36" rx="15" ry="18" fill="url(#memGrad)" opacity="0.85"/>
+              <ellipse cx="46" cy="36" rx="15" ry="18" fill="url(#memGrad)" opacity="0.85"/>
+              <line x1="36" y1="16" x2="36" y2="56" stroke="rgba(12,18,15,0.8)" stroke-width="2"/>
+            </svg>
+          </div>
+          <p class="ec-status">sped to 30 s</p>
+          <p class="ec-meta">cadence raised mid-mitosis</p>
+        </article>
+
+        <article class="embryo-card is-slow">
+          <div class="ec-head">
+            <span class="ec-id">Embryo 3</span>
+            <span class="tag tag--slow">stalled</span>
+          </div>
+          <div class="ec-art">
+            <svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+              <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(224,164,88,0.35)" stroke-width="1" stroke-dasharray="3 5"/>
+              <circle cx="36" cy="36" r="19" fill="url(#yolkGrad)" opacity="0.7"/>
+              <circle cx="36" cy="36" r="6" fill="rgba(12,18,15,0.55)"/>
+            </svg>
+          </div>
+          <p class="ec-status">40 min quiet</p>
+          <p class="ec-meta">no division — watching</p>
+        </article>
+
+      </div>
+
+      <!-- agent's mind: expectation + watchpoint + question -->
+      <aside class="agent-view" aria-label="Agent's view">
+        <div class="av-head">
+          <svg class="mini-iris" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="rgba(93,211,158,0.4)" stroke-width="1"/>
+            <circle cx="12" cy="12" r="4.5" fill="url(#gfpGrad)"/>
+          </svg>
+          Agent's view
+        </div>
+
+        <div class="av-item expectation">
+          <div class="av-kind">Expecting</div>
+          <p class="av-body">Embryo 1 reaches 8-cell within the next two intervals — division has held a steady 18-minute rhythm.</p>
+        </div>
+
+        <div class="av-item watchpoint">
+          <div class="av-kind">Watching</div>
+          <p class="av-body">Embryo 3's 40-minute pause. If it crosses one hour I'll drop its laser power and flag it.</p>
+        </div>
+
+        <div class="av-item question">
+          <div class="av-kind">Open question</div>
+          <p class="av-body">Is Embryo 2's acceleration real development, or a focus drift reading as motion?</p>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ================= FOOTER ================= -->
+  <footer class="foot">
+    <span>Gently · autonomous light-sheet microscopy</span>
+    <span>session 20260616_1812 · keeping watch</span>
+  </footer>
+
+</div>
+
+</body>
+</html>

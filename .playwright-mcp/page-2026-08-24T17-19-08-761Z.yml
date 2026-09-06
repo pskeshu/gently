@@ -1,0 +1,239 @@
+- generic [ref=f24e1]:
+  - generic [ref=f24e2]:
+    - generic [ref=f24e3]:
+      - link "Gently Microscopy" [ref=f24e4] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f24e5]:
+        - link "db03fcbc" [ref=f24e6] [cursor=pointer]:
+          - /url: /review?session=db03fcbc
+        - button "Copy session ID" [ref=f24e7] [cursor=pointer]
+    - generic [ref=f24e11]:
+      - generic [ref=f24e12]: P
+      - button "Open process console" [ref=f24e14]
+      - link "Dashboard settings" [ref=f24e18] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f24e22] [cursor=pointer]
+      - button "Scope offline" [ref=f24e26] [cursor=pointer]
+  - generic [ref=f24e31]:
+    - complementary [ref=f24e32]:
+      - navigation [ref=f24e33]:
+        - generic [ref=f24e34]:
+          - generic [ref=f24e35]: Now
+          - button "Home" [ref=f24e36] [cursor=pointer]
+          - button "Operations" [ref=f24e37] [cursor=pointer]
+          - button "Embryos" [ref=f24e38] [cursor=pointer]
+        - generic [ref=f24e39]:
+          - generic [ref=f24e40]: Library
+          - button "Plans" [ref=f24e41] [cursor=pointer]
+          - button "Sessions" [ref=f24e42] [cursor=pointer]
+          - button "Notebook" [ref=f24e43] [cursor=pointer]
+          - button "Gallery" [ref=f24e44] [cursor=pointer]
+        - generic [ref=f24e45]:
+          - generic [ref=f24e46]: System
+          - button "Devices" [ref=f24e47] [cursor=pointer]
+          - button "Calibration" [ref=f24e48] [cursor=pointer]
+          - button "Logs" [ref=f24e49] [cursor=pointer]
+      - button "Talk to Gently" [ref=f24e50] [cursor=pointer]
+    - generic [ref=f24e52]:
+      - generic [ref=f24e53]:
+        - generic [ref=f24e54]: LIVE
+        - generic [ref=f24e56]: 4 embryos · Online
+      - contentinfo [ref=f24e57]:
+        - generic [ref=f24e58]: 4 embryos · 40 images · 16 events
+        - generic [ref=f24e59]: No active timelapse
+    - complementary "Agent chat" [ref=f24e60]:
+      - generic [ref=f24e62]:
+        - generic [ref=f24e63]: Agent
+        - generic [ref=f24e65]: Connected · v1.0.0.dev0
+        - button "Collapse agent panel" [ref=f24e66] [cursor=pointer]
+      - generic [ref=f24e70]:
+        - textbox "Message Gently… ( / commands · @ tools )" [active] [ref=f24e71]:
+          - /placeholder: Message Gently…   ( / commands · @ tools )
+        - button "Send message" [disabled] [ref=f24e72]
+  - generic [ref=f24e76]:
+    - generic:
+      - generic [ref=f24e78]:
+        - button "▼" [ref=f24e79] [cursor=pointer]
+        - generic [ref=f24e80]: HOME
+        - generic [ref=f24e81]: 3 rows
+      - generic [ref=f24e82]:
+        - generic [ref=f24e83]:
+          - button "▼" [ref=f24e84] [cursor=pointer]
+          - generic [ref=f24e85]: EMBRYOS
+          - generic [ref=f24e86]: no embryos
+        - generic [ref=f24e87]:
+          - generic [ref=f24e88] [cursor=pointer]: default
+          - generic [ref=f24e89] [cursor=pointer]: board
+          - generic [ref=f24e90] [cursor=pointer]: filmstrip
+          - generic [ref=f24e91] [cursor=pointer]: vitals
+        - generic [ref=f24e95]:
+          - generic [ref=f24e97] [cursor=pointer]:
+            - generic [ref=f24e98]:
+              - heading "Embryo Monitoring" [level=2] [ref=f24e99]
+              - generic [ref=f24e100]: No active timelapse
+            - generic [ref=f24e103]:
+              - generic [ref=f24e104]:
+                - generic [ref=f24e105]: "40"
+                - generic [ref=f24e106]: TP
+              - generic [ref=f24e107]:
+                - generic [ref=f24e108]: "4"
+                - generic [ref=f24e109]: Active
+              - generic [ref=f24e110]:
+                - generic [ref=f24e111]: "0"
+                - generic [ref=f24e112]: Done
+              - generic [ref=f24e113]:
+                - generic [ref=f24e114]: 2:00
+                - generic [ref=f24e115]: Next
+          - generic [ref=f24e117]:
+            - generic [ref=f24e118]:
+              - generic [ref=f24e119]: Embryos
+              - generic [ref=f24e120]:
+                - generic "e01 — gastrula — 9 TP" [ref=f24e121] [cursor=pointer]:
+                  - generic [ref=f24e122]: 🔬
+                  - generic [ref=f24e123]: e01
+                - generic "e02 — Comma — 9 TP" [ref=f24e124] [cursor=pointer]:
+                  - generic [ref=f24e125]: 🌙
+                  - generic [ref=f24e126]: e02
+                - generic "e03 — lima-bean — 9 TP" [ref=f24e127] [cursor=pointer]:
+                  - generic [ref=f24e128]: 🔬
+                  - generic [ref=f24e129]: e03
+                - generic "e04 — Comma — 9 TP" [ref=f24e130] [cursor=pointer]:
+                  - generic [ref=f24e131]: 🌙
+                  - generic [ref=f24e132]: e04
+            - generic [ref=f24e133]:
+              - generic [ref=f24e134]:
+                - generic [ref=f24e135]:
+                  - generic [ref=f24e136]: ●
+                  - generic [ref=f24e137]: e01
+                  - generic [ref=f24e138]: 🔬 gastrula
+                  - generic [ref=f24e139]: 5 transitions
+                  - generic [ref=f24e140]: 10 evals
+                  - generic [ref=f24e141]: 9 tp
+                - generic [ref=f24e142]:
+                  - generic "Jump to 2-cell" [ref=f24e143] [cursor=pointer]:
+                    - generic [ref=f24e144]: 🔬
+                    - text: 2-cell @ T0
+                  - generic "Jump to 4-cell" [ref=f24e145] [cursor=pointer]:
+                    - generic [ref=f24e146]: 🔬
+                    - text: 4-cell @ T2
+                  - generic "Jump to 8-cell" [ref=f24e147] [cursor=pointer]:
+                    - generic [ref=f24e148]: 🔬
+                    - text: 8-cell @ T4
+                  - generic "Jump to 26-cell" [ref=f24e149] [cursor=pointer]:
+                    - generic [ref=f24e150]: 🔬
+                    - text: 26-cell @ T6
+                  - generic "Jump to gastrula" [ref=f24e151] [cursor=pointer]:
+                    - generic [ref=f24e152]: 🔬
+                    - text: gastrula @ T8
+              - generic [ref=f24e153]:
+                - generic [ref=f24e154]:
+                  - generic [ref=f24e155]: Evaluations
+                  - generic [ref=f24e156]: 10 checked, 5 stages
+                - generic [ref=f24e157]:
+                  - 'generic "T0: 2-cell" [ref=f24e158] [cursor=pointer]': 🔬
+                  - 'generic "T1: 2-cell" [ref=f24e160] [cursor=pointer]': 🔬
+                  - 'generic "T2: 4-cell" [ref=f24e162] [cursor=pointer]': 🔬
+                  - 'generic "T3: 4-cell" [ref=f24e164] [cursor=pointer]': 🔬
+                  - 'generic "T4: 8-cell" [ref=f24e166] [cursor=pointer]': 🔬
+                  - 'generic "T5: 8-cell" [ref=f24e168] [cursor=pointer]': 🔬
+                  - 'generic "T6: 26-cell" [ref=f24e170] [cursor=pointer]': 🔬
+                  - 'generic "T7: 26-cell" [ref=f24e172] [cursor=pointer]': 🔬
+                  - 'generic "T8: gastrula" [ref=f24e174] [cursor=pointer]': 🔬
+                  - 'generic "T9: gastrula" [ref=f24e176] [cursor=pointer]': 🔬
+      - generic [ref=f24e178]:
+        - generic [ref=f24e179]:
+          - button "▼" [ref=f24e180] [cursor=pointer]
+          - generic [ref=f24e181]: CALIBRATION
+          - generic [ref=f24e182]: no cal images
+        - generic [ref=f24e183]:
+          - generic [ref=f24e184] [cursor=pointer]: profile
+          - generic [ref=f24e185] [cursor=pointer]: gallery
+        - generic [ref=f24e187]:
+          - heading "Calibration" [level=2] [ref=f24e189]
+          - generic [ref=f24e190]:
+            - generic [ref=f24e191]:
+              - generic [ref=f24e192]: Embryos
+              - generic [ref=f24e193]: No calibration images yet
+            - generic [ref=f24e196]:
+              - generic [ref=f24e197]: 📷
+              - generic [ref=f24e198]: Select an embryo to view calibration images
+      - generic [ref=f24e199]:
+        - generic [ref=f24e200]:
+          - button "▼" [ref=f24e201] [cursor=pointer]
+          - generic [ref=f24e202]: EXPERIMENT
+          - generic [ref=f24e203]: empty
+        - generic [ref=f24e204]:
+          - generic [ref=f24e205] [cursor=pointer]: overview
+          - generic [ref=f24e206] [cursor=pointer]: rules
+        - heading "Operations" [level=2] [ref=f24e210]
+      - generic [ref=f24e213]:
+        - button "▼" [ref=f24e214] [cursor=pointer]
+        - generic [ref=f24e215]: EVENTS
+        - generic [ref=f24e216]: no events
+      - generic [ref=f24e217]:
+        - generic [ref=f24e218]:
+          - button "▼" [ref=f24e219] [cursor=pointer]
+          - generic [ref=f24e220]: PLANS
+          - generic [ref=f24e221]: 6 rows
+        - generic [ref=f24e222]:
+          - generic [ref=f24e223] [cursor=pointer]: document
+          - generic [ref=f24e224] [cursor=pointer]: graph
+          - generic [ref=f24e225] [cursor=pointer]: board
+          - generic [ref=f24e226] [cursor=pointer]: decisions
+          - generic [ref=f24e227] [cursor=pointer]: matrix
+          - generic [ref=f24e228] [cursor=pointer]: timeline
+        - generic [ref=f24e230]:
+          - generic [ref=f24e232]:
+            - generic [ref=f24e233]: Campaigns
+            - text: ›
+          - generic [ref=f24e234]:
+            - navigation [ref=f24e235]
+            - main [ref=f24e237]:
+              - paragraph [ref=f24e240]: Loading campaigns...
+            - complementary [ref=f24e241]:
+              - generic [ref=f24e242]:
+                - button "Close" [ref=f24e243] [cursor=pointer]
+                - heading [level=2]
+      - generic [ref=f24e249]:
+        - button "▼" [ref=f24e250] [cursor=pointer]
+        - generic [ref=f24e251]: SESSIONS
+        - generic [ref=f24e252]: empty
+      - generic [ref=f24e254]:
+        - button "▼" [ref=f24e255] [cursor=pointer]
+        - generic [ref=f24e256]: NOTEBOOK
+        - generic [ref=f24e257]: 4 rows
+      - generic [ref=f24e259]:
+        - button "▼" [ref=f24e260] [cursor=pointer]
+        - generic [ref=f24e261]: GALLERY
+        - generic [ref=f24e262]: no images
+  - generic:
+    - generic [ref=f24e264]:
+      - button "▼" [ref=f24e265] [cursor=pointer]
+      - generic [ref=f24e266]: DEVICES
+      - generic [ref=f24e267]: scope offline
+    - generic:
+      - generic [ref=f24e268]:
+        - generic [ref=f24e269]:
+          - text: Atrium · drag to pan · wheel to zoom · Backspace back
+          - link "exit" [ref=f24e270] [cursor=pointer]:
+            - /url: "#"
+        - generic [ref=f24e271]:
+          - button "←" [disabled] [ref=f24e272]
+          - button "⌂ start" [ref=f24e273] [cursor=pointer]
+          - button "all" [ref=f24e274] [cursor=pointer]
+          - button "home" [ref=f24e275] [cursor=pointer]
+          - button "embryos" [ref=f24e276] [cursor=pointer]
+          - button "devices" [ref=f24e277] [cursor=pointer]
+          - button "calibration" [ref=f24e278] [cursor=pointer]
+          - button "experiment" [ref=f24e279] [cursor=pointer]
+          - button "events" [ref=f24e280] [cursor=pointer]
+          - button "plans" [ref=f24e281] [cursor=pointer]
+          - button "sessions" [ref=f24e282] [cursor=pointer]
+          - button "notebook" [ref=f24e283] [cursor=pointer]
+          - button "gallery" [ref=f24e284] [cursor=pointer]
+      - generic [ref=f24e285]:
+        - generic [ref=f24e286]: 58%
+        - generic [ref=f24e287]:
+          - text: density
+          - slider "density 4" [ref=f24e288]: "4"
+          - generic [ref=f24e289]: "4"

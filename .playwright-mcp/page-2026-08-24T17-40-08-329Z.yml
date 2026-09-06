@@ -1,0 +1,141 @@
+- generic [ref=f59e1]:
+  - generic "Welcome to Gently" [ref=f59e2]:
+    - button "Toggle theme" [ref=f59e3] [cursor=pointer]
+    - generic [ref=f59e7]:
+      - generic [ref=f59e8]: Good evening.What are we doing today?
+      - generic [ref=f59e11]:
+        - button "guided Plan an experiment Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch. Start planning" [ref=f59e12] [cursor=pointer]:
+          - generic [ref=f59e13]: guided
+          - heading "Plan an experiment" [level=3] [ref=f59e17]
+          - paragraph [ref=f59e18]: Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.
+          - generic [ref=f59e19]: Start planning
+        - button "standalone Take a quick look Straight to the scope to see what's there — no plan, no commitment. Open the scope" [ref=f59e22] [cursor=pointer]:
+          - generic [ref=f59e23]: standalone
+          - heading "Take a quick look" [level=3] [ref=f59e28]
+          - paragraph [ref=f59e29]: Straight to the scope to see what's there — no plan, no commitment.
+          - generic [ref=f59e30]: Open the scope
+      - generic [ref=f59e33]:
+        - button "or just tell me what you need" [ref=f59e34] [cursor=pointer]
+        - generic:
+          - textbox "e.g. watch these embryos overnight and ping me if one stalls" [ref=f59e40]
+          - button "Send" [ref=f59e41] [cursor=pointer]
+      - button "Skip to workspace ›" [ref=f59e44] [cursor=pointer]
+  - generic [ref=f59e45]:
+    - generic [ref=f59e46]:
+      - link "Gently Microscopy" [ref=f59e47] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f59e48]:
+        - link "4ebb40a7" [ref=f59e49] [cursor=pointer]:
+          - /url: /review?session=4ebb40a7
+        - button "Copy session ID" [ref=f59e50] [cursor=pointer]
+    - generic [ref=f59e54]:
+      - generic [ref=f59e55]: P
+      - button "Open process console" [ref=f59e57]
+      - link "Dashboard settings" [ref=f59e61] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f59e65] [cursor=pointer]
+      - button "Scope offline" [ref=f59e69] [cursor=pointer]
+  - generic [ref=f59e74]:
+    - complementary [ref=f59e75]:
+      - navigation [ref=f59e76]:
+        - generic [ref=f59e77]:
+          - generic [ref=f59e78]: Now
+          - button "Home" [ref=f59e79] [cursor=pointer]
+          - button "Operations" [ref=f59e80] [cursor=pointer]
+          - button "Embryos" [ref=f59e81] [cursor=pointer]
+        - generic [ref=f59e82]:
+          - generic [ref=f59e83]: Library
+          - button "Plans" [ref=f59e84] [cursor=pointer]
+          - button "Sessions" [ref=f59e85] [cursor=pointer]
+          - button "Notebook" [ref=f59e86] [cursor=pointer]
+          - button "Gallery" [ref=f59e87] [cursor=pointer]
+        - generic [ref=f59e88]:
+          - generic [ref=f59e89]: System
+          - button "Devices" [ref=f59e90] [cursor=pointer]
+          - button "Calibration" [ref=f59e91] [cursor=pointer]
+          - button "Logs" [ref=f59e92] [cursor=pointer]
+      - button "Talk to Gently" [ref=f59e93] [cursor=pointer]
+    - generic [ref=f59e95]:
+      - generic [ref=f59e96]:
+        - generic [ref=f59e97]: LIVE
+        - generic [ref=f59e99]: 0 embryos · Online
+      - generic [ref=f59e101]:
+        - complementary [ref=f59e102]:
+          - generic [ref=f59e103]: Agent’s view
+          - generic [ref=f59e104]:
+            - generic [ref=f59e105]: From the notebook
+            - generic [ref=f59e106] [cursor=pointer]: laser at 35% is enough for this strain
+            - generic [ref=f59e109] [cursor=pointer]: is the 2-fold call reliable at this exposure?
+            - generic [ref=f59e112] [cursor=pointer]: gastrula timing is consistent across the dish
+            - generic [ref=f59e115] [cursor=pointer]: e02 drifts in z after t6
+        - generic [ref=f59e118]:
+          - generic [ref=f59e119]:
+            - generic [ref=f59e120]:
+              - generic [ref=f59e121]: Recent sessions
+              - link "All" [ref=f59e122] [cursor=pointer]:
+                - /url: "#sessions"
+            - generic [ref=f59e123]:
+              - generic [ref=f59e125]:
+                - generic [ref=f59e126]:
+                  - generic [ref=f59e127]: 4ebb40a7
+                  - generic [ref=f59e128]: live
+                - generic [ref=f59e129]: 1m ago · 0 embryos
+              - generic [ref=f59e130]:
+                - generic [ref=f59e131]:
+                  - generic [ref=f59e132]: ced24add
+                  - generic [ref=f59e134]: 9m ago · 0 embryos
+                - button "Resume" [ref=f59e135] [cursor=pointer]
+              - generic [ref=f59e136]:
+                - generic [ref=f59e137]:
+                  - generic [ref=f59e138]: 5aaf1f3c
+                  - generic [ref=f59e140]: 9m ago · 0 embryos
+                - button "Resume" [ref=f59e141] [cursor=pointer]
+              - generic [ref=f59e142]:
+                - generic [ref=f59e143]:
+                  - generic [ref=f59e144]: 7f12d51b
+                  - generic [ref=f59e146]: 10m ago · 0 embryos
+                - button "Resume" [ref=f59e147] [cursor=pointer]
+              - generic [ref=f59e148]:
+                - generic [ref=f59e149]:
+                  - generic [ref=f59e150]: seeded demo
+                  - generic [ref=f59e152]: 10m ago · 3 embryos
+                - button "Resume" [ref=f59e153] [cursor=pointer]
+          - generic [ref=f59e154]:
+            - generic [ref=f59e155]:
+              - generic [ref=f59e156]: Recent plans
+              - link "All" [ref=f59e157] [cursor=pointer]:
+                - /url: "#plans"
+            - generic [ref=f59e158]: timing-variance
+          - generic [ref=f59e161]:
+            - generic [ref=f59e162]:
+              - generic [ref=f59e163]: Recent images
+              - link "All" [ref=f59e164] [cursor=pointer]:
+                - /url: "#embryos"
+            - generic [ref=f59e166]:
+              - generic "e01 · t5 (seeded demo)" [ref=f59e167]:
+                - img "e01 · t5" [ref=f59e168]
+              - generic "e02 · t5 (seeded demo)" [ref=f59e169]:
+                - img "e02 · t5" [ref=f59e170]
+              - generic "e03 · t5 (seeded demo)" [ref=f59e171]:
+                - img "e03 · t5" [ref=f59e172]
+              - generic "e01 · t9 (seeded demo)" [ref=f59e173]:
+                - img "e01 · t9" [ref=f59e174]
+              - generic "e02 · t9 (seeded demo)" [ref=f59e175]:
+                - img "e02 · t9" [ref=f59e176]
+              - generic "e03 · t9 (seeded demo)" [ref=f59e177]:
+                - img "e03 · t9" [ref=f59e178]
+              - generic "e04 · t9 (seeded demo)" [ref=f59e179]:
+                - img "e04 · t9" [ref=f59e180]
+      - text: ›
+      - contentinfo [ref=f59e181]:
+        - generic [ref=f59e182]: 0 embryos · 0 images · 11 events
+        - generic [ref=f59e183]: No active timelapse
+    - complementary "Agent chat" [ref=f59e184]:
+      - generic [ref=f59e186]:
+        - generic [ref=f59e187]: Agent
+        - generic [ref=f59e189]: Connected · v1.0.0.dev0
+        - button "Collapse agent panel" [ref=f59e190] [cursor=pointer]
+      - generic [ref=f59e194]:
+        - textbox "Message Gently… ( / commands · @ tools )" [active] [ref=f59e195]:
+          - /placeholder: Message Gently…   ( / commands · @ tools )
+        - button "Send message" [disabled] [ref=f59e196]

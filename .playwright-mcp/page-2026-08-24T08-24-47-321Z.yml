@@ -1,0 +1,55 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic:
+      - generic [ref=e3]: BOTTOM CAMERA
+      - generic [ref=e9]:
+        - generic [ref=e10]: EMBRYOS · 4
+        - generic [ref=e13]:
+          - generic [ref=e14]:
+            - generic [ref=e15] [cursor=pointer]: e01 1420, 880
+            - generic [ref=e16] [cursor=pointer]: e02 1610, 905
+            - generic [ref=e17] [cursor=pointer]: e03 1755, 1120
+            - generic [ref=e18] [cursor=pointer]: e04 2010, 860
+          - generic [ref=e19]:
+            - button "remap region" [ref=e20] [cursor=pointer]
+            - generic [ref=e21]: µm
+      - generic [ref=e22]:
+        - generic [ref=e23]: SPIM HEAD
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - generic [ref=e28]: laser
+            - slider [ref=e29]: "35"
+            - generic [ref=e30]: 35%
+          - generic [ref=e31]:
+            - generic [ref=e32]: exposure
+            - slider [ref=e33]: "40"
+            - generic [ref=e34]: 40ms
+          - generic [ref=e35]:
+            - generic [ref=e36]: step
+            - slider [ref=e37]: "50"
+            - generic [ref=e38]: 50µm
+          - generic [ref=e39]:
+            - button "go to e02" [ref=e40] [cursor=pointer]
+            - button "HALT" [ref=e41] [cursor=pointer]
+      - generic [ref=e42]:
+        - generic [ref=e43]: STAGE
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: x
+            - generic [ref=e49]: 1610.4 µm
+          - generic [ref=e50]:
+            - generic [ref=e51]: "y"
+            - generic [ref=e52]: 905.2 µm
+          - generic [ref=e53]:
+            - generic [ref=e54]: z
+            - generic [ref=e55]: "-12.8 µm"
+          - generic [ref=e56]:
+            - button "snap" [ref=e57] [cursor=pointer]
+            - button "live" [ref=e58] [cursor=pointer]
+  - generic [ref=e59]: drag empty space to pan · wheel to zoom · f fit · 1 100%
+  - generic [ref=e60]:
+    - button "+ calibration" [ref=e61] [cursor=pointer]
+    - button "+ agent" [ref=e62] [cursor=pointer]
+    - button "+ acquisition" [ref=e63] [cursor=pointer]
+    - button "fit" [ref=e64] [cursor=pointer]
+  - generic [ref=e65]: 132%

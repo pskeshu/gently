@@ -1,0 +1,74 @@
+- generic [active] [ref=f7e1]:
+  - generic "Welcome to Gently" [ref=f7e2]:
+    - button "Toggle theme" [ref=f7e3] [cursor=pointer]
+    - generic [ref=f7e11]:
+      - generic [ref=f7e12]: Hello.What are we doing today?
+      - generic [ref=f7e15]:
+        - button "guided Plan an experiment Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch. Start planning" [ref=f7e16] [cursor=pointer]:
+          - generic [ref=f7e17]: guided
+          - heading "Plan an experiment" [level=3] [ref=f7e21]
+          - paragraph [ref=f7e22]: Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.
+          - generic [ref=f7e23]: Start planning
+        - button "standalone Take a quick look Straight to the scope to see what's there — no plan, no commitment. Open the scope" [ref=f7e26] [cursor=pointer]:
+          - generic [ref=f7e27]: standalone
+          - heading "Take a quick look" [level=3] [ref=f7e32]
+          - paragraph [ref=f7e33]: Straight to the scope to see what's there — no plan, no commitment.
+          - generic [ref=f7e34]: Open the scope
+      - generic [ref=f7e37]:
+        - button "or just tell me what you need" [ref=f7e38] [cursor=pointer]
+        - generic:
+          - textbox "e.g. watch these embryos overnight and ping me if one stalls" [ref=f7e44]
+          - button "Send" [ref=f7e45] [cursor=pointer]
+      - button "Skip to workspace ›" [ref=f7e48] [cursor=pointer]
+  - generic [ref=f7e49]:
+    - link "Gently Microscopy" [ref=f7e51] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f7e52]:
+      - button "Open process console" [ref=f7e53]
+      - link "Dashboard settings" [ref=f7e57] [cursor=pointer]:
+        - /url: /settings
+      - button "Toggle theme" [ref=f7e61] [cursor=pointer]
+      - button "Connecting" [ref=f7e69] [cursor=pointer]
+  - generic [ref=f7e74]:
+    - complementary [ref=f7e75]:
+      - navigation [ref=f7e76]:
+        - generic [ref=f7e77]:
+          - generic [ref=f7e78]: Now
+          - button "Home" [ref=f7e79] [cursor=pointer]
+          - button "Operations" [ref=f7e80] [cursor=pointer]
+          - button "Embryos" [ref=f7e81] [cursor=pointer]
+        - generic [ref=f7e82]:
+          - generic [ref=f7e83]: Library
+          - button "Plans" [ref=f7e84] [cursor=pointer]
+          - button "Sessions" [ref=f7e85] [cursor=pointer]
+          - button "Notebook" [ref=f7e86] [cursor=pointer]
+          - button "Gallery" [ref=f7e87] [cursor=pointer]
+        - generic [ref=f7e88]:
+          - generic [ref=f7e89]: System
+          - button "Devices" [ref=f7e90] [cursor=pointer]
+          - button "Calibration" [ref=f7e91] [cursor=pointer]
+          - button "Logs" [ref=f7e92] [cursor=pointer]
+      - button "Talk to Gently" [ref=f7e93] [cursor=pointer]
+    - generic [ref=f7e95]:
+      - generic [ref=f7e96]: LIVE
+      - generic [ref=f7e101]:
+        - generic [ref=f7e102]:
+          - generic [ref=f7e103]:
+            - generic [ref=f7e104]: Recent sessions
+            - link "All" [ref=f7e105] [cursor=pointer]:
+              - /url: "#sessions"
+          - generic [ref=f7e106]: Loading…
+        - generic [ref=f7e108]:
+          - generic [ref=f7e109]:
+            - generic [ref=f7e110]: Recent plans
+            - link "All" [ref=f7e111] [cursor=pointer]:
+              - /url: "#plans"
+          - generic [ref=f7e112]: Loading…
+        - generic [ref=f7e114]:
+          - generic [ref=f7e115]:
+            - generic [ref=f7e116]: Recent images
+            - link "All" [ref=f7e117] [cursor=pointer]:
+              - /url: "#embryos"
+          - generic [ref=f7e118]: No images yet — they appear once a session is active.
+      - text: ›
+      - contentinfo [ref=f7e120]
