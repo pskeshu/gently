@@ -162,11 +162,85 @@ const LightPanel = (() => {
         });
     }
 
+    /**
+     * The lines this config actually routes, for DISPLAY.
+     *
+     * Deliberately not `wavelengthsOf`, which answers "which lines could be
+     * involved" and returns all of them for an unknown config — correct for
+     * `emitting()`, because an unread config with unread power must come out
+     * unknown rather than safe. But rendering four disabled sliders reading an
+     * em dash is maximum clutter for zero information, so the panel asks a
+     * narrower question: which lines do we KNOW are routed.
+     */
+    /**
+     * The preset list, always including whatever is actually set.
+     *
+     * The list comes from `/api/devices/laser/configs`, which 503s with the
+     * device layer down — so the select would read an em dash while the detail
+     * below it showed routed lines and live power sliders. The read-back config
+     * is a fact whether or not the catalogue of presets is available, and the
+     * two halves of the panel must not contradict each other.
+     */
+    function configOptions(current) {
+        const opts = configs.slice();
+        if (current && !opts.includes(current)) opts.unshift(current);
+        if (!opts.length) return '<option>—</option>';
+        return opts.map(c =>
+            `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`).join('');
+    }
+
+    function routedLines(s) {
+        return s.config ? wavelengthsOf(s.config) : [];
+    }
+
     function markup(s, em) {
         const armed = s.beam ? Object.values(s.beam).some(v => v === true) : null;
         const age = s.readAt ? `${Math.round((Date.now() - s.readAt) / 1000)}s ago` : 'never';
-        const lines = wavelengthsOf(s.config);
+        const lines = routedLines(s);
 
+        return `
+          <div class="lp">
+            <div class="lp-head">
+              <span class="lp-title">Light</span>
+              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${age}</span>
+            </div>
+
+            <div class="lp-row">
+              <span class="lp-label">LED</span>
+              <button class="lp-btn" data-led="${s.led === 'Open' ? 'Closed' : 'Open'}"
+                      aria-pressed="${s.led === 'Open'}">${s.led === 'Open' ? 'On' : 'Off'}</button>
+              <span class="lp-val">${dash(s.led)}</span>
+            </div>
+
+            <div class="lp-row">
+              <span class="lp-label" title="The Laser config group — on this rig this is the laser ON/OFF control">Laser</span>
+              <select class="lp-select" data-config aria-label="Laser config">
+                ${configOptions(s.config)}
+              </select>
+            </div>
+            ${idleBeamNote(s, armed, lines)}
+
+            ${lines.length ? laserDetail(s, armed, lines) : ''}
+
+            ${em === true
+                ? `<div class="lp-emit" role="status">EMITTING · ${s.config || 'lines unknown'}</div>`
+                : em === null
+                    ? '<div class="lp-emit lp-emit-unknown" role="status">Emission state unknown</div>'
+                    : ''}
+          </div>`;
+    }
+
+    /**
+     * The laser's own settings, revealed once a line is routed.
+     *
+     * Nested for SCOPE, not for dependency. Beam and power only matter once
+     * something is routed, which is why they are hidden until then — but they
+     * are not caused by the config, and #106 is exactly what happens when
+     * someone assumes they are. So the contradiction gets a line of its own
+     * rather than being softened by the indent.
+     */
+    function laserDetail(s, armed, lines) {
+        const contradicts = lines.length && armed === false;
         const powerRows = lines.map(wl => {
             const lim = (limits && limits[wl]) || { min: 0, max: 100 };
             const val = (s.power || {})[wl];
@@ -184,19 +258,7 @@ const LightPanel = (() => {
         }).join('');
 
         return `
-          <div class="lp">
-            <div class="lp-head">
-              <span class="lp-title">Light</span>
-              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${age}</span>
-            </div>
-
-            <div class="lp-row">
-              <span class="lp-label">LED</span>
-              <button class="lp-btn" data-led="${s.led === 'Open' ? 'Closed' : 'Open'}"
-                      aria-pressed="${s.led === 'Open'}">${s.led === 'Open' ? 'On' : 'Off'}</button>
-              <span class="lp-val">${dash(s.led)}</span>
-            </div>
-
+          <div class="lp-sub">
             <div class="lp-row">
               <span class="lp-label" title="BeamEnabled on the scanner card — the Micro-Manager property name">BeamEnabled</span>
               <button class="lp-btn ${armed ? 'is-armed' : ''}" data-beam="${armed ? 'off' : 'on'}"
@@ -204,25 +266,23 @@ const LightPanel = (() => {
               <span class="lp-val">${armed == null ? '—' : armed ? 'Yes' : 'No'}</span>
               ${sideDetail(s.beam)}
             </div>
-
-            <div class="lp-row">
-              <span class="lp-label" title="The Laser config group — on this rig this is the laser ON/OFF control">Laser</span>
-              <select class="lp-select" data-config aria-label="Laser config">
-                ${configs.length
-                    ? configs.map(c =>
-                        `<option value="${c}" ${c === s.config ? 'selected' : ''}>${c}</option>`).join('')
-                    : '<option>—</option>'}
-              </select>
-            </div>
-
+            ${contradicts
+                ? `<p class="lp-warn">Lines are routed but the beam is off — this
+                   configuration will not emit. Every volume acquisition leaves
+                   BeamEnabled at No.</p>`
+                : ''}
             ${powerRows}
-
-            ${em === true
-                ? `<div class="lp-emit" role="status">EMITTING · ${s.config || 'lines unknown'}</div>`
-                : em === null
-                    ? '<div class="lp-emit lp-emit-unknown" role="status">Emission state unknown</div>'
-                    : ''}
           </div>`;
+    }
+
+    /**
+     * An armed beam with nothing routed is safe but surprising, and it is the
+     * state the rig is left in. Say it on the Laser row so hiding the detail
+     * never hides the fact.
+     */
+    function idleBeamNote(s, armed, lines) {
+        if (lines.length || armed !== true) return '';
+        return '<p class="lp-note">Beam is armed, but no lines are routed — nothing emits.</p>';
     }
 
     /** Only worth showing when the two sides disagree, which is a real state. */

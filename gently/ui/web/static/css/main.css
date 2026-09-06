@@ -8907,6 +8907,46 @@ body.modal-open {
 .devices-status-pill.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
 
 /* Device-layer supervision card (device-layer.js) */
+/* The device-layer strip's buttons used to borrow `.marking-action-btn` from
+   the old marking surface. When that surface was deleted its CSS went with it
+   and these lost their styling — the classes were live, borrowed by markup
+   that had nothing to do with marking. Re-homed onto the class the buttons
+   already carried, so the name now says what it styles. */
+.devices-layer-btn,
+.devices-layer-log-toggle {
+    padding: 0.35rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.15s;
+}
+
+.devices-layer-btn:hover:not(:disabled),
+.devices-layer-log-toggle:hover:not(:disabled) {
+    background: var(--bg-hover);
+}
+
+.devices-layer-btn:disabled,
+.devices-layer-log-toggle:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* Start is the primary action on this strip. */
+.devices-layer-btn.is-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.devices-layer-btn.is-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+    background: var(--accent);
+}
+
 .devices-layer-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -8941,7 +8981,7 @@ body.modal-open {
 /* Stop tears down the running device layer — the destructive action, so it
    reads red (filled + active when there's something to stop). When nothing is
    running it stays red-tinted but clearly inactive, mirroring how Start is
-   blue-active/blue-faded. Overrides the generic .marking-action-btn:disabled
+   blue-active/blue-faded. Overrides the generic .devices-layer-btn:disabled
    0.4 opacity so the red stays legible while disabled. */
 #devices-layer-stop {
     background: #f85149;
