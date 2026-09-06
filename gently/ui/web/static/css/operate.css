@@ -1074,3 +1074,22 @@
     max-width: 52ch;
     line-height: 1.45;
 }
+
+/* The primary member of the selection is the one the instrument panes act on;
+   membership of the set is a lighter state. With one embryo selected the two
+   coincide, so the common case looks exactly as it did. */
+.rp-row.is-primary {
+    border-color: var(--accent);
+}
+
+.rp-row.is-sel:not(.is-primary) {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* Disabled until something is selected, so it cannot be switched to an empty
+   target set. */
+#op-target-scope .op-segbtn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}

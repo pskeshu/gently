@@ -105,12 +105,13 @@ const RosterPanel = (() => {
     function render() {
         const embryos = SharedState.get('embryos') || [];
         const selected = SharedState.get('selectedEmbryoId');
+        const inSet = new Set(SharedState.get('selectedEmbryoIds') || []);
 
         mounts.forEach((opts, hostId) => {
             const host = document.getElementById(hostId);
             if (!host) return;
             host.innerHTML = embryos.length
-                ? embryos.map(e => row(e, selected, opts)).join('')
+                ? embryos.map(e => row(e, selected, inSet, opts)).join('')
                 : empty(opts);
             wire(host);
         });
@@ -127,7 +128,7 @@ const RosterPanel = (() => {
                 then register.${cta}</div>`;
     }
 
-    function row(emb, selected, opts) {
+    function row(emb, selected, inSet, opts) {
         const xy = xyOf(emb);
         const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
         const isRef = role === 'calibration';
@@ -146,7 +147,13 @@ const RosterPanel = (() => {
                      data-verb="${a.verb}" data-id="${esc(emb.id)}">${a.text}</button>`;
         }).join('');
 
-        return `<div class="rp-row${emb.id === selected ? ' is-sel' : ''}" tabindex="0"
+        // Two states, deliberately distinct: `is-sel` is membership of the
+        // target set, `is-primary` is the one the instrument panes act on. With
+        // one embryo selected they coincide, which is why the common case looks
+        // exactly as it did.
+        const cls = (inSet.has(emb.id) || emb.id === selected ? ' is-sel' : '')
+            + (emb.id === selected ? ' is-primary' : '');
+        return `<div class="rp-row${cls}" tabindex="0"
                  data-embryo="${esc(emb.id)}">
                   <span class="rp-main">
                     <span class="rp-label">Embryo ${esc(labelOf(emb))}${fitBadge(emb, opts)}</span>
@@ -179,7 +186,14 @@ const RosterPanel = (() => {
             const goto = e.target.closest('[data-goto]');
             if (goto) { if (v && v.goTo) v.goTo(goto.dataset.goto); return; }
             const row = e.target.closest('[data-embryo]');
-            if (row && v && v.select) v.select(row.dataset.embryo);
+            if (!row || !v || !v.select) return;
+            // The interaction every file manager, DAW and photo library already
+            // teaches, so the set needs no chrome of its own. A plain click
+            // replaces, which keeps single-embryo work identical to before.
+            const mode = (e.metaKey || e.ctrlKey) ? 'toggle'
+                : e.shiftKey ? 'range'
+                    : 'replace';
+            v.select(row.dataset.embryo, mode);
         };
         host.onkeydown = e => {
             if (e.key !== 'Enter' && e.key !== ' ') return;

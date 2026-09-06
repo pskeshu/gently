@@ -94,6 +94,12 @@ const OperateManager = (function () {
 
     // ── emitters / run ──────────────────────────────────────────────────────
     let _acquiring = false;
+    // The selection set. `_selected` is the primary member of it.
+    let _targets = [];
+    // Which embryos a run targets. 'all' is the default and is what this pane
+    // has always done — a plain click must never silently narrow a timelapse
+    // from every subject to one, so the narrowing is a thing you say.
+    let _targetScope = 'all';
     // Read back from the Light panel's device read, never remembered here.
     const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
     let _galvo = 0.0, _piezo = 50.0;
@@ -1004,14 +1010,52 @@ const OperateManager = (function () {
     }
 
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
-    function selectEmbryo(id) {
-        _selected = id;
+    /**
+     * Select an embryo, and maintain the selection SET around it.
+     *
+     * `_selected` is the primary — the one the instrument panes act on, which
+     * is what it has always meant. `_targets` is every member. A plain click
+     * makes them the same, so single-embryo work is unchanged; the modifiers
+     * are the only way to grow the set, and growing it changes nothing until
+     * Acquisition is switched to "Selected".
+     *
+     * Selection is NOT role. Excluding an embryo from tonight's run by marking
+     * it a reference also changes expression_monitoring's scope and its
+     * photodose budget multiplier in the orchestrator's `_is_eligible` — those
+     * are facts about what the embryo is for, not about what is running.
+     */
+    function selectEmbryo(id, mode) {
+        if (!id) return;
+        const order = _embryos.map(e => e.id);
+
+        if (mode === 'toggle') {
+            const at = _targets.indexOf(id);
+            if (at >= 0 && _targets.length > 1) {
+                _targets.splice(at, 1);
+                // Deselecting the primary hands it to a remaining member rather
+                // than leaving the instrument panes pointed at nothing.
+                if (_selected === id) _selected = _targets[0];
+            } else if (at < 0) {
+                _targets.push(id);
+                _selected = id;
+            }
+        } else if (mode === 'range' && _selected && order.includes(_selected)) {
+            const a = order.indexOf(_selected), b = order.indexOf(id);
+            _targets = order.slice(Math.min(a, b), Math.max(a, b) + 1);
+            _selected = id;
+        } else {
+            _targets = [id];
+            _selected = id;
+        }
+
         // Publish AFTER the local assignment: the subscription in wire() sees
         // _selected already equal and no-ops, so our own click renders exactly
         // once, as before. The set() is what makes the other copies of this
         // cursor follow.
-        SharedState.set('selectedEmbryoId', id);
+        SharedState.set('selectedEmbryoIds', _targets.slice());
+        SharedState.set('selectedEmbryoId', _selected);
         publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle();
+        renderTargetScope();
     }
 
     // Shared embryo list, left of every instrument surface. Reads the canonical
@@ -1142,8 +1186,44 @@ const OperateManager = (function () {
      *
      * Empty now, and the caller says so.
      */
-    function subjectIds() {
+    function allSubjectIds() {
         return _embryos.filter(e => e.role !== 'calibration').map(e => e.id);
+    }
+
+    /** The embryos a run will image, per the declared scope. */
+    function subjectIds() {
+        if (_targetScope !== 'selected') return allSubjectIds();
+        // Never a reference, whatever is selected: role still decides what an
+        // embryo is for.
+        const refs = new Set(_embryos.filter(e => e.role === 'calibration').map(e => e.id));
+        return _targets.filter(id => !refs.has(id));
+    }
+
+    // The pane says which set it will use, and how big it is. The modifier keys
+    // that grow the set do not have to be discovered for this to be readable.
+    function renderTargetScope() {
+        const el = $('op-target-scope');
+        if (!el) return;
+        const all = allSubjectIds().length;
+        const sel = subjectIds().length;
+        el.querySelectorAll('[data-scope]').forEach(b => {
+            const on = b.dataset.scope === _targetScope;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', String(on));
+        });
+        const a = el.querySelector('[data-scope="all"]');
+        const s2 = el.querySelector('[data-scope="selected"]');
+        if (a) a.textContent = `All subjects (${all})`;
+        if (s2) {
+            s2.textContent = `Selected (${_targetScope === 'selected' ? sel : _targets.length})`;
+            s2.disabled = !_targets.length;
+        }
+    }
+
+    function setTargetScope(scope) {
+        _targetScope = scope === 'selected' ? 'selected' : 'all';
+        renderTargetScope();
+        renderSingle();
     }
 
     // Every embryo marked as a reference means there is nothing to image. Say
@@ -1315,7 +1395,7 @@ const OperateManager = (function () {
         acquire: {
             onEnter() { renderRun(); },
             onLeave() {},
-            render() { publishRoster(); renderSingle(); },
+            render() { publishRoster(); renderSingle(); renderTargetScope(); },
         },
     };
     function stopBottom() {
@@ -1430,11 +1510,17 @@ const OperateManager = (function () {
     function onEmbryosUpdate(p) {
         _embryos = (p && Array.isArray(p.embryos)) ? p.embryos.slice() : [];
         if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
+        // Drop members that no longer exist, or the set silently targets ghosts
+        // — the same class of bug as the phantom roster row in #126.
+        const known = new Set(_embryos.map(e => e.id));
+        _targets = _targets.filter(id => known.has(id));
         // The embryo list is shared across all three panes; keep a live
         // selection whenever it is non-empty so SPIM/Acquire aren't a dead-end
         // ("No embryo selected") right after registering. The operator can still
         // switch by clicking a registered embryo (bottom) or a roster row.
         if (!_selected && _embryos.length) _selected = _embryos[0].id;
+        if (!_targets.length && _selected) _targets = [_selected];
+        SharedState.set('selectedEmbryoIds', _targets.slice());
         SharedState.set('selectedEmbryoId', _selected);
         // Render the shared rail even when the Operate view isn't the active tab,
         // so switching to it (or refreshing) shows the list immediately rather
@@ -1477,9 +1563,10 @@ const OperateManager = (function () {
         // of them looking for buttons the panel no longer emits, is how a
         // select fires twice.
         //
-        // Everything below was collateral of that deletion: the slice that
-        // removed the roster's own listeners ran past them, and eight controls
-        // went dead — including the interlock banner's back-off button.
+        // Everything below was collateral of that deletion in the roster
+        // refactor: the slice that removed the roster's own listeners ran past
+        // them. Eight controls went dead, including the interlock banner's
+        // back-off button. Restored, and pinned by a test that counts them.
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
         document.querySelectorAll('[data-gv]').forEach(b =>
@@ -1510,6 +1597,11 @@ const OperateManager = (function () {
                 if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
             });
         }
+        const scope = $('op-target-scope');
+        if (scope) scope.addEventListener('click', e => {
+            const b = e.target.closest('[data-scope]');
+            if (b && !b.disabled) setTargetScope(b.dataset.scope);
+        });
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
@@ -1617,7 +1709,7 @@ const OperateManager = (function () {
         // panels/roster.js renders SharedState.embryos and calls these. The
         // list, the selection and the endpoints stay here.
         roster: {
-            select: id => selectEmbryo(id),
+            select: (id, mode) => selectEmbryo(id, mode),
             remove: id => deleteEmbryo(id),
             centre: id => {
                 const emb = _embryos.find(e => e.id === id);
