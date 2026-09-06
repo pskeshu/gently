@@ -88,6 +88,11 @@ const SharedState = (() => {
     const s = {
         stageXY: null,          // {x, y} in um, or null if unknown
         selectedEmbryoId: null,
+        // The selection SET. `selectedEmbryoId` stays the primary — the one the
+        // instrument panes act on — and this is every member. One embryo
+        // selected means the two agree, which is the normal case and behaves
+        // exactly as it always did.
+        selectedEmbryoIds: [],
         sessionId: null,
         agentBusy: false,
         hasControl: false,

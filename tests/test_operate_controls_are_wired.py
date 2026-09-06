@@ -50,6 +50,7 @@ CONTROLS = {
     "op-confirm": "$('op-confirm')",
     "op-clear": "$('op-clear')",
     "op-cam-toggle": "$('op-cam-toggle')",
+    "op-target-scope": "$('op-target-scope')",
     "[data-gv]": "[data-gv]",
     "[data-pz]": "[data-pz]",
     "[data-backoff]": "[data-backoff]",

@@ -759,6 +759,17 @@
 
                     <div class="op-col">
                       <div class="op-block-head">What to run</div>
+                      <!-- Which embryos, said out loud. "All subjects" is the
+                           default and is what this pane has always done; a plain
+                           click in the roster must never silently narrow a
+                           timelapse to one embryo. Ctrl/Cmd-click and Shift-click
+                           in the embryo list grow the selection. -->
+                      <div class="op-seg" id="op-target-scope" role="group" aria-label="Run targets">
+                        <button class="op-segbtn is-on" data-scope="all" type="button"
+                                aria-pressed="true">All subjects</button>
+                        <button class="op-segbtn" data-scope="selected" type="button"
+                                aria-pressed="false" disabled>Selected</button>
+                      </div>
                       <div class="op-seg" id="op-modes" role="tablist" aria-label="Run mode">
                         <button class="op-segbtn is-on" data-mode="single" role="tab" type="button">Single volume</button>
                         <button class="op-segbtn" data-mode="adaptive" role="tab" type="button">Adaptive timelapse</button>
