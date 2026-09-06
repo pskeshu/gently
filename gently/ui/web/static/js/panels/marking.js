@@ -111,10 +111,49 @@ const MarkingPanel = (() => {
                     >Clear</button>
                 </div>
 
+                ${session(s)}
                 ${s.note ? `<p class="mk-note">${escape(s.note)}</p>` : ''}
               </div>`;
             wire(el);
         });
+    }
+
+    /**
+     * The agent-initiated session, when there is one.
+     *
+     * Present only while the agent is waiting — this is the one part of the
+     * panel that is a transient condition rather than a standing control, so it
+     * seats and retires itself (PANELS.md rule 6).
+     *
+     * The per-marker role list exists because the contract needs it:
+     * `marking_done` carries a role per marker and the waiting agent reads
+     * them, so the operator has to be able to say which of these is a
+     * reference before answering. Registered embryos get their roles in the
+     * Acquisition roster; these are not registered yet.
+     */
+    function session(s) {
+        if (!s.session) return '';
+        const rows = (s.session.pending || []).map(m => {
+            const ref = m.role === 'calibration';
+            return `<div class="mk-prow">
+                      <span class="mk-pnum">${m.index + 1}</span>
+                      <span class="mk-psrc">${escape(m.source)}</span>
+                      <button class="lp-btn mk-prole${ref ? ' is-reference' : ''}" type="button"
+                              title="${ref ? 'Reference — click to make it a subject'
+                                           : 'Subject — click to make it a reference'}"
+                              data-act="cycleRole" data-index="${m.index}"
+                        >${ref ? 'ref' : 'subj'}</button>
+                    </div>`;
+        }).join('');
+
+        return `<div class="mk-session">
+                  <div class="mk-shead">The agent is waiting</div>
+                  ${rows || '<p class="mk-note">Nothing marked yet — click each embryo on the image.</p>'}
+                  <div class="mk-acts">
+                    <button class="lp-btn" data-act="redetect">Re-detect</button>
+                    <button class="lp-btn lp-btn-primary" data-act="done">Done</button>
+                  </div>
+                </div>`;
     }
 
     function escape(t) {
@@ -128,7 +167,8 @@ const MarkingPanel = (() => {
                 const v = verbs();
                 if (!v) return;
                 const fn = v[b.dataset.act];
-                if (typeof fn === 'function') fn();
+                // `data-index` is only present on the per-marker role toggles.
+                if (typeof fn === 'function') fn(b.dataset.index);
             };
         });
     }

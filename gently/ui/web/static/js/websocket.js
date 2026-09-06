@@ -131,14 +131,16 @@ function handleMessage(msg) {
     } else if (msg.type === 'timelapse_state') {
         ClientEventBus.emit('TIMELAPSE_STATE', msg.data);
     } else if (msg.type === 'marking_image') {
-        // Server is requesting embryo marking
-        if (typeof MarkingManager !== 'undefined') {
-            MarkingManager.handleMarkingImage(msg.data);
-            // Auto-switch to marking subtab
-            MarkingManager.switchSubtab('marking');
-            // Switch to embryos tab if not already there
-            if (state.tab !== 'embryos') switchTab('embryos');
-        }
+        // The agent is asking the operator to mark embryos on an image it
+        // captured, and is blocked until `marking_done` comes back.
+        //
+        // This used to drive a second marking implementation in the Embryos
+        // tab (static/js/marking.js) with its own canvas and hit-test, so every
+        // improvement to marking landed on only one of two surfaces. It goes to
+        // the Operate bottom-camera pane now — the same surface an operator
+        // marks on unprompted, which means the agent's request inherits the
+        // zoom, the display range and the corrected hit-test.
+        ClientEventBus.emit('MARKING_IMAGE', msg.data);
     } else if (msg.type === 'open_volume') {
         // The agent asked us to open the in-browser volume viewer — the
         // web-native replacement for the old desktop napari window.

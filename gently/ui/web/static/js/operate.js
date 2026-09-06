@@ -100,6 +100,29 @@ const OperateManager = (function () {
     // has always done — a plain click must never silently narrow a timelapse
     // from every subject to one, so the narrowing is a thing you say.
     let _targetScope = 'all';
+
+    // ── AGENT-INITIATED MARKING ─────────────────────────────────────────────
+    // The agent can ask the operator to mark embryos on an image it pushes
+    // (server.start_marking_session -> a `marking_image` websocket frame, and
+    // it waits for `marking_done` keyed by session_id).
+    //
+    // That request used to land on a SECOND marking implementation —
+    // static/js/marking.js, 452 lines with its own canvas, its own hit-test
+    // and its own list, in the Embryos tab. So every fix to marking landed on
+    // one of two surfaces: the zoom, the display range, #105's hit-test and
+    // #126's aliasing all existed here and none of them there. Whether an
+    // operator got the corrected behaviour depended on who had asked them to
+    // mark.
+    //
+    // One surface now, two invocations. The pushed image is adapted into the
+    // frame shape this pane already understands, so all of that geometry
+    // applies unchanged.
+    let _markSession = null;
+
+    /** The µm/px this session declares, or the rig default. */
+    function pxBase() {
+        return _markSession ? _markSession.pixelSizeUm : undefined;
+    }
     // Read back from the Light panel's device read, never remembered here.
     const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
     let _galvo = 0.0, _piezo = 50.0;
@@ -610,7 +633,7 @@ const OperateManager = (function () {
     function markerToCanvas(m, r) {
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
         if (!f || !cap || !M) return null;
-        const px = M.stageToFrame(m.stageX, m.stageY, f, cap);
+        const px = M.stageToFrame(m.stageX, m.stageY, f, cap, pxBase());
         if (!px) return null;
         return { cx: r.x + (px[0] / r.fw) * r.w, cy: r.y + (px[1] / r.fh) * r.h, px };
     }
@@ -623,7 +646,7 @@ const OperateManager = (function () {
         _embryos.forEach(emb => {
             const xy = resolveXY(emb);
             if (!xy) return;
-            const px = M.stageToFrame(xy.x, xy.y, f, cap);
+            const px = M.stageToFrame(xy.x, xy.y, f, cap, pxBase());
             if (!px) return;
             out.push({ emb, cx: r.x + (px[0] / r.fw) * r.w, cy: r.y + (px[1] / r.fh) * r.h });
         });
@@ -672,7 +695,11 @@ const OperateManager = (function () {
             ctx.stroke();
             ctx.fillStyle = colour;
             ctx.font = '600 11px Inter Tight, sans-serif';
-            ctx.fillText(String(i + 1), cx + 13, cy - 8);
+            // During an agent-initiated session each marker carries a role that
+            // goes back in the answer, so a reference must be distinguishable
+            // on the image and not only in the panel.
+            const tag = (_markSession && m.role === 'calibration') ? `${i + 1}·ref` : String(i + 1);
+            ctx.fillText(tag, cx + 13, cy - 8);
             ctx.restore();
         });
     }
@@ -716,7 +743,7 @@ const OperateManager = (function () {
         if (!cap) { toastFail('Stage position unknown — wait for the readout, then mark'); return; }
 
         const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh;
-        const s = M && M.frameToStage(fx, fy, f, cap);
+        const s = M && M.frameToStage(fx, fy, f, cap, pxBase());
         if (!s) { toastFail('Cannot place a marker without a stage position'); return; }
         _markers.push({ stageX: s[0], stageY: s[1], source: 'manual' });
         drawMarkers(); renderMarkCount();
@@ -758,6 +785,16 @@ const OperateManager = (function () {
             detecting: _detecting,
             startedAt: _detectStartedAt,
             note: _markNote,
+            // Present only while the agent is waiting on an answer. The panel
+            // renders the pending markers and their roles from this, because
+            // the contract carries a role per marker.
+            session: _markSession ? {
+                pending: _markers.map((m, i) => ({
+                    index: i,
+                    role: m.role || _markSession.defaultRole,
+                    source: m.source || 'manual',
+                })),
+            } : null,
         });
     }
 
@@ -834,7 +871,7 @@ const OperateManager = (function () {
             cands.forEach(c => {
                 let sx = c.stage_x_um, sy = c.stage_y_um;
                 if ((sx == null || sy == null) && f && cap && M && c.pixel_x != null && c.pixel_y != null) {
-                    const s = M.frameToStage(c.pixel_x / f.downsample, c.pixel_y / f.downsample, f, cap);
+                    const s = M.frameToStage(c.pixel_x / f.downsample, c.pixel_y / f.downsample, f, cap, pxBase());
                     if (s) { sx = s[0]; sy = s[1]; }
                 }
                 if (sx == null || sy == null) return;
@@ -869,7 +906,7 @@ const OperateManager = (function () {
             // the localiser that will replace SAM. Pixel coords are projected
             // from stage space against the frame being submitted.
             const markers = _markers.map(m => {
-                const px = (f && M) ? M.stageToFrame(m.stageX, m.stageY, f, cap) : null;
+                const px = (f && M) ? M.stageToFrame(m.stageX, m.stageY, f, cap, pxBase()) : null;
                 return {
                     stage_x_um: m.stageX, stage_y_um: m.stageY,
                     pixel_x: px ? px[0] : undefined, pixel_y: px ? px[1] : undefined,
@@ -1491,6 +1528,124 @@ const OperateManager = (function () {
         el.textContent = bits.join('  ·  ');
     }
 
+    /**
+     * The agent is asking the operator to mark embryos on an image it captured.
+     *
+     * Adapts the pushed image into the same payload shape a live bottom-camera
+     * frame has, so `frameOf`/`stageOf`/`drawMarkers`/`onCanvasClick` and the
+     * corrected hit-test all work on it with no special cases. The one thing
+     * that differs is the scale: the session declares its own `pixel_size_um`,
+     * which `pxBase()` threads into the geometry.
+     */
+    function onMarkingImage(d) {
+        if (!d || !d.image_b64) return;
+
+        _markSession = {
+            sessionId: d.session_id,
+            defaultRole: d.default_role || 'test',
+            pixelSizeUm: d.pixel_size_um || undefined,
+        };
+
+        // A pushed still, in the shape a live frame arrives in. `mime` matters:
+        // start_marking_session sends PNG, the camera stream sends JPEG.
+        _lastBottom = {
+            t: Date.now(),
+            shape: [d.height, d.width],
+            downsample: 1,
+            stage_position: [d.stage_x_um != null ? d.stage_x_um : 0,
+                             d.stage_y_um != null ? d.stage_y_um : 0],
+            mime: 'image/png',
+            jpeg_b64: d.image_b64,
+        };
+
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        // Initial markers arrive in PIXEL coordinates; this pane keeps markers
+        // in stage µm so they stay attached to the sample under zoom and stage
+        // motion. Convert once, here, at the boundary.
+        _markers = (d.initial_markers || []).map(m => {
+            const st = (f && cap && M) ? M.frameToStage(m.pixelX, m.pixelY, f, cap, pxBase()) : null;
+            return st ? {
+                stageX: st[0], stageY: st[1],
+                source: m.source || 'sam',
+                role: m.role || _markSession.defaultRole,
+                embryo_id: m.embryo_id || null,
+                confidence: m.confidence != null ? m.confidence : null,
+            } : null;
+        }).filter(Boolean);
+
+        // Bring the operator to the surface rather than expecting them to find
+        // it. The old implementation did this too, and it is right: the agent
+        // is blocked waiting on an answer.
+        if (typeof switchTab === 'function') switchTab('devices');
+        showPane('bottom');
+        setImg('op-img-bottom', 'op-ph-bottom', _lastBottom);
+        drawMarkers();
+        renderMarkCount();
+        setDetectNote(_markers.length
+            ? `${_markers.length} detected — the agent is waiting. Adjust them, set roles, then Done.`
+            : 'The agent is waiting for you to mark the embryos. Click each one, then Done.');
+    }
+
+    /** Answer the agent. Markers go back in pixel coordinates, with roles. */
+    function finishMarkingSession() {
+        if (!_markSession) return;
+        const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
+        const markers = _markers.map((m, i) => {
+            const px = (f && cap && M) ? M.stageToFrame(m.stageX, m.stageY, f, cap, pxBase()) : null;
+            return px ? {
+                number: i + 1,
+                pixelX: Math.round(px[0]),
+                pixelY: Math.round(px[1]),
+                role: m.role || _markSession.defaultRole,
+                source: m.source || 'manual',
+                embryo_id: m.embryo_id || null,
+                confidence: m.confidence != null ? m.confidence : null,
+                timestamp: new Date().toISOString(),
+            } : null;
+        }).filter(Boolean);
+
+        const sent = sendWs({ type: 'marking_done', session_id: _markSession.sessionId, markers });
+        if (!sent) {
+            toastFail('Not connected — the agent did not get your marks');
+            return;
+        }
+        const n = markers.length;
+        _markSession = null;
+        _markers = [];
+        drawMarkers();
+        renderMarkCount();
+        setDetectNote(`Marking complete — ${n} embryo${n === 1 ? '' : 's'} sent to the agent.`);
+        publishMarking();
+    }
+
+    /** Ask the agent to recapture and re-detect. */
+    function redetectMarkingSession() {
+        if (!_markSession) return;
+        if (!sendWs({ type: 'marking_redetect', session_id: _markSession.sessionId })) {
+            toastFail('Not connected — could not ask for a re-detect');
+            return;
+        }
+        setDetectNote('Asked the agent to recapture and re-detect…');
+    }
+
+    /** Cycle one pending marker between subject and reference. */
+    function cycleMarkerRole(index) {
+        const m = _markers[index];
+        if (!m || !_markSession) return;
+        m.role = m.role === 'calibration' ? 'test' : 'calibration';
+        drawMarkers();
+        publishMarking();
+    }
+
+    // The marking contract is a websocket request/response keyed on
+    // session_id, not an HTTP call — the agent is blocked on `complete`.
+    function sendWs(payload) {
+        const ws = (typeof state !== 'undefined' && state) ? state.ws : null;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        ws.send(JSON.stringify(payload));
+        return true;
+    }
+
     // ══ EVENTS ══════════════════════════════════════════════════════════════
     function onBottomFrame(p) {
         // Bail when hidden, or a hidden Operate keeps base64-decoding every
@@ -1643,6 +1798,8 @@ const OperateManager = (function () {
             // Server-pushed stills (focus montages today). websocket.js emits
             // this for every image; onPushedImage takes the kinds this pane owns.
             ClientEventBus.on('IMAGE_RECEIVED', onPushedImage);
+            // The agent asking for marks. One surface, two invocations.
+            ClientEventBus.on('MARKING_IMAGE', onMarkingImage);
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
                 const pos = p && p.positions;
                 if (!pos) return;
@@ -1722,6 +1879,10 @@ const OperateManager = (function () {
             detect: () => runDetect(),
             register: () => confirmMarks(),
             clear: () => clearMarks(),
+            // Session verbs — only meaningful while the agent is waiting.
+            done: () => finishMarkingSession(),
+            redetect: () => redetectMarkingSession(),
+            cycleRole: i => cycleMarkerRole(Number(i)),
         },
     };
 })();
