@@ -1476,6 +1476,40 @@ const OperateManager = (function () {
         // the markup, so it owns the handlers. Two listeners on one host, one
         // of them looking for buttons the panel no longer emits, is how a
         // select fires twice.
+        //
+        // Everything below was collateral of that deletion: the slice that
+        // removed the roster's own listeners ran past them, and eight controls
+        // went dead — including the interlock banner's back-off button.
+        const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
+        const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        document.querySelectorAll('[data-gv]').forEach(b =>
+            b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
+        document.querySelectorAll('[data-pz]').forEach(b =>
+            b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
+        document.querySelectorAll('[data-backoff]').forEach(b =>
+            b.addEventListener('click', backOff));
+
+        const modes = $('op-modes');
+        if (modes) {
+            modes.addEventListener('click', e => {
+                const b = e.target.closest('[data-mode]');
+                if (b) setMode(b.dataset.mode);
+            });
+        }
+        const stopSel = $('op-tl-stop');
+        if (stopSel) {
+            stopSel.addEventListener('change', () => {
+                const w = $('op-tl-condwrap');
+                if (w) w.hidden = stopSel.value === 'manual';
+            });
+        }
+        const lib = $('op-lib-list');
+        if (lib) {
+            lib.addEventListener('click', e => {
+                const b = e.target.closest('[data-lib]');
+                if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
+            });
+        }
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
