@@ -45,7 +45,7 @@ const CameraPanel = (() => {
             // params; there is no separate read, so the panel shows what was
             // last set and says so rather than implying a hardware read.
             read: null,
-            write: '/api/devices/lightsheet/live_params',
+            write: '/api/devices/lightsheet/live/params',
             body: ms => ({ exposure: ms }),
         },
     };
