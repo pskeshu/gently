@@ -11108,8 +11108,11 @@ body.modal-open {
     background: transparent; color: inherit; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18));
 }
 .devices-region-btn:hover { border-color: var(--accent); color: var(--accent); }
-.devices-region-editor {
-    position: relative; z-index: 3;
+/* The rail and the legend are siblings at the same z-index, so the later legend
+   paints over an open wizard's buttons. Lift the rail only while the wizard is open. */
+.devices-map-rail:has(.devices-region-wiz:not([hidden])) { z-index: 5; }
+.devices-region-wiz {
+    position: relative;
     display: grid; gap: 8px;
     width: 300px; max-width: 100%;
     padding: 10px; border-radius: 6px;
@@ -11117,14 +11120,38 @@ body.modal-open {
     border: 1px solid var(--accent);
     font-size: 0.75rem;
 }
-.devices-region-editor[hidden] { display: none; }
-.devices-region-hint, .devices-region-inset small { margin: 0; opacity: 0.75; line-height: 1.35; display: block; }
-.devices-region-corner { border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.14)); border-radius: 4px; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.devices-region-corner legend { padding: 0 4px; opacity: 0.8; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
-.devices-region-corner label { display: inline-flex; align-items: center; gap: 4px; }
-.devices-region-editor input[type="number"] { width: 84px; font: inherit; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
-.devices-region-editor button { font: inherit; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
+.devices-region-wiz[hidden] { display: none; }
+.devices-region-steps { display: inline-flex; gap: 5px; align-items: center; }
+.devices-region-steps i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); display: inline-block; opacity: 0.45; }
+.devices-region-steps i.done { background: var(--accent); opacity: 0.7; }
+.devices-region-steps i.now  { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.devices-region-cam { position: relative; aspect-ratio: 4 / 3; background: #0b0f14; border-radius: 4px; overflow: hidden; display: grid; place-items: center; }
+.devices-region-cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.devices-region-cam img:not([src]) { display: none; }
+.devices-region-cam-ph { position: absolute; color: #8a94a3; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.devices-region-cam-ph[hidden] { display: none; }
+.devices-region-schem { width: 100%; height: auto; display: block; border-radius: 4px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.devices-region-schem .rs-now   { fill: none; stroke: currentColor; stroke-opacity: 0.35; stroke-dasharray: 3 2; }
+.devices-region-schem .rs-new   { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: var(--accent); stroke-width: 1.2; }
+.devices-region-schem .rs-corner { fill: none; stroke: currentColor; stroke-opacity: 0.5; }
+.devices-region-schem .rs-got    { fill: var(--accent); stroke: var(--accent); }
+.devices-region-schem .rs-target { stroke: var(--accent); stroke-width: 2; animation: rs-pulse 1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.devices-region-schem .rs-stage  { fill: #f5a524; }
+.devices-region-schem .rs-arrow  { stroke: #f5a524; stroke-width: 1; stroke-dasharray: 2 2; }
+.devices-region-schem .rs-label  { font-size: 8px; fill: currentColor; opacity: 0.8; text-anchor: middle; }
+.devices-region-schem .rs-axis   { font-size: 6px; fill: currentColor; opacity: 0.5; }
+@keyframes rs-pulse { 50% { transform: scale(1.6); stroke-opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .devices-region-schem .rs-target { animation: none; } }
+.devices-region-say { margin: 0; line-height: 1.4; }
+.devices-region-xy { display: flex; gap: 12px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.devices-region-xy b { font-weight: 600; }
+.devices-region-xy i { font-style: normal; opacity: 0.6; }
+.devices-region-xy[hidden], .devices-region-inset[hidden], .devices-region-actions [hidden] { display: none; }
+.devices-region-inset small { display: block; opacity: 0.75; line-height: 1.35; }
+.devices-region-wiz input[type="number"] { width: 84px; font: inherit; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
+.devices-region-wiz button { font: inherit; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
 .devices-region-apply { background: var(--accent) !important; border-color: var(--accent) !important; color: #071018 !important; font-weight: 600; }
+.devices-region-apply:disabled { opacity: 0.5; cursor: default; }
 .devices-region-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .devices-region-result { min-height: 1em; }
 .devices-region-result[data-ok="0"] { color: #ef4444; }

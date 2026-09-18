@@ -2451,31 +2451,84 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
-    // Edit region (#107) — the XY safety envelope, set from the map
+    // Edit region (#107) — a guided walk to the two corners of the safe area
     // =====================================================================
-    // The box the map draws IS the fence the controller enforces, so editing
-    // it here means writing firmware limits. The device layer refuses a box
-    // the stage is not currently inside; that message is shown as-is.
+    // The box the map draws IS the fence the controller enforces, so this
+    // ends in a firmware write. The walk: start the bottom camera so the
+    // operator can see where they are, send them to the bottom-left corner
+    // with the joystick, capture, then the top-right, capture, review, apply.
+    // The schematic shows which corner is wanted and where the stage is now.
     function setupRegionEditor() {
-        const btn = document.getElementById('devices-region-edit');
-        const form = document.getElementById('devices-region-editor');
-        if (!btn || !form) return;
-        const f = name => form.elements[name];
-        const result = document.getElementById('devices-region-result');
-        const say = (msg, ok) => { result.textContent = msg; result.dataset.ok = ok ? '1' : '0'; };
+        const btn  = document.getElementById('devices-region-edit');
+        const wiz  = document.getElementById('devices-region-wiz');
+        if (!btn || !wiz) return;
+        const el = id => document.getElementById(id);
+        const say = (msg, ok = true) => { el('devices-region-result').textContent = msg; el('devices-region-result').dataset.ok = ok ? '1' : '0'; };
+
+        const STEPS = [
+            { title: 'Mark the two far corners of the area you know is clear of the SPIM head, optics and holder. The camera comes on so you can see where you are.', next: 'Start' },
+            { title: 'Joystick to the BOTTOM-LEFT corner of the clear area (−X, −Y). Watch the camera; stop where you would still be happy to image.', next: 'Capture this corner', corner: 'A' },
+            { title: 'Now the TOP-RIGHT corner (+X, +Y).', next: 'Capture this corner', corner: 'B' },
+            { title: 'This is the new safe region. Apply writes it to the controller, which then enforces it against the joystick too.', next: 'Apply' },
+        ];
+        const st = { step: 0, A: null, B: null, timer: null, cam: false };
 
         function box() {
-            const inset = Number(f('inset').value) || 0;
+            if (!st.A || !st.B) return null;
+            const inset = Number(el('devices-region-inset').value) || 0;
             const b = {
-                x_min: Number(f('x_min').value) + inset, x_max: Number(f('x_max').value) - inset,
-                y_min: Number(f('y_min').value) + inset, y_max: Number(f('y_max').value) - inset,
+                x_min: Math.min(st.A.X, st.B.X) + inset, x_max: Math.max(st.A.X, st.B.X) - inset,
+                y_min: Math.min(st.A.Y, st.B.Y) + inset, y_max: Math.max(st.A.Y, st.B.Y) - inset,
             };
-            return Object.values(b).every(Number.isFinite) && b.x_min < b.x_max && b.y_min < b.y_max ? b : null;
+            return b.x_min < b.x_max && b.y_min < b.y_max ? b : null;
+        }
+
+        // Reference frame for the schematic: the current envelope, padded, so a
+        // stage driven outside today's box still shows up (that is the point).
+        function ref() {
+            const cur = _optimalBox || { x: [-1000, 1000], y: [-1000, 1000] };
+            const px = (cur.x[1] - cur.x[0]) * 0.3, py = (cur.y[1] - cur.y[0]) * 0.3;
+            return { x0: cur.x[0] - px, x1: cur.x[1] + px, y0: cur.y[0] - py, y1: cur.y[1] + py };
+        }
+        function toSvg(X, Y) {
+            const r = ref();
+            const cl = v => Math.max(4, Math.min(156, v));
+            return { x: cl(8 + 144 * (X - r.x0) / (r.x1 - r.x0)), y: cl(92 - 84 * (Y - r.y0) / (r.y1 - r.y0)) };
+        }
+        function drawSchematic() {
+            const svg = el('devices-region-schem');
+            const r = ref();
+            const cur = _optimalBox;
+            const parts = [];
+            if (cur) {
+                const a = toSvg(cur.x[0], cur.y[0]), b = toSvg(cur.x[1], cur.y[1]);
+                parts.push(`<rect class="rs-now" x="${a.x}" y="${b.y}" width="${b.x - a.x}" height="${a.y - b.y}"/>`);
+            }
+            const pend = box();
+            if (pend) {
+                const a = toSvg(pend.x_min, pend.y_min), b = toSvg(pend.x_max, pend.y_max);
+                parts.push(`<rect class="rs-new" x="${a.x}" y="${b.y}" width="${b.x - a.x}" height="${a.y - b.y}"/>`);
+            }
+            // The two corners: where they are wanted (on today's box), captured, or pulsing as the target.
+            const want = { A: cur ? toSvg(cur.x[0], cur.y[0]) : { x: 20, y: 80 }, B: cur ? toSvg(cur.x[1], cur.y[1]) : { x: 140, y: 20 } };
+            for (const k of ['A', 'B']) {
+                const cap = st[k] ? toSvg(st[k].X, st[k].Y) : null;
+                const pt = cap || want[k];
+                const cls = cap ? 'rs-corner rs-got' : (STEPS[st.step].corner === k ? 'rs-corner rs-target' : 'rs-corner');
+                parts.push(`<circle class="${cls}" cx="${pt.x}" cy="${pt.y}" r="5"/><text class="rs-label" x="${pt.x + (k === 'A' ? -9 : 9)}" y="${pt.y + (k === 'A' ? 9 : -6)}">${k}</text>`);
+            }
+            if (_lastXY) {
+                const p = toSvg(_lastXY.X, _lastXY.Y);
+                parts.push(`<circle class="rs-stage" cx="${p.x}" cy="${p.y}" r="3.5"/>`);
+                const tgt = STEPS[st.step].corner;
+                if (tgt && !st[tgt]) parts.push(`<line class="rs-arrow" x1="${p.x}" y1="${p.y}" x2="${want[tgt].x}" y2="${want[tgt].y}"/>`);
+            }
+            svg.innerHTML = parts.join('') + `<text class="rs-axis" x="152" y="97">+X</text><text class="rs-axis" x="3" y="9">+Y</text>`;
         }
         function preview() {
             if (!_mapRegionPreview) return;
             _mapRegionPreview.innerHTML = '';
-            const b = form.hidden ? null : box();
+            const b = wiz.hidden ? null : box();
             if (!b) return;
             const r = document.createElementNS(SVG_NS, 'rect');
             r.setAttribute('x', b.x_min); r.setAttribute('y', svgY(b.y_max));
@@ -2483,47 +2536,95 @@ const DevicesManager = (function () {
             r.setAttribute('class', 'devices-region-preview');
             _mapRegionPreview.appendChild(r);
         }
+        function tick() {
+            el('devices-region-x').textContent = _lastXY ? Math.round(_lastXY.X) : '—';
+            el('devices-region-y').textContent = _lastXY ? Math.round(_lastXY.Y) : '—';
+            drawSchematic();
+        }
+        function render() {
+            const s = STEPS[st.step];
+            el('devices-region-say').textContent = s.title;
+            el('devices-region-next').textContent = s.next;
+            el('devices-region-next').disabled = st.step === 3 && !box();
+            el('devices-region-back').hidden = st.step === 0;
+            el('devices-region-xy').hidden = st.step === 0;
+            el('devices-region-inset-row').hidden = st.step !== 3;
+            el('devices-region-camwrap').hidden = !st.cam;
+            el('devices-region-steps').innerHTML = STEPS.map((_, i) =>
+                `<i class="${i < st.step ? 'done' : i === st.step ? 'now' : ''}"></i>`).join('');
+            tick(); preview();
+        }
+        function onFrame(p) {
+            if (wiz.hidden || !p || !p.jpeg_b64) return;
+            const img = el('devices-region-cam');
+            img.src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
+            el('devices-region-cam-ph').hidden = true;
+        }
+        async function startCam() {
+            st.cam = true; el('devices-region-cam-ph').hidden = false; el('devices-region-cam-ph').textContent = 'Starting camera…';
+            try {
+                const r = await fetch('/api/devices/bottom_camera/stream/start', { method: 'POST' });
+                if (!r.ok) el('devices-region-cam-ph').textContent = r.status === 403 ? 'Sign in to start the camera' : 'Camera unavailable — use the map';
+            } catch (_) { el('devices-region-cam-ph').textContent = 'Camera unavailable — use the map'; }
+        }
         function open() {
-            const cur = _optimalBox;
-            f('x_min').value = cur ? Math.round(cur.x[0]) : '';
-            f('x_max').value = cur ? Math.round(cur.x[1]) : '';
-            f('y_min').value = cur ? Math.round(cur.y[0]) : '';
-            f('y_max').value = cur ? Math.round(cur.y[1]) : '';
-            f('inset').value = 0;
-            say('', true);
-            form.hidden = false; btn.hidden = true;
+            st.step = 0; st.A = st.B = null; st.cam = false;
+            el('devices-region-inset').value = 0;
+            el('devices-region-cam').removeAttribute('src');
+            say('');
+            wiz.hidden = false; btn.hidden = true;
+            st.timer = setInterval(tick, 250);
+            render();
+        }
+        function close() {
+            wiz.hidden = true; btn.hidden = false;
+            clearInterval(st.timer); st.timer = null;
+            // ponytail: stops the stream even if Operate had it on first; a shared
+            // owner count is the upgrade if that ever bites.
+            if (st.cam) fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {});
             preview();
         }
-        function close() { form.hidden = true; btn.hidden = false; preview(); }
-
-        btn.addEventListener('click', open);
-        document.getElementById('devices-region-cancel').addEventListener('click', close);
-        form.addEventListener('input', preview);
-        form.querySelectorAll('[data-capture]').forEach(b => b.addEventListener('click', () => {
-            if (!_lastXY) { say('No stage position yet', false); return; }
-            const k = b.dataset.capture;
-            f('x_' + k).value = Math.round(_lastXY.X);
-            f('y_' + k).value = Math.round(_lastXY.Y);
-            preview();
-        }));
-        form.addEventListener('submit', async e => {
-            e.preventDefault();
+        async function next() {
+            const s = STEPS[st.step];
+            if (s.corner) {
+                if (!_lastXY) { say('No stage position yet — is the device layer running?', false); return; }
+                st[s.corner] = { X: _lastXY.X, Y: _lastXY.Y };
+                if (s.corner === 'B' && !box()) { st.B = null; say('That is the same corner as A — drive diagonally away first', false); return; }
+                say('');
+            }
+            if (st.step === 0) startCam();
+            if (st.step < 3) { st.step += 1; render(); return; }
+            await apply();
+        }
+        async function apply() {
             const b = box();
-            if (!b) { say('Corner A must be below and left of corner B', false); return; }
-            say('Writing to the controller…', true);
+            if (!b) { say('Two distinct corners are needed', false); return; }
+            const nb = el('devices-region-next'); nb.disabled = true;
+            say('Writing to the controller…');
             try {
                 const r = await fetch('/api/devices/stage/envelope', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(b),
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
                 });
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) { say(d.detail || d.error || `Failed (${r.status})`, false); return; }
-                // Telemetry will confirm; do not wait for it to redraw.
                 _optimalBox = { x: [d.x_min, d.x_max], y: [d.y_min, d.y_max] };
                 computeViewBox(); renderMap();
                 close();
             } catch (err) { say(`Failed: ${err.message}`, false); }
+            finally { nb.disabled = false; }
+        }
+
+        btn.addEventListener('click', open);
+        el('devices-region-cancel').addEventListener('click', close);
+        el('devices-region-back').addEventListener('click', () => {
+            if (st.step === 0) return;
+            st.step -= 1;
+            if (STEPS[st.step].corner) st[STEPS[st.step].corner] = null;
+            say(''); render();
         });
+        el('devices-region-next').addEventListener('click', next);
+        el('devices-region-inset').addEventListener('input', render);
+        if (typeof ClientEventBus !== 'undefined') ClientEventBus.on('BOTTOM_CAMERA_FRAME', onFrame);
     }
 
     function init() {
