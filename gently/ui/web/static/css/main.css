@@ -11099,3 +11099,33 @@ body.modal-open {
     margin-left: 0.2rem;
 }
 }
+
+/* ── Map: Edit region (#107) ─────────────────────────────────────────────── */
+.devices-region-btn {
+    margin-top: 6px; width: 100%;
+    font: inherit; font-size: 0.72rem; letter-spacing: 0.04em;
+    padding: 4px 8px; border-radius: 4px; cursor: pointer;
+    background: transparent; color: inherit; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18));
+}
+.devices-region-btn:hover { border-color: var(--accent); color: var(--accent); }
+.devices-region-editor {
+    position: relative; z-index: 3;
+    display: grid; gap: 8px;
+    width: 300px; max-width: 100%;
+    padding: 10px; border-radius: 6px;
+    background: var(--map-paper-2, rgba(20,24,30,0.92));
+    border: 1px solid var(--accent);
+    font-size: 0.75rem;
+}
+.devices-region-editor[hidden] { display: none; }
+.devices-region-hint, .devices-region-inset small { margin: 0; opacity: 0.75; line-height: 1.35; display: block; }
+.devices-region-corner { border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.14)); border-radius: 4px; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.devices-region-corner legend { padding: 0 4px; opacity: 0.8; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.devices-region-corner label { display: inline-flex; align-items: center; gap: 4px; }
+.devices-region-editor input[type="number"] { width: 84px; font: inherit; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
+.devices-region-editor button { font: inherit; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
+.devices-region-apply { background: var(--accent) !important; border-color: var(--accent) !important; color: #071018 !important; font-weight: 600; }
+.devices-region-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.devices-region-result { min-height: 1em; }
+.devices-region-result[data-ok="0"] { color: #ef4444; }
+.devices-region-preview { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 6; stroke-dasharray: 24 12; vector-effect: non-scaling-stroke; pointer-events: none; }

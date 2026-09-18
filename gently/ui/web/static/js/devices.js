@@ -28,6 +28,7 @@ const DevicesManager = (function () {
     let _mapSvg, _mapBg, _mapGridMinor, _mapGridMajor, _mapAxisEmphasis;
     let _mapBeyond, _mapCoverslip;
     let _mapZones, _mapZoneLabels, _mapOrigin, _mapAxes;
+    let _mapRegionPreview;
     let _mapEmbryos;
     let _mapMarker, _mapMarkerPulse, _mapMarkerRing, _mapMarkerDot;
     let _mapReadoutX, _mapReadoutY;
@@ -195,6 +196,7 @@ const DevicesManager = (function () {
         _mapReadoutX      = grab(_mapReadoutX, 'devices-map-x');
         _mapReadoutY      = grab(_mapReadoutY, 'devices-map-y');
         _mapWrap          = grab(_mapWrap, 'devices-map-wrap');
+        _mapRegionPreview = grab(_mapRegionPreview, 'devices-map-region-preview');
         _scalebarLabel    = grab(_scalebarLabel, 'devices-scalebar-value');
         _scalebarTrack    = alive(_scalebarTrack) || document.querySelector('#devices-scalebar .devices-scalebar-track');
 
@@ -2448,9 +2450,86 @@ const DevicesManager = (function () {
         }
     }
 
+    // =====================================================================
+    // Edit region (#107) — the XY safety envelope, set from the map
+    // =====================================================================
+    // The box the map draws IS the fence the controller enforces, so editing
+    // it here means writing firmware limits. The device layer refuses a box
+    // the stage is not currently inside; that message is shown as-is.
+    function setupRegionEditor() {
+        const btn = document.getElementById('devices-region-edit');
+        const form = document.getElementById('devices-region-editor');
+        if (!btn || !form) return;
+        const f = name => form.elements[name];
+        const result = document.getElementById('devices-region-result');
+        const say = (msg, ok) => { result.textContent = msg; result.dataset.ok = ok ? '1' : '0'; };
+
+        function box() {
+            const inset = Number(f('inset').value) || 0;
+            const b = {
+                x_min: Number(f('x_min').value) + inset, x_max: Number(f('x_max').value) - inset,
+                y_min: Number(f('y_min').value) + inset, y_max: Number(f('y_max').value) - inset,
+            };
+            return Object.values(b).every(Number.isFinite) && b.x_min < b.x_max && b.y_min < b.y_max ? b : null;
+        }
+        function preview() {
+            if (!_mapRegionPreview) return;
+            _mapRegionPreview.innerHTML = '';
+            const b = form.hidden ? null : box();
+            if (!b) return;
+            const r = document.createElementNS(SVG_NS, 'rect');
+            r.setAttribute('x', b.x_min); r.setAttribute('y', svgY(b.y_max));
+            r.setAttribute('width', b.x_max - b.x_min); r.setAttribute('height', b.y_max - b.y_min);
+            r.setAttribute('class', 'devices-region-preview');
+            _mapRegionPreview.appendChild(r);
+        }
+        function open() {
+            const cur = _optimalBox;
+            f('x_min').value = cur ? Math.round(cur.x[0]) : '';
+            f('x_max').value = cur ? Math.round(cur.x[1]) : '';
+            f('y_min').value = cur ? Math.round(cur.y[0]) : '';
+            f('y_max').value = cur ? Math.round(cur.y[1]) : '';
+            f('inset').value = 0;
+            say('', true);
+            form.hidden = false; btn.hidden = true;
+            preview();
+        }
+        function close() { form.hidden = true; btn.hidden = false; preview(); }
+
+        btn.addEventListener('click', open);
+        document.getElementById('devices-region-cancel').addEventListener('click', close);
+        form.addEventListener('input', preview);
+        form.querySelectorAll('[data-capture]').forEach(b => b.addEventListener('click', () => {
+            if (!_lastXY) { say('No stage position yet', false); return; }
+            const k = b.dataset.capture;
+            f('x_' + k).value = Math.round(_lastXY.X);
+            f('y_' + k).value = Math.round(_lastXY.Y);
+            preview();
+        }));
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const b = box();
+            if (!b) { say('Corner A must be below and left of corner B', false); return; }
+            say('Writing to the controller…', true);
+            try {
+                const r = await fetch('/api/devices/stage/envelope', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(b),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) { say(d.detail || d.error || `Failed (${r.status})`, false); return; }
+                // Telemetry will confirm; do not wait for it to redraw.
+                _optimalBox = { x: [d.x_min, d.x_max], y: [d.y_min, d.y_max] };
+                computeViewBox(); renderMap();
+                close();
+            } catch (err) { say(`Failed: ${err.message}`, false); }
+        });
+    }
+
     function init() {
         cacheDom();
         setupViewSwitcher();
+        setupRegionEditor();
         setupCameraWiring();
         setupManualWiring();
         setupRoomLight();

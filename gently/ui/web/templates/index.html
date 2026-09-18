@@ -835,6 +835,7 @@
                         <g id="devices-map-axis-emphasis"></g>
                         <g id="devices-map-coverslip"></g>
                         <g id="devices-map-zones"></g>
+                        <g id="devices-map-region-preview"></g>
                         <g id="devices-map-zone-labels"></g>
                         <g id="devices-map-origin"></g>
                         <g id="devices-map-axes"></g>
@@ -878,7 +879,38 @@
                                 <span class="devices-readout-value" id="devices-map-y">—</span>
                             </div>
                         </div>
+                        <!-- #107. Ryan: "sometimes the embryos that we put on the
+                             coverslip are outside the map region." The region is the
+                             XY safety envelope; this is the only place it is edited. -->
+                        <button class="devices-region-btn" id="devices-region-edit" type="button">Edit region</button>
                     </div>
+                    <form class="devices-region-editor" id="devices-region-editor" hidden>
+                        <div class="devices-readout-head">
+                            <span class="devices-readout-title">Safe region</span>
+                            <span class="devices-readout-unit">micrometres</span>
+                        </div>
+                        <p class="devices-region-hint">Drive the stage with the joystick to each corner of the area you know is clear of the SPIM head, optics and holder, then capture it. The controller enforces the result against every motion source, joystick included.</p>
+                        <fieldset class="devices-region-corner">
+                            <legend>Corner A · min X, min Y</legend>
+                            <label>X <input type="number" step="any" name="x_min" required></label>
+                            <label>Y <input type="number" step="any" name="y_min" required></label>
+                            <button type="button" data-capture="min">Use current</button>
+                        </fieldset>
+                        <fieldset class="devices-region-corner">
+                            <legend>Corner B · max X, max Y</legend>
+                            <label>X <input type="number" step="any" name="x_max" required></label>
+                            <label>Y <input type="number" step="any" name="y_max" required></label>
+                            <button type="button" data-capture="max">Use current</button>
+                        </fieldset>
+                        <label class="devices-region-inset">Inset <input type="number" step="any" name="inset" value="0"> µm
+                            <small>If A and B are the outer corners the stage can physically reach, inset ~850 µm: a fast joystick overshoots by up to ~680 µm before it stops.</small>
+                        </label>
+                        <div class="devices-region-actions">
+                            <button type="submit" class="devices-region-apply">Apply</button>
+                            <button type="button" id="devices-region-cancel">Cancel</button>
+                        </div>
+                        <div class="devices-region-result" id="devices-region-result"></div>
+                    </form>
                     </div>
 
                     <!-- BOTTOM LEFT: scale bar -->

@@ -16,26 +16,28 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================================
-# XY-STAGE HARDWARE SAFETY LIMITS — absolute MMCore micrometres.
+# XY-STAGE SAFETY ENVELOPE — factory defaults, absolute MMCore micrometres.
 #
 # Layer 0 of the motion-safety stack. Every XY move planned by any layer
-# above (Bluesky plans, agent orchestrators, UI tools) is bounded here.
-# No layer above can widen these — they are not constructor kwargs and
-# DiSPIMXYStage exposes no setter for them.
+# above (Bluesky plans, agent orchestrators, UI tools) is bounded by the
+# stage's envelope, and the same numbers are pushed into the Tiger firmware
+# so the joystick is bounded too.
 #
-# Update only after physically verifying the new bounds on the rig:
-#   1. Drive the stage manually to each corner using the joystick.
-#   2. Confirm no collisions with the SPIM head, optics, or sample holder.
-#   3. Read the absolute MMCore X / Y values from the live device-state
-#      stream (or the XY Stage readout in the Devices > Map view).
-#   4. Edit the four constants below; restart the device-layer process.
+# The four constants below are the DEFAULT envelope. The live one is set by
+# the operator from the Map view's "Edit region" wizard (#107): drive the
+# stage to each corner of the region you have verified is clear of the SPIM
+# head, optics and holder, capture it, apply. That is the same procedure
+# the constants were measured with; the wizard just does not require a
+# code edit and a restart. The result persists in config/config.local.yml
+# and is re-applied at boot.
 # =========================================================================
 #
-# Current envelope is INSET from the operator-measured outer corners by
+# Default envelope is INSET from the operator-measured outer corners by
 # ~840–860 µm. The inset absorbs the joystick's deceleration-overshoot
 # (we measured ~13 µm at slow joystick, up to ~683 µm at fast). With this
 # inset, even a fast-joystick overshoot still lands inside the true safe
-# travel envelope the operator measured by hand.
+# travel envelope the operator measured by hand. The wizard offers the same
+# inset as a field.
 XY_STAGE_X_MIN_UM: float = -2252.1
 XY_STAGE_X_MAX_UM: float = 983.0
 XY_STAGE_Y_MIN_UM: float = -1677.0
@@ -142,16 +144,21 @@ class DiSPIMXYStage:
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
+        # Live envelope, µm. Seeded from the defaults; changed only through
+        # set_firmware_limits(), which writes the controller first and
+        # verifies the read-back, so software and firmware never disagree.
+        self._x_limits: tuple[float, float] = (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
+        self._y_limits: tuple[float, float] = (XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM)
 
     @property
     def x_limits(self) -> tuple[float, float]:
-        """Read-only view of the hardware safety limits (module constants)."""
-        return (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
+        """The live X envelope in µm (see set_firmware_limits)."""
+        return self._x_limits
 
     @property
     def y_limits(self) -> tuple[float, float]:
-        """Read-only view of the hardware safety limits (module constants)."""
-        return (XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM)
+        """The live Y envelope in µm (see set_firmware_limits)."""
+        return self._y_limits
 
     def set(self, position):
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
@@ -160,18 +167,14 @@ class DiSPIMXYStage:
             x = float(x)
             y = float(y)
 
-            # Hardware safety check — values pinned to the module-level
-            # XY_STAGE_*_UM constants; nothing above this layer can widen them.
-            if not (XY_STAGE_X_MIN_UM <= x <= XY_STAGE_X_MAX_UM):
-                raise ValueError(
-                    f"X position {x} outside hardware limits "
-                    f"[{XY_STAGE_X_MIN_UM}, {XY_STAGE_X_MAX_UM}]"
-                )
-            if not (XY_STAGE_Y_MIN_UM <= y <= XY_STAGE_Y_MAX_UM):
-                raise ValueError(
-                    f"Y position {y} outside hardware limits "
-                    f"[{XY_STAGE_Y_MIN_UM}, {XY_STAGE_Y_MAX_UM}]"
-                )
+            # Software half of the envelope; the firmware half is the same
+            # numbers, written by set_firmware_limits().
+            x_lo, x_hi = self._x_limits
+            y_lo, y_hi = self._y_limits
+            if not (x_lo <= x <= x_hi):
+                raise ValueError(f"X position {x} outside hardware limits [{x_lo}, {x_hi}]")
+            if not (y_lo <= y <= y_hi):
+                raise ValueError(f"Y position {y} outside hardware limits [{y_lo}, {y_hi}]")
 
             status = Status(obj=self, timeout=30)
 
@@ -339,6 +342,10 @@ class DiSPIMXYStage:
                     f"The controller may have rejected or rescaled the value."
                 )
             logger.info("ASI firmware limit %s = %.4f mm (verified)", prop, got)
+        # Only now — after every write has been read back — does the software
+        # envelope follow. A partial failure above leaves it where it was.
+        self._x_limits = (x_min_mm * 1000.0, x_max_mm * 1000.0)
+        self._y_limits = (y_min_mm * 1000.0, y_max_mm * 1000.0)
 
     def enable_joystick(self, enabled: bool = True) -> None:
         """Set the ASI Tiger 'JoystickEnabled' property on the XY stage.
