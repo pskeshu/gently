@@ -628,6 +628,11 @@
                     <div class="op-gauge" id="op-gauge-fd" data-status="unknown">
                       <div class="op-gauge-head">
                         <span class="op-gauge-name">Sample → objective</span>
+                        <!-- #109. Ryan, first words on opening this tab: "here we
+                             need a halt button." Always enabled: halting a still
+                             axis costs nothing, and a stop that is greyed out when
+                             you reach for it is not a stop. -->
+                        <button class="op-btn op-btn-halt" id="op-halt" type="button" title="Stop all stage motion now">HALT</button>
                         <span class="op-gauge-read"><b class="op-num" id="op-fd-pos">—</b><i>µm</i></span>
                       </div>
                       <div class="op-gauge-body">

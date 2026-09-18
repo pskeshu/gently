@@ -31,6 +31,7 @@
     --op-live: #4ade80;   /* a stream is running */
     --op-warn: #f5a524;   /* floor proximity, XY locked */
     --op-emit: #f4485d;   /* LED or laser emitting — nothing else may use this */
+    --op-bad:  #ef4444;   /* the sample is below the floor; HALT */
 
     --op-1: 4px;  --op-2: 8px;  --op-3: 12px;
     --op-4: 16px; --op-5: 20px; --op-6: 24px;
@@ -57,6 +58,7 @@
     --op-live: #16a34a;
     --op-warn: #b45309;
     --op-emit: #dc2626;
+    --op-bad:  #b91c1c;
 }
 
 /* ── sub-navigation ─────────────────────────────────────────────────────── */
@@ -197,6 +199,18 @@
     background: color-mix(in srgb, var(--op-warn) 12%, transparent);
 }
 .op-lock[hidden] { display: none; }
+/* #139: below the floor is a state, not a smaller number. Different colour,
+   heavier border, and the banner pulses once a second so it cannot sit
+   unnoticed for half an hour the way "-2 µm to floor" did. */
+.op-lock.is-below {
+    border-color: var(--op-bad);
+    border-width: 2px;
+    background: color-mix(in srgb, var(--op-bad) 22%, transparent);
+    animation: op-below 1s ease-in-out infinite;
+}
+.op-lock.is-below .op-lock-txt, .op-lock.is-below .op-lock-txt i { color: var(--op-bad); }
+@keyframes op-below { 50% { background: color-mix(in srgb, var(--op-bad) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .op-lock.is-below { animation: none; } }
 .op-lock-txt {
     font-size: 0.68rem;
     letter-spacing: 0.06em;
@@ -505,6 +519,9 @@
 .op-gauge-foot-r { white-space: nowrap; }
 .op-gauge.is-near-floor { border-color: var(--op-warn); }
 .op-gauge.is-near-floor .op-gauge-mark { background: var(--op-warn); }
+/* #109: a move in flight is visible as motion, not as pale buttons. */
+.op-gauge.is-moving .op-gauge-mark { animation: op-moving 0.6s ease-in-out infinite alternate; }
+@keyframes op-moving { to { opacity: 0.25; } }
 
 /* An axis the rig does not have is a fact, not an error: dimmed, no marker,
    nudges removed from the DOM entirely (there is nothing to press). */
@@ -534,6 +551,7 @@
 .op-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .op-btn-ghost { background: transparent; }
 .op-btn-warn { background: var(--op-warn); border-color: var(--op-warn); color: #1a1204; font-weight: 600; }
+.op-btn-halt { background: var(--op-bad); border-color: var(--op-bad); color: #fff; font-weight: 700; letter-spacing: 0.08em; }
 .op-btn-toggle[aria-pressed="true"], .op-btn.is-on {
     border-color: var(--op-live);
     color: var(--op-live);
