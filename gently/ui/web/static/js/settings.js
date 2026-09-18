@@ -8,6 +8,7 @@ const SettingsManager = {
 
     defaults: {
         defaultView: 'default',
+        atrium: false,
         board: {
             columns: ['stage', 'confidence', 'rate', 'eta', 'sparkline', 'alert'],
             sparklineLength: 20,
@@ -149,6 +150,7 @@ const SettingsManager = {
 
         // Default view
         this.setRadio('defaultView', c.defaultView);
+        this.setCheckbox('cfg-atrium', !!c.atrium);
 
         // Alerts
         this.setInput('cfg-warnOvertimeRatio', c.board.warnOvertimeRatio);
@@ -235,7 +237,7 @@ const SettingsManager = {
         // Ignore the server-backed hardware sections — they own their own
         // handlers (ThermalizerSettings) and must not trigger the localStorage
         // save or its "Settings saved" toast.
-        const isHardware = (t) => t && t.closest && t.closest('#section-thermalizer, #section-effective');
+        const isHardware = (t) => t && t.closest && t.closest('#section-thermalizer, #section-effective, #section-stage, #section-devicelayer');
         content.addEventListener('change', (e) => {
             if (isHardware(e.target)) return;
             this.readFormAndSave();
@@ -253,6 +255,7 @@ const SettingsManager = {
 
         // Default view
         c.defaultView = this.getRadio('defaultView') || 'default';
+        c.atrium = document.getElementById('cfg-atrium')?.checked ?? false;
 
         // Alerts
         c.board.warnOvertimeRatio = parseFloat(document.getElementById('cfg-warnOvertimeRatio')?.value) || 1.5;

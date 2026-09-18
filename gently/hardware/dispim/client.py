@@ -1138,6 +1138,14 @@ class DiSPIMMicroscope(Microscope):
             },
         )
 
+    async def get_joystick(self) -> dict:
+        """Is the physical XY joystick enabled (controller read-back)."""
+        return await self._api_get("/api/stage/joystick")
+
+    async def set_joystick(self, enabled: bool) -> dict:
+        """Enable or lock the physical XY joystick; persisted across boots."""
+        return await self._api_post("/api/stage/joystick", {"enabled": bool(enabled)})
+
     async def halt_motion(self) -> dict:
         """Stop every positioner now (F-drive, XY, bottom Z). See #109."""
         return await self._api_post("/api/motion/halt", {})

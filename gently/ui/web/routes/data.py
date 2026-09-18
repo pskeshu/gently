@@ -1534,6 +1534,34 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=409, detail=res.get("error", "refused"))
         return res
 
+    @router.get("/api/devices/stage/joystick")
+    async def stage_joystick_get():
+        """Physical XY joystick state, read from the controller."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_joystick()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"joystick read failed: {exc}") from exc
+
+    @router.post("/api/devices/stage/joystick", dependencies=[Depends(require_control)])
+    async def stage_joystick_set(payload: dict = Body(...)):  # noqa: B008
+        """Joystick lock: {"enabled": bool}. Settings → Stage."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        if not isinstance(payload.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="boolean 'enabled' required")
+        try:
+            res = await client.set_joystick(payload["enabled"])
+        except Exception as exc:
+            logger.exception("joystick set failed")
+            raise HTTPException(status_code=502, detail=f"joystick set failed: {exc}") from exc
+        if not res.get("success", True):
+            raise HTTPException(status_code=502, detail=res.get("error", "refused"))
+        return res
+
     @router.post("/api/devices/motion/halt")
     async def halt_motion():
         """Stop all stage motion now. Not behind require_control: a halt that
