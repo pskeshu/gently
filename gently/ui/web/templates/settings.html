@@ -48,6 +48,7 @@
                 <a class="settings-nav-item active" data-section="views" href="#views">Views</a>
                 <a class="settings-nav-item" data-section="alerts" href="#alerts">Alerts</a>
                 <a class="settings-nav-item" data-section="ambient" href="#ambient">Ambient Pulse</a>
+                <a class="settings-nav-item" data-section="interface" href="#interface">Interface</a>
             </div>
             <div class="settings-nav-group">
                 <div class="settings-nav-title">View Settings</div>
@@ -59,6 +60,7 @@
             <div class="settings-nav-group">
                 <div class="settings-nav-title">Hardware</div>
                 <a class="settings-nav-item" data-section="devicelayer" href="#devicelayer">Device layer</a>
+                <a class="settings-nav-item" data-section="stage" href="#stage">Stage</a>
                 <a class="settings-nav-item" data-section="thermalizer" href="#thermalizer">Thermalizer</a>
                 <a class="settings-nav-item" data-section="effective" href="#effective">Effective config</a>
                 <a class="settings-nav-item" data-section="advanced" href="#advanced">Advanced</a>
@@ -77,6 +79,17 @@
                         <label class="settings-radio"><input type="radio" name="defaultView" value="filmstrip"> Filmstrip</label>
                         <label class="settings-radio"><input type="radio" name="defaultView" value="vitals"> Vitals</label>
                     </div>
+                </div>
+            </section>
+
+            <section class="settings-section" id="section-interface">
+                <h2 class="settings-section-title">Interface</h2>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-atrium">
+                        Open in the Atrium
+                    </label>
+                    <div class="settings-hint">The spatial shell: every panel exists at once, only attention moves. This browser only; <code>?atrium=1</code> on the URL still works for one visit. Applies on the next page load.</div>
                 </div>
             </section>
 
@@ -125,6 +138,18 @@
             </section>
 
             <!-- Ambient Section -->
+            <section class="settings-section" id="section-stage">
+                <h2 class="settings-section-title">Stage</h2>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="hw-joystick-lock">
+                        Joystick lock
+                    </label>
+                    <div class="settings-hint">Disables the physical XY joystick at the controller so nothing but Gently can move the stage. Read back from the hardware; survives a device-layer restart. Requires control.</div>
+                </div>
+                <p class="settings-label" style="opacity:.8" id="hw-joystick-status">Loading…</p>
+            </section>
+
             <section class="settings-section" id="section-ambient">
                 <h2 class="settings-section-title">Ambient Pulse</h2>
                 <div class="settings-field">
@@ -340,6 +365,35 @@
                 localStorage.setItem('gently-theme', next);
             });
         }
+
+        // Joystick lock — live hardware toggle via /api/devices/stage/joystick.
+        (function () {
+            const cb = document.getElementById('hw-joystick-lock');
+            const status = document.getElementById('hw-joystick-status');
+            if (!cb) return;
+            const show = (enabled) => {
+                cb.checked = !enabled;
+                status.textContent = enabled ? 'Joystick enabled at the controller' : 'Joystick LOCKED at the controller';
+            };
+            fetch('/api/devices/stage/joystick').then(r => r.ok ? r.json() : null).then(d => {
+                if (d && d.success !== false) show(!!d.enabled);
+                else { cb.disabled = true; status.textContent = 'Microscope not connected'; }
+            }).catch(() => { cb.disabled = true; status.textContent = 'Microscope not connected'; });
+            cb.addEventListener('change', async () => {
+                const enabled = !cb.checked;
+                cb.disabled = true; status.textContent = 'Writing to the controller…';
+                try {
+                    const r = await fetch('/api/devices/stage/joystick', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled }),
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (r.ok) show(!!d.enabled);
+                    else { cb.checked = !cb.checked; status.textContent = r.status === 403 ? 'Sign in to change the joystick' : (d.detail || `Failed (${r.status})`); }
+                } catch (e) { cb.checked = !cb.checked; status.textContent = 'Failed: ' + e.message; }
+                finally { cb.disabled = false; }
+            });
+        })();
 
         // Device-layer settings (port + SAM device) — persisted via /api/launch/prefs.
         // Applies to the next device-layer start (a running one isn't reconfigured).
