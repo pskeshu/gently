@@ -75,6 +75,13 @@
   .btn:hover:not(:disabled){filter:brightness(1.08)}
   .btn:disabled{opacity:.7;cursor:default}
   .foot{text-align:center;margin-top:16px;color:var(--g-faint);font-size:12px}
+  /* The build id is what CONTRIBUTING asks for in every bug report, so it is a
+     control, not decoration: one click copies it. Styled as the text it already
+     was — a dashed underline is the only hint, so the gate stays quiet. */
+  .foot-version{font:inherit;color:inherit;background:none;border:0;padding:0;
+    cursor:pointer;border-bottom:1px dashed currentColor;transition:color .15s}
+  .foot-version:hover,.foot-version:focus-visible{color:var(--g-muted)}
+  .foot-version:focus-visible{outline:2px solid var(--g-accent);outline-offset:3px;border-radius:2px}
   .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--g-muted)}
   .status.err{color:#f85149}
 </style>
@@ -108,7 +115,9 @@
 
     <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
     <div class="status" id="status"></div>
-    <div class="foot">Remembers your last choice · <span class="foot-version">v{{ gently_version }}</span></div>
+    <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
+      <button type="button" class="foot-version" id="foot-version"
+              title="Copy this build id — paste it into bug reports">v{{ gently_version }}</button></div>
   </div>
 
 <script>
@@ -182,6 +191,52 @@ document.getElementById("go").addEventListener("click", async () => {
     btn.disabled = false; paint();
   }
 });
+
+// Copy the build id. A bug report is only actionable if it names a build, and
+// this string is the only place a reviewer sees one before logging in — so it
+// is one click, not a selection drag. The note beside it carries the feedback
+// so the id itself never moves. Same secure-context fallback as the dashboard's
+// session-id copy (app.js): WebView2 on localhost is secure, a LAN http:// visit
+// is not, and there the hand-selection keeps Ctrl+C working.
+(function () {
+  const btn = document.getElementById("foot-version");
+  const note = document.getElementById("foot-note");
+  const REST = note.textContent;
+  let restore;
+
+  function say(msg) {
+    note.textContent = msg;
+    clearTimeout(restore);
+    restore = setTimeout(() => { note.textContent = REST; }, 1600);
+  }
+
+  function selectSelf() {
+    const r = document.createRange();
+    r.selectNodeContents(btn);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
+  btn.addEventListener("click", async () => {
+    const text = btn.textContent.trim();
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); say("Copied"); return; } catch (e) { /* fall through */ }
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("aria-hidden", "true");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+    if (ok) { say("Copied"); return; }
+    selectSelf();
+    say("Press Ctrl+C to copy");
+  });
+})();
 
 loadPrefs();
 </script>
