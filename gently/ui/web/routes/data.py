@@ -1770,12 +1770,30 @@ def create_router(server) -> APIRouter:
         condition_value = payload.get("condition_value")
         monitoring_mode = payload.get("monitoring_mode") or None
 
-        # Volume geometry — passed through for context / future calibration write;
-        # not forwarded to orchestrator.start (which owns its own geometry via the
-        # per-embryo calibration). RIG-DEFERRED: real acquisition uses these.
+        # Volume geometry. The galvo/piezo half is context only — the
+        # orchestrator derives the scan cuboid from each embryo's own
+        # calibration, and overriding it here would hand a calibrated run a
+        # geometry nobody measured.
+        #
+        # Exposure and slice count are different: they are per-embryo
+        # acquisition settings with no calibration to derive them from, and
+        # `orchestrator.start` reads them off the EmbryoState. They used to be
+        # collected here, validated, packed into this dict and dropped —
+        # "we have exposure time, but not sure we use it" — so the panel's
+        # numbers were decoration and every timepoint ran at the 10 ms / 50
+        # slice defaults. They are applied below, to exactly the embryos the
+        # run will image.
+        try:
+            exposure_ms = float(payload.get("exposure_ms", 10.0))
+        except (TypeError, ValueError):
+            raise HTTPException(  # B904
+                status_code=400, detail="exposure_ms must be a number"
+            ) from None
+        if not (0 < exposure_ms <= 10000):
+            raise HTTPException(status_code=400, detail="exposure_ms must be in (0, 10000]")
         volume_geometry = {
             "num_slices": num_slices,
-            "exposure_ms": float(payload.get("exposure_ms", 10.0)),
+            "exposure_ms": exposure_ms,
             "galvo_amplitude": float(payload.get("galvo_amplitude", 0.5)),
             "galvo_center": float(payload.get("galvo_center", 0.0)),
             "piezo_amplitude": float(payload.get("piezo_amplitude", 25.0)),
@@ -1792,6 +1810,18 @@ def create_router(server) -> APIRouter:
                 status_code=503,
                 detail="Timelapse orchestrator not initialised (agent not running or no session)",
             )
+
+        # Apply what the panel asked for to the embryos this run will image —
+        # the same resolution orchestrator.start uses for embryo_ids=None, so
+        # the set that gets the settings is the set that gets imaged.
+        experiment = _require_agent_with_experiment().experiment
+        targets = embryo_ids or [e.id for e in experiment.embryos.values() if not e.should_skip]
+        for eid in targets:
+            emb = experiment.embryos.get(eid)
+            if emb is None:
+                continue
+            emb.exposure_ms = exposure_ms
+            emb.num_slices = num_slices
 
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
