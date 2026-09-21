@@ -677,6 +677,7 @@ const Atrium = (() => {
         c.innerHTML = `
           <div id="atr-tl">
             <div id="atr-hint">Atrium · drag to pan · wheel to zoom · Backspace back
+              <a href="/settings" id="atr-settings">settings</a>
               <a href="#" id="atr-off">exit</a></div>
             <div id="atr-chips"></div>
           </div>
@@ -810,7 +811,9 @@ const Atrium = (() => {
 
     function disable() {
         legacyChrome().forEach(el => el.removeAttribute('inert'));
-        // Leaving means leaving the flag behind, not recording a preference.
+        // Leaving means leaving. If Settings brought us here, exit unticks it —
+        // otherwise the next load would walk straight back in.
+        if (preferred()) setPreferred(false);
         location.href = location.pathname;
     }
 
@@ -847,20 +850,29 @@ const Atrium = (() => {
     }
 
     /**
-     * The flag is the URL, and only the URL.
+     * Two ways in, both deliberate: `?atrium=1` for one visit, or the
+     * "Open in the Atrium" checkbox in Settings for this browser.
      *
-     * It used to persist: `enable()` wrote '1' to localStorage, so a single
-     * visit to `?atrium=1` turned the Atrium on permanently, on that browser,
-     * for every later visit — including plain `/`. An experimental surface
-     * that latches after one look is the same trap as #133, where the agent
-     * panel's "open by default" was defeated permanently by one close.
-     *
-     * Off unless this page load asked for it. Nothing to discover and undo
-     * later, and no way to hand someone a machine that opens into a viewer
-     * they did not choose.
+     * It used to latch on its own: `enable()` wrote '1' to localStorage, so a
+     * single visit to `?atrium=1` turned the Atrium on permanently — the same
+     * trap as #133, where one close defeated "open by default" for good. A
+     * setting the operator ticks, finds again in Settings, and unticks is not
+     * that; a flag that writes itself is. The URL still never persists.
      */
+    const PREF_KEY = 'gently-dashboard-config';
+    function preferred() {
+        try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}').atrium === true; }
+        catch (_) { return false; }
+    }
+    function setPreferred(v) {
+        try {
+            const c = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+            c.atrium = !!v;
+            localStorage.setItem(PREF_KEY, JSON.stringify(c));
+        } catch (_) { /* private mode */ }
+    }
     function wanted() {
-        return new URLSearchParams(location.search).get('atrium') === '1';
+        return new URLSearchParams(location.search).get('atrium') === '1' || preferred();
     }
 
     function init() {

@@ -246,7 +246,7 @@ class DeviceLayerServer(Service):
                     override = yaml.safe_load(sf) or {}
                 if isinstance(override, dict):
                     self.config = self.config or {}
-                    for key in ("temperature", "xy_envelope"):
+                    for key in ("temperature", "xy_envelope", "xy_joystick"):
                         if override.get(key):
                             self.config[key] = override[key]
                             logger.info("Applied %s override from %s", key, sidecar)
@@ -402,14 +402,17 @@ class DeviceLayerServer(Service):
             # Tiger persists JoystickEnabled in non-volatile card settings —
             # if a prior session ever called SaveCardSettings with the
             # joystick off, every subsequent boot inherits that state and the
-            # physical controller is dead. Force it on at boot so the
-            # operator's joystick always works regardless of card history.
+            # physical controller is dead. So the flag is always written at
+            # boot: on by default, off only if the operator chose the joystick
+            # lock in Settings (persisted as `xy_joystick` in the sidecar).
+            js_cfg = (self.config or {}).get("xy_joystick") or {}
+            js_on = bool(js_cfg.get("enabled", True))
             try:
-                xy_stage.enable_joystick(True)
+                xy_stage.enable_joystick(js_on)
             except Exception as exc:
                 # Not fatal — the agent can still drive the stage. Log loudly
                 # so the operator knows the joystick is unavailable.
-                logger.error("Could not enable XY joystick: %s", exc)
+                logger.error("Could not set XY joystick (%s): %s", js_on, exc)
 
         # [4/5] Initialize RunEngine
         cui.step(4, 5, "Initializing RunEngine")
@@ -2925,6 +2928,43 @@ class DeviceLayerServer(Service):
         logger.warning("XY envelope set by operator: %s", box)
         return web.json_response(self._envelope_payload(xy_stage))
 
+    async def handle_get_joystick(self, request):
+        """GET /api/stage/joystick — is the physical XY joystick enabled (controller read)."""
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        try:
+            enabled = await asyncio.to_thread(xy_stage.joystick_enabled)
+        except Exception as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=502)
+        return web.json_response({"success": True, "enabled": enabled})
+
+    async def handle_set_joystick(self, request):
+        """POST /api/stage/joystick — {"enabled": bool}. The joystick lock.
+
+        Written to the controller and read back; persisted so the next boot
+        applies the same choice instead of forcing the joystick on.
+        """
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        enabled = body.get("enabled") if isinstance(body, dict) else None
+        if not isinstance(enabled, bool):  # "maybe" is truthy; a string must not unlock a stage
+            return web.json_response(
+                {"success": False, "error": "boolean 'enabled' required"}, status=400
+            )
+        try:
+            await asyncio.to_thread(xy_stage.enable_joystick, enabled)
+        except Exception as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=502)
+        self._write_sidecar("xy_joystick", {"enabled": enabled})
+        logger.warning("XY joystick %s by operator", "enabled" if enabled else "LOCKED")
+        return web.json_response({"success": True, "enabled": enabled})
+
     async def handle_halt_motion(self, request):
         """POST /api/motion/halt — stop every positioner, now.
 
@@ -4027,6 +4067,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
         self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
         self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)
+        self._app.router.add_get("/api/stage/joystick", self.handle_get_joystick)
+        self._app.router.add_post("/api/stage/joystick", self.handle_set_joystick)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
         self._app.router.add_get("/api/properties", self.handle_get_properties)

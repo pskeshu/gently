@@ -347,6 +347,10 @@ class DiSPIMXYStage:
         self._x_limits = (x_min_mm * 1000.0, x_max_mm * 1000.0)
         self._y_limits = (y_min_mm * 1000.0, y_max_mm * 1000.0)
 
+    def joystick_enabled(self) -> bool:
+        """Read the ASI 'JoystickEnabled' flag from the controller."""
+        return str(self.core.getProperty(self.name, "JoystickEnabled")).strip() == "Yes"
+
     def enable_joystick(self, enabled: bool = True) -> None:
         """Set the ASI Tiger 'JoystickEnabled' property on the XY stage.
 
