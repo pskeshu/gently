@@ -1515,6 +1515,43 @@ def _calibration_quality_score(cal: dict) -> float:
     return float(min(vals)) if vals else 0.0
 
 
+def persist_calibration(agent, embryo) -> bool:
+    """Write one embryo's current calibration into its session record.
+
+    A fit only reaches `embryo.yaml` when the agent's `auto_save` happens to
+    run — it syncs every embryo on a conversation turn or a "significant
+    action". Nothing a UI route does triggers that, so a calibration changed
+    from a pane was durable by luck: borrowed on Tuesday, gone on Wednesday,
+    with the data in between taken on numbers no longer recorded anywhere.
+
+    `calibration` is passed explicitly (never None) because
+    `FileStore.register_embryo` COALESCES: None keeps whatever is already on
+    disk, which would silently defeat a clear.
+    """
+    store = getattr(agent, "store", None)
+    session_id = getattr(agent, "session_id", None)
+    if store is None or not session_id:
+        return False
+    try:
+        pos = (
+            getattr(embryo, "position_coarse", None)
+            or getattr(embryo, "stage_position", None)
+            or {}
+        )
+        store.register_embryo(
+            session_id,
+            embryo.id,
+            position_x=pos.get("x"),
+            position_y=pos.get("y"),
+            calibration=embryo.calibration if embryo.calibration is not None else {},
+            role=getattr(embryo, "role", None),
+        )
+        return True
+    except Exception:
+        logger.exception("Could not persist the calibration for %s", embryo.id)
+        return False
+
+
 def rank_calibration_sources(embryos: dict) -> list[tuple[str, float, dict]]:
     """Calibrated embryos, best fit first.
 
@@ -1641,7 +1678,7 @@ def apply_calibration_to_embryos(
     if not target_embryo_ids:
         return "No target embryos. Nothing to do."
 
-    applied, skipped = [], []
+    applied, skipped, unsaved = [], [], []
     for tid in target_embryo_ids:
         if tid not in agent.experiment.embryos:
             skipped.append((tid, "not found"))
@@ -1654,6 +1691,11 @@ def apply_calibration_to_embryos(
         import copy
 
         tgt.calibration = copy.deepcopy(source.calibration)
+        # To disk as well as memory: a borrowed fit that vanishes at the next
+        # restore is worse than not offering one, because the volumes taken in
+        # between still claim to be calibrated.
+        if not persist_calibration(agent, tgt):
+            unsaved.append(tid)
         applied.append(tid)
 
     lines = []
@@ -1667,6 +1709,11 @@ def apply_calibration_to_embryos(
     lines.append("  " + (", ".join(applied) if applied else "(none)"))
     if skipped:
         lines.append(f"Skipped: {', '.join(f'{tid} ({reason})' for tid, reason in skipped)}")
+    if unsaved:
+        lines.append(
+            f"Not written to the session record: {', '.join(unsaved)} — applied in memory "
+            "only, so it will not survive a restore."
+        )
     lines.append(
         "Note: calibration is position-dependent — piezo-galvo slope can drift "
         "across the XY field. Verify with a quick acquisition on each target "
@@ -1718,23 +1765,7 @@ def clear_embryo_calibration(embryo_id: str, context: dict | None = None) -> str
 
     embryo.calibration = {}
 
-    store = getattr(agent, "store", None)
-    session_id = getattr(agent, "session_id", None)
-    persisted = False
-    if store is not None and session_id:
-        try:
-            pos = getattr(embryo, "position_coarse", {}) or {}
-            store.register_embryo(
-                session_id,
-                embryo_id,
-                position_x=pos.get("x"),
-                position_y=pos.get("y"),
-                calibration={},  # not None — None would COALESCE and keep the old fit
-                role=getattr(embryo, "role", None),
-            )
-            persisted = True
-        except Exception:
-            logger.exception("Could not persist the cleared calibration for %s", embryo_id)
+    persisted = persist_calibration(agent, embryo)
 
     try:
         agent.experiment.notify_embryos_changed()

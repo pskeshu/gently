@@ -327,3 +327,43 @@ def test_the_threshold_is_not_duplicated_as_a_literal() -> None:
         "the sweep's low-confidence warning went back to a bare literal, so the "
         "pane and the sweep can now disagree about what 'poor' means"
     )
+
+
+def test_a_borrowed_fit_survives_a_restore(tmp_path) -> None:
+    """Otherwise it is durable by luck.
+
+    A fit reaches `embryo.yaml` only when the agent's `auto_save` happens to
+    run — on a conversation turn or a "significant action". Nothing a UI route
+    does triggers that, so the first version of this feature applied the
+    calibration in memory only: borrowed on Tuesday, gone on Wednesday, with
+    the volumes taken in between still claiming to be calibrated. Found by
+    reading embryo.yaml on the rig after a borrow; it still said `{}`.
+    """
+    from gently.app.tools.calibration_tools import apply_calibration_to_embryos
+    from gently.core.file_store import FileStore
+
+    store = FileStore(root=tmp_path)
+    session_id = store.create_session("borrow-persist", name="borrow-persist")
+
+    source, target = _emb("embryo_2", top=0.9, bot=0.9), _emb("embryo_1")
+    for emb in (source, target):
+        emb.position_coarse = {"x": 1.0, "y": 2.0}
+        store.register_embryo(session_id, emb.id, position_x=1.0, position_y=2.0)
+
+    agent = MagicMock()
+    agent.experiment.embryos = {"embryo_1": target, "embryo_2": source}
+    agent.store = store
+    agent.session_id = session_id
+
+    fn = getattr(apply_calibration_to_embryos, "__wrapped__", apply_calibration_to_embryos)
+    fn(
+        source_embryo_id="embryo_2",
+        target_embryo_ids=["embryo_1"],
+        context={"agent": agent},
+    )
+
+    on_disk = store.get_embryo(session_id, "embryo_1")
+    assert on_disk is not None
+    assert (on_disk.get("calibration") or {}).get("slope_um_per_deg") == 100.0, (
+        "the borrowed fit never reached the session record, so it disappears at the next restore"
+    )
