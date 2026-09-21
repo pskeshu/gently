@@ -1421,3 +1421,42 @@
     padding: 0;
 }
 .rp-btn.rp-centre.is-compact:hover { color: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); }
+
+/* ── Calibration settings ─────────────────────────────────────────────────
+   The two an operator changes between samples sit in the open; the numbers
+   that place the calibration points inside the detected range sit behind
+   "More…", because they are wrong to touch without a reason. */
+.op-row-wrap { flex-wrap: wrap; row-gap: var(--op-2); }
+.cal-opts { margin-top: var(--op-2); }
+.cal-opt { display: inline-flex; align-items: center; gap: 5px; }
+.cal-opt input[type="checkbox"] { accent-color: var(--accent, #3b82f6); }
+.cal-num {
+    width: 62px;
+    min-height: 24px;
+    padding: 1px 5px;
+    background: var(--bg-card);
+    border: 1px solid var(--op-rule);
+    border-radius: 5px;
+    color: var(--op-ink);
+    font-family: var(--op-mono);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+.cal-num:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+.cal-adv {
+    margin-top: var(--op-2);
+    padding: var(--op-2) var(--op-3);
+    border: 1px dashed var(--op-rule);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.cal-adv .op-cap { margin: 0; }
+.op-btn-quiet {
+    background: none;
+    border-color: transparent;
+    color: var(--op-ink-dim);
+    padding: 2px 6px;
+}
+.op-btn-quiet:hover { color: var(--op-ink); border-color: var(--op-rule); }

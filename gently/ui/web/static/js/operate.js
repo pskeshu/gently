@@ -1082,6 +1082,112 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
 
+    // ── calibration settings ────────────────────────────────────────────────
+    // calibrate_embryo takes these; the pane used to send none of them, so a
+    // rig whose galvo range is already known still paid for a Claude-vision
+    // edge hunt, and the two numbers that place the calibration points inside
+    // that range could not be touched at all. Defaults here MUST match the
+    // tool's, so an untouched pane behaves exactly as before.
+    const CAL_KEY = 'gently.calibrate.settings';
+    const CAL_DEFAULTS = {
+        edges: true,        // skip_edge_detection = !edges
+        zbuf: 25,           // z_buffer_um
+        estep: 0.05,        // edge_step (deg)
+        erange: 0.5,        // edge_max_range (deg)
+        etol: 0.2,          // edge_tolerance_deg
+        inset: 0.4,         // inset_fraction
+        gtop: null,         // galvo_top, only with edge detection off
+        gbot: null,         // galvo_bottom
+    };
+    let _cal = Object.assign({}, CAL_DEFAULTS);
+    try {
+        const saved = JSON.parse(localStorage.getItem(CAL_KEY) || '{}');
+        if (saved && typeof saved === 'object') _cal = Object.assign({}, CAL_DEFAULTS, saved);
+    } catch (e) { /* defaults */ }
+
+    function saveCal() {
+        try { localStorage.setItem(CAL_KEY, JSON.stringify(_cal)); } catch (e) { /* not fatal */ }
+    }
+
+    const calNum = (id, fallback) => {
+        const el = $(id);
+        if (!el) return fallback;
+        const v = parseFloat(el.value);
+        return Number.isFinite(v) ? v : fallback;
+    };
+
+    function readCalForm() {
+        _cal = {
+            edges: $('cal-edges') ? !!$('cal-edges').checked : _cal.edges,
+            zbuf: calNum('cal-zbuf', CAL_DEFAULTS.zbuf),
+            estep: calNum('cal-estep', CAL_DEFAULTS.estep),
+            erange: calNum('cal-erange', CAL_DEFAULTS.erange),
+            etol: calNum('cal-etol', CAL_DEFAULTS.etol),
+            inset: calNum('cal-inset', CAL_DEFAULTS.inset),
+            gtop: $('cal-gtop') && $('cal-gtop').value !== '' ? calNum('cal-gtop', null) : null,
+            gbot: $('cal-gbot') && $('cal-gbot').value !== '' ? calNum('cal-gbot', null) : null,
+        };
+        saveCal();
+        renderCalForm();
+    }
+
+    function renderCalForm() {
+        const set = (id, v) => { const el = $(id); if (el && el.value !== String(v)) el.value = v; };
+        if ($('cal-edges')) $('cal-edges').checked = !!_cal.edges;
+        set('cal-zbuf', _cal.zbuf); set('cal-estep', _cal.estep);
+        set('cal-erange', _cal.erange); set('cal-etol', _cal.etol); set('cal-inset', _cal.inset);
+        if ($('cal-gtop')) $('cal-gtop').value = _cal.gtop == null ? '' : _cal.gtop;
+        if ($('cal-gbot')) $('cal-gbot').value = _cal.gbot == null ? '' : _cal.gbot;
+        // Explicit bounds only mean anything when nothing is hunting for them.
+        const bounds = $('cal-adv-bounds');
+        if (bounds) bounds.hidden = !!_cal.edges;
+    }
+
+    // What the pane will actually send. Only what differs from the tool's own
+    // defaults travels, so the request says what the operator changed.
+    function calibrationSettings() {
+        const body = {};
+        if (!_cal.edges) {
+            body.skip_edge_detection = true;
+            if (_cal.gtop != null) body.galvo_top = _cal.gtop;
+            if (_cal.gbot != null) body.galvo_bottom = _cal.gbot;
+        }
+        const pairs = [
+            ['z_buffer_um', _cal.zbuf, CAL_DEFAULTS.zbuf],
+            ['edge_step', _cal.estep, CAL_DEFAULTS.estep],
+            ['edge_max_range', _cal.erange, CAL_DEFAULTS.erange],
+            ['edge_tolerance_deg', _cal.etol, CAL_DEFAULTS.etol],
+            ['inset_fraction', _cal.inset, CAL_DEFAULTS.inset],
+        ];
+        pairs.forEach(([key, val, def]) => { if (Number.isFinite(val) && val !== def) body[key] = val; });
+        return body;
+    }
+
+    function wireCalForm() {
+        ['cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
+            'cal-gtop', 'cal-gbot'].forEach(id => {
+            const el = $(id);
+            if (el) el.addEventListener('change', readCalForm);
+        });
+        const more = $('cal-more'), adv = $('cal-adv');
+        if (more && adv) {
+            more.addEventListener('click', () => {
+                const open = adv.hidden;
+                adv.hidden = !open;
+                more.setAttribute('aria-expanded', String(open));
+                more.textContent = open ? 'Less' : 'More…';
+            });
+        }
+        const reset = $('cal-reset');
+        if (reset) reset.addEventListener('click', () => {
+            _cal = Object.assign({}, CAL_DEFAULTS);
+            saveCal();
+            renderCalForm();
+            toast('Calibration settings back to defaults');
+        });
+        renderCalForm();
+    }
+
     async function calibrateSelected() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-calibrate'), out = $('op-cal-result');
@@ -1094,7 +1200,8 @@ const OperateManager = (function () {
         if (b) { b.disabled = true; b.textContent = 'Calibrating… 0s'; }
         if (out) out.textContent = 'sweeping…';
         try {
-            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, {});
+            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`,
+                calibrationSettings());
             const cal = d.calibration || {};
             const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
             if (out) {
@@ -1832,6 +1939,7 @@ const OperateManager = (function () {
         // back-off button. Restored, and pinned by a test that counts them.
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        wireCalForm();
         document.querySelectorAll('[data-gv]').forEach(b =>
             b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b =>

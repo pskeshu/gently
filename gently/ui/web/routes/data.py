@@ -1321,11 +1321,46 @@ def create_router(server) -> APIRouter:
         import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
         from gently.harness.tools.registry import get_tool_registry
 
+        # The pane's settings, not a fixed recipe. Everything here is a real
+        # parameter of calibrate_embryo that was previously left at its default
+        # with no way to say otherwise: whether Claude vision hunts for the
+        # galvo edges (and the bounds to use instead when it does not), how far
+        # above the coverslip to look, and the two numbers that place the pair
+        # of calibration points inside the detected range — which the tool's own
+        # docstring warns produce noise-amplified slopes on small embryos when
+        # they are wrong. Absent keys keep the tool's defaults.
+        args: dict = {"embryo_id": embryo_id}
+        if payload.get("skip_edge_detection") is not None:
+            args["skip_edge_detection"] = bool(payload["skip_edge_detection"])
+        for key, cast, lo, hi in (
+            ("galvo_top", float, -10.0, 10.0),
+            ("galvo_bottom", float, -10.0, 10.0),
+            ("edge_step", float, 0.001, 1.0),
+            ("edge_max_range", float, 0.01, 5.0),
+            ("edge_tolerance_deg", float, 0.0, 2.0),
+            ("inset_fraction", float, 0.0, 0.49),
+            ("z_buffer_um", float, 0.0, 500.0),
+        ):
+            if payload.get(key) is None:
+                continue
+            try:
+                val = cast(payload[key])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f"{key} must be a number") from exc
+            if not (lo <= val <= hi):
+                raise HTTPException(status_code=400, detail=f"{key} must be within [{lo}, {hi}]")
+            args[key] = val
+        # inset_fraction is applied to each side, so 0.5 collapses the two
+        # calibration points onto one another and the slope fit has no baseline.
+        if args.get("galvo_top") is not None and args.get("galvo_bottom") is not None:
+            if args["galvo_top"] == args["galvo_bottom"]:
+                raise HTTPException(status_code=400, detail="galvo_top and galvo_bottom are equal")
+
         registry = get_tool_registry()
         try:
             message = await registry.execute(
                 "calibrate_embryo",
-                {"embryo_id": embryo_id},
+                args,
                 {"agent": agent, "client": client},
             )
         except Exception as exc:
