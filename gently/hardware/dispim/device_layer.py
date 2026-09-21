@@ -90,7 +90,10 @@ class DeviceLayerServer(Service):
         # SAM configuration
         self._sam_device = sam_device
         self._sam_detector = None  # Lazy loaded
-        self._sam_checkpoint = "sam_vit_b_01ec64.pth"
+        # None = resolve at use (env, storage root, repo root, cwd). A bare
+        # filename here resolved against this process's cwd, which is wherever
+        # the launcher happened to start it.
+        self._sam_checkpoint: str | None = None
         self._sam_model_type = "vit_b"
 
         # Task queue for plan execution
@@ -4227,8 +4230,13 @@ class DeviceLayerServer(Service):
         missing = []
         if find_spec("segment_anything") is None:
             missing.append("segment-anything not installed (uv sync --extra sam)")
-        if not Path(self._sam_checkpoint).exists():
-            missing.append(f"checkpoint not found: {self._sam_checkpoint}")
+        from .sam_detection import checkpoint_missing_detail, find_checkpoint
+
+        found, searched = find_checkpoint(self._sam_checkpoint)
+        if found is None:
+            # Name the directories, not just the file: a readiness line saying
+            # a filename is missing does not say where to put it.
+            missing.append(checkpoint_missing_detail(searched))
 
         if missing:
             return "UNAVAILABLE · " + " · ".join(missing), False

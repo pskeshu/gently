@@ -29,6 +29,72 @@ from gently.settings import settings
 
 logger = logging.getLogger(__name__)
 
+CHECKPOINT_NAME = "sam_vit_b_01ec64.pth"
+
+
+def find_checkpoint(spec: str | Path | None = None) -> tuple[Path | None, list[Path]]:
+    """Locate the SAM checkpoint, and say where it looked.
+
+    The checkpoint used to be the bare name ``sam_vit_b_01ec64.pth``, which
+    resolves against the **device layer process's cwd**. That is not a stable
+    place: the device layer is spawned by the launcher, by the Tauri shell and
+    by anyone testing from a worktree, and the file is a 375 MB untracked blob
+    that lives in exactly one checkout. Detect then fails at the moment of use
+    with "SAM checkpoint not found: sam_vit_b_01ec64.pth" — a message that
+    names a file but not a directory, so it does not even say where to put it.
+
+    Order, most explicit first:
+
+    1. ``spec``, when it is a path rather than the bare default name;
+    2. ``GENTLY_SAM_CHECKPOINT``;
+    3. ``<storage root>/models/`` — machine-level and checkout-independent,
+       which is where a shared 375 MB blob belongs;
+    4. the repo root, where it sits in a normal clone today;
+    5. the cwd, the old behaviour, so nothing that works now stops working.
+
+    Returns the first path that exists and the full list of candidates, so a
+    caller can report every place it looked instead of one name.
+    """
+    candidates: list[Path] = []
+    name = CHECKPOINT_NAME
+
+    if spec:
+        p = Path(spec)
+        if p.name != name or p.parent != Path("."):
+            # An explicit path — absolute, or relative with a directory in it.
+            candidates.append(p if p.is_absolute() else Path.cwd() / p)
+        name = p.name
+
+    env = os.getenv("GENTLY_SAM_CHECKPOINT")
+    if env:
+        candidates.append(Path(env) if Path(env).is_absolute() else Path.cwd() / env)
+
+    candidates.append(settings.storage.base_path / "models" / name)
+    # gently/hardware/dispim/sam_detection.py -> the repo root
+    candidates.append(Path(__file__).resolve().parents[3] / name)
+    candidates.append(Path.cwd() / name)
+
+    seen: list[Path] = []
+    for c in candidates:
+        if c not in seen:
+            seen.append(c)
+    for c in seen:
+        if c.exists():
+            return c, seen
+    return None, seen
+
+
+def checkpoint_missing_detail(searched: list[Path]) -> str:
+    """One line naming every path that was tried.
+
+    Keeps the wording the readiness banner already used ("checkpoint not
+    found: <path>") and appends the rest of the search, so an operator reading
+    it at the microscope learns where to put the file.
+    """
+    name = searched[-1].name if searched else CHECKPOINT_NAME
+    where = ", ".join(str(p) for p in searched)
+    return f"checkpoint not found: {name} · looked in: {where}"
+
 
 class SAMEmbryoDetector:
     """
@@ -43,7 +109,7 @@ class SAMEmbryoDetector:
 
     def __init__(
         self,
-        sam_checkpoint: str = "sam_vit_b_01ec64.pth",
+        sam_checkpoint: str | None = None,
         sam_model_type: str = "vit_b",
         device: str = "cpu",
         anthropic_api_key: str | None = None,
@@ -53,8 +119,9 @@ class SAMEmbryoDetector:
 
         Parameters
         ----------
-        sam_checkpoint : str
-            Path to SAM model checkpoint
+        sam_checkpoint : str, optional
+            Path to SAM model checkpoint. None resolves it — see
+            `find_checkpoint` for the search order.
         sam_model_type : str
             SAM model type (vit_b, vit_l, vit_h)
         device : str
@@ -88,11 +155,12 @@ class SAMEmbryoDetector:
 
         from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 
-        if not Path(self.sam_checkpoint).exists():
-            raise FileNotFoundError(f"SAM checkpoint not found: {self.sam_checkpoint}")
+        found, searched = find_checkpoint(self.sam_checkpoint)
+        if found is None:
+            raise FileNotFoundError("SAM " + checkpoint_missing_detail(searched))
 
-        logger.info("Loading SAM model: %s on %s", self.sam_model_type, self.device)
-        sam = sam_model_registry[self.sam_model_type](checkpoint=self.sam_checkpoint)
+        logger.info("Loading SAM model: %s on %s (%s)", self.sam_model_type, self.device, found)
+        sam = sam_model_registry[self.sam_model_type](checkpoint=str(found))
         sam.to(device=self.device)
 
         self._mask_generator = SamAutomaticMaskGenerator(
