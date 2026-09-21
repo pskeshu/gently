@@ -763,6 +763,9 @@
                         {# The rest of the slide, in one go. Absent when every
                            embryo already has a fit — there is nothing to say. #}
                         <button class="op-btn" id="op-cal-all" type="button" hidden>Calibrate the rest</button>
+                        {# Only where there is a fit to discard. Two clicks:
+                           the numbers it drops cost ~70 exposures to measure. #}
+                        <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
                         <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
                       </div>
                       <p class="op-cap" id="op-cal-borrow-note" hidden></p>

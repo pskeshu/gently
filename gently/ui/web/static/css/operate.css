@@ -1544,3 +1544,5 @@
 [data-theme="light"] .cp { background: var(--op-panel, #fff); }
 /* A caption that is warning rather than explaining. */
 .op-cap-warn { color: var(--op-warn); }
+/* A destructive verb waiting for its second click. */
+.op-btn.is-armed { color: var(--op-warn); border-color: var(--op-warn); }

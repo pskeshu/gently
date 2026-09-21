@@ -1454,6 +1454,43 @@ def create_router(server) -> APIRouter:
             "message": message,
         }
 
+    @router.delete(
+        "/api/devices/embryos/{embryo_id}/calibration",
+        dependencies=[Depends(require_control)],
+    )
+    async def clear_calibration(embryo_id: str):
+        """Discard one embryo's fit, so it counts as uncalibrated again.
+
+        The point is not tidiness. The calibration gate refuses to start a run
+        on an uncalibrated embryo, so clearing a fit nobody trusts — a poor
+        R², an embryo that has been moved, a borrowed fit that did not hold —
+        stops silently-wrong data at the door instead of producing volumes
+        that look real. Runs through the tool, so the fit is dropped from disk
+        as well as memory and the agent has the same verb.
+        """
+        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
+        from gently.harness.tools.registry import get_tool_registry
+
+        agent = _require_agent_with_experiment()
+        emb = agent.experiment.embryos.get(embryo_id)
+        if emb is None:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+        had = dict(getattr(emb, "calibration", {}) or {})
+
+        try:
+            message = await get_tool_registry().execute(
+                "clear_embryo_calibration", {"embryo_id": embryo_id}, {"agent": agent}
+            )
+        except Exception as exc:
+            logger.exception("Clearing calibration for %s failed", embryo_id)
+            raise HTTPException(status_code=502, detail=f"clear failed: {exc}") from exc
+
+        still = dict(getattr(emb, "calibration", {}) or {})
+        if still:
+            # Never report a clear that did not clear.
+            raise HTTPException(status_code=502, detail=str(message))
+        return {"success": True, "cleared": had, "message": message}
+
     @router.get("/api/devices/embryos/{embryo_id}/calibration/sources")
     async def calibration_sources(embryo_id: str):
         """Whose fit this embryo could borrow, best first.

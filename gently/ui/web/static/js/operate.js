@@ -185,6 +185,19 @@ const OperateManager = (function () {
         }
         return data;
     }
+    async function deleteJSON(url) {
+        const res = await fetch(url, { method: 'DELETE' });
+        const text = await res.text().catch(() => '');
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { /* not JSON */ }
+        if (!res.ok) {
+            const e = new Error(`${res.status} ${data.detail || data.error || text}`);
+            e.status = res.status;
+            e.data = data;
+            throw e;
+        }
+        return data;
+    }
     async function getJSON(url) {
         const res = await fetch(url);
         const text = await res.text().catch(() => '');
@@ -1242,6 +1255,7 @@ const OperateManager = (function () {
         if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
         renderBorrow(emb);
         renderCalibrateAll();
+        renderClearFit(emb);
         // The verb says which of the two things it does. Running it again over
         // a fit that already exists is a different decision from calibrating
         // something that has none, and the button used to read the same.
@@ -1285,6 +1299,53 @@ const OperateManager = (function () {
         // what the source embryo did after the first borrow.
         if (hasFit(forEmbryo) && best.score <= fitScore(forEmbryo)) return null;
         return best;
+    }
+
+    // ── clearing a fit ──────────────────────────────────────────────────────
+    // Two clicks, not a dialog. The fit being discarded cost sixty to eighty
+    // exposures on a live embryo and cannot be recovered except by spending
+    // them again, but a modal for every reset would be its own tax — so the
+    // button asks once, in place, and forgets after a few seconds.
+    let _clearArmed = false;
+    let _clearTimer = null;
+
+    function disarmClear() {
+        _clearArmed = false;
+        if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+        const b = $('op-cal-clear');
+        if (b) { b.textContent = 'Clear fit'; b.classList.remove('is-armed'); }
+    }
+
+    function renderClearFit(emb) {
+        const b = $('op-cal-clear');
+        if (!b) return;
+        const show = hasFit(emb);
+        if (b.hidden !== !show) disarmClear();
+        b.hidden = !show;
+    }
+
+    async function clearFit() {
+        if (!_selected) return;
+        const b = $('op-cal-clear');
+        if (!_clearArmed) {
+            _clearArmed = true;
+            if (b) { b.textContent = 'Clear it? click again'; b.classList.add('is-armed'); }
+            _clearTimer = setTimeout(disarmClear, 5000);
+            return;
+        }
+        disarmClear();
+        if (b) b.disabled = true;
+        try {
+            await deleteJSON(`/api/devices/embryos/${_selected}/calibration`);
+            const mine = _embryos.find(e => e.id === _selected);
+            if (mine) mine.calibration = {};
+            toast('Calibration cleared — this embryo now counts as uncalibrated');
+        } catch (e) {
+            toastFail(`Could not clear the fit (${why(e)})`);
+        } finally {
+            if (b) b.disabled = false;
+            renderCalTarget();
+        }
     }
 
     // Embryos that would be calibrated by "the rest": no fit, not skipped.
@@ -2093,6 +2154,8 @@ const OperateManager = (function () {
         if (borrow) borrow.addEventListener('click', borrowCalibration);
         const all = $('op-cal-all');
         if (all) all.addEventListener('click', calibrateAll);
+        const clear = $('op-cal-clear');
+        if (clear) clear.addEventListener('click', clearFit);
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>

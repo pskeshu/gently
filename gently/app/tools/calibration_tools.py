@@ -1673,3 +1673,75 @@ def apply_calibration_to_embryos(
         "before committing to a full timelapse."
     )
     return "\n".join(lines)
+
+
+@tool(
+    name="clear_embryo_calibration",
+    description="""Discard an embryo's piezo-galvo fit, so it counts as uncalibrated again.
+
+Use when a fit is known to be wrong — a poor R², an embryo that has been moved or re-centred,
+or a calibration borrowed from another embryo that did not hold up. Clearing is the honest
+alternative to running acquisitions on numbers nobody trusts: the calibration gate refuses to
+start a run on an uncalibrated embryo, so a cleared fit stops silently-wrong data at the door
+rather than producing volumes that look real.
+
+Costs nothing and acquires nothing, but the fit it discards cost sixty to eighty exposures to
+measure. It cannot be undone — recovering it means calibrating again (or borrowing another
+embryo's fit with apply_calibration_to_embryos).""",
+    category=ToolCategory.CALIBRATION,
+    requires_microscope=False,
+    examples=[
+        ToolExample("Reset embryo 2's calibration", {"embryo_id": "embryo_2"}),
+    ],
+)
+def clear_embryo_calibration(embryo_id: str, context: dict | None = None) -> str:
+    """Drop one embryo's calibration, in memory and on disk.
+
+    Persisting matters: `embryo.calibration` is written into the session's
+    `embryo.yaml`, and a clear that only touched memory would come back at the
+    next restore — the operator would have reset it, seen it reset, and found
+    it calibrated again tomorrow with no record of which numbers were in use.
+    """
+    from gently.harness.tools.helpers import require_agent
+
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    embryo, err = get_embryo_or_error(agent, embryo_id)
+    if err:
+        return err
+
+    old = dict(embryo.calibration or {})
+    if not old:
+        return f"{embryo_id} has no calibration to clear."
+
+    embryo.calibration = {}
+
+    store = getattr(agent, "store", None)
+    session_id = getattr(agent, "session_id", None)
+    persisted = False
+    if store is not None and session_id:
+        try:
+            pos = getattr(embryo, "position_coarse", {}) or {}
+            store.register_embryo(
+                session_id,
+                embryo_id,
+                position_x=pos.get("x"),
+                position_y=pos.get("y"),
+                calibration={},  # not None — None would COALESCE and keep the old fit
+                role=getattr(embryo, "role", None),
+            )
+            persisted = True
+        except Exception:
+            logger.exception("Could not persist the cleared calibration for %s", embryo_id)
+
+    try:
+        agent.experiment.notify_embryos_changed()
+    except Exception:
+        logger.debug("notify_embryos_changed failed", exc_info=True)
+
+    slope = old.get("slope_um_per_deg")
+    what = f"{slope:.1f} µm/deg ({_format_quality(old)})" if slope is not None else "a fit"
+    tail = "" if persisted else " (in memory only — it may return on the next session restore)"
+    return f"Cleared {embryo_id}'s calibration: discarded {what}.{tail}"
