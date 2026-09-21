@@ -1292,3 +1292,46 @@
 @media (prefers-reduced-motion: reduce) {
     .op-btn-spin { animation-duration: 2.4s; }
 }
+
+/* ── Detect panel: the pipeline, as a chain you can switch stages out of ──
+   Blobs is fixed because it is what sets recall; the two optional stages are
+   pressed-state buttons, so their state is readable without hovering. */
+.mk-pipe {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: var(--op-2);
+}
+.mk-stage {
+    font-family: var(--op-ui);
+    font-size: 0.68rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--op-rule);
+    background: var(--bg-hover);
+    color: var(--op-ink-dim);
+    cursor: pointer;
+}
+.mk-stage.is-fixed { cursor: default; border-style: dashed; }
+.mk-stage[aria-pressed="true"] {
+    border-color: var(--accent, #3b82f6);
+    color: var(--accent, #3b82f6);
+    background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+}
+.mk-stage[aria-pressed="false"] { text-decoration: line-through; opacity: 0.75; }
+.mk-arrow { color: var(--op-ink-dim); font-size: 0.7rem; }
+
+.mk-opts { display: flex; align-items: center; gap: var(--op-3); margin-bottom: var(--op-2); }
+.mk-opt { display: flex; align-items: center; gap: 5px; }
+.mk-opt-cap { font-size: 0.66rem; color: var(--op-ink-dim); }
+.mk-select {
+    font-family: var(--op-ui);
+    font-size: 0.68rem;
+    padding: 1px 4px;
+    border: 1px solid var(--op-rule);
+    border-radius: 5px;
+    background: var(--bg-card);
+    color: var(--op-ink);
+}
+.mk-opt-check input { accent-color: var(--accent, #3b82f6); }

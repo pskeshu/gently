@@ -1150,9 +1150,13 @@ def create_router(server) -> APIRouter:
         clean (a marking step, not a blind auto-register).
 
         Body (all optional): {exposure_ms, min_confidence, min_relative_peak,
-        min_area, max_area, use_claude_review, use_last_frame}. Claude review
-        defaults OFF. use_last_frame detects on the last streamed frame (if any)
-        instead of capturing a fresh image.
+        min_area, max_area, use_claude_review, use_sam, use_last_frame}.
+        The pipeline is three stages and the last two are selectable: blob
+        candidates (sets recall) -> Claude classification of each crop (removes
+        only) -> SAM refinement (outlines). use_claude_review and use_sam both
+        default ON; a blobs-only run needs neither an API key nor a GPU.
+        use_last_frame detects on the last streamed frame (if any) instead of
+        capturing a fresh image.
 
         Returns: {success, count, stage_position: [x, y] | null,
                   embryos: [{embryo_id, pixel_x, pixel_y, stage_x_um, stage_y_um,
@@ -1161,7 +1165,10 @@ def create_router(server) -> APIRouter:
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
-        if not getattr(client, "has_sam", False):
+        # Only the refinement step needs SAM; blobs (and the Claude filter)
+        # run without a checkpoint, so the gate follows the stage that is asked for.
+        use_sam = bool(payload.get("use_sam", True))
+        if use_sam and not getattr(client, "has_sam", False):
             raise HTTPException(
                 status_code=503, detail="SAM detection not available on device layer"
             )
@@ -1170,6 +1177,7 @@ def create_router(server) -> APIRouter:
             "use_claude_review": bool(payload.get("use_claude_review", True)),
             "use_last_frame": bool(payload.get("use_last_frame", False)),
             "capture_only": bool(payload.get("capture_only", False)),
+            "use_sam": use_sam,
         }
         for key, cast in (
             ("exposure_ms", float),

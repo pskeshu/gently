@@ -1207,6 +1207,7 @@ class DiSPIMMicroscope(Microscope):
         min_relative_peak: float | None = None,
         use_last_frame: bool = False,
         capture_only: bool = False,
+        use_sam: bool = True,
     ) -> dict:
         """
         Capture image and detect embryos using blob detection + SAM.
@@ -1247,7 +1248,9 @@ class DiSPIMMicroscope(Microscope):
             ``{'success': bool, 'embryos': [...], 'stage_position': (x, y),
             'image': np.ndarray, ...}``
         """
-        if not self.has_sam:
+        # SAM is only the refinement step. A blobs-only (or blobs + Claude)
+        # run needs no checkpoint and no GPU, so it is not gated on it.
+        if use_sam and not self.has_sam:
             return {"error": "SAM detection not available on server"}
 
         self._ensure_connected()
@@ -1263,6 +1266,7 @@ class DiSPIMMicroscope(Microscope):
                 "brightness_percentile": brightness_percentile,
                 "use_last_frame": use_last_frame,
                 "capture_only": capture_only,
+                "use_sam": use_sam,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms

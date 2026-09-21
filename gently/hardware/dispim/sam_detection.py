@@ -509,6 +509,40 @@ class SAMEmbryoDetector:
         logger.info("SAM refined %d embryos", len(embryos))
         return embryos
 
+    @staticmethod
+    def embryos_from_candidates(candidates: list[dict]) -> list[dict]:
+        """Blob candidates in the shape SAM refinement would have returned.
+
+        SAM contributes an outline, not a position: it is given the boxes the
+        blob finder proposed and segments inside them. So when it is switched
+        off — no GPU, a checkpoint that will not load, or an operator who wants
+        the fast path — the candidates themselves are already a usable answer,
+        and every consumer downstream (stage conversion, the marking canvas,
+        Register) only reads the centre, the box and a confidence.
+
+        ``confidence`` carries the blob's relative strength, which is what the
+        candidate finder ranks on; ``circularity`` is SAM's to measure, so it
+        is reported as 0.0 rather than guessed.
+        """
+        out: list[dict] = []
+        for i, cand in enumerate(candidates):
+            cx, cy = cand["centroid"]
+            bx, by, bw, bh = cand["bbox"]
+            out.append(
+                {
+                    "embryo_id": f"embryo_{i + 1}",
+                    "uid": str(uuid.uuid4()),
+                    "pixel_x": float(cx),
+                    "pixel_y": float(cy),
+                    "bbox": (int(bx), int(by), int(bw), int(bh)),
+                    "area_pixels": int(cand.get("area", bw * bh)),
+                    "circularity": 0.0,
+                    "confidence": float(cand.get("relative_strength", 0.0)),
+                    "mask": None,
+                }
+            )
+        return out
+
     async def detect_embryos(
         self,
         image: np.ndarray,
@@ -516,6 +550,7 @@ class SAMEmbryoDetector:
         pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
         objective_mag: float = DEFAULT_OBJECTIVE_MAG,
         use_claude_review: bool = True,
+        use_sam: bool = True,
         save_visualizations: bool = True,
         output_dir: Path | None = None,
         brightness_percentile: float = 99.0,
@@ -547,6 +582,11 @@ class SAMEmbryoDetector:
             Objective magnification (default: 10x for bottom camera)
         use_claude_review : bool
             Whether to use Claude Vision for review (default: True)
+        use_sam : bool
+            Whether to refine the candidate boxes with SAM (default: True).
+            False returns the blob candidates themselves — no GPU, no
+            checkpoint, no outline. Recall is unchanged either way: SAM only
+            refines boxes step 1 proposed.
         save_visualizations : bool
             Whether to save annotated images (default: True)
         output_dir : Path, optional
@@ -630,16 +670,21 @@ class SAMEmbryoDetector:
                 "images": {},
             }
 
-        # Step 2: Refine with SAM
-        logger.info("[3/3] Refining with SAM...")
-        embryos_sam = self.refine_with_sam(image_enhanced, candidates)
-        logger.info("SAM refined %d embryos", len(embryos_sam))
+        # Step 3: Refine with SAM — optional, because it contributes outlines
+        # rather than positions. Skipping it keeps every candidate.
+        if use_sam:
+            logger.info("[3/3] Refining with SAM...")
+            embryos_sam = self.refine_with_sam(image_enhanced, candidates)
+            logger.info("SAM refined %d embryos", len(embryos_sam))
+        else:
+            logger.info("[3/3] SAM skipped — using %d blob candidates", len(candidates))
+            embryos_sam = self.embryos_from_candidates(candidates)
 
         # Use enhanced image for visualization
         image_8bit = image_enhanced
 
         if len(embryos_sam) == 0:
-            logger.warning("No embryos detected by SAM!")
+            logger.warning("No embryos left after the %s step!", "SAM" if use_sam else "candidate")
             return {
                 "embryos": [],
                 "initial_detections": 0,

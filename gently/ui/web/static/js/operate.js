@@ -896,11 +896,36 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
 
+    // Name the stages that are actually running: "blobs" and "blobs + Claude +
+    // SAM" take very different amounts of time, and a caption that says only
+    // "Detecting…" leaves an operator watching a spinner with no idea whether
+    // 20 seconds is normal.
+    function detectingCaption(tune) {
+        const parts = ['blobs'];
+        if (tune.use_claude_review !== false) parts.push('Claude');
+        if (tune.use_sam !== false) parts.push('SAM');
+        return `Detecting… ${parts.join(' + ')}`;
+    }
+
     function setBusyText(t) {
         const el = document.querySelector('#op-busy-bottom .op-cam-busy-txt');
         if (el) el.textContent = t;
     }
-    async function runDetect() {
+    /**
+     * Run the detector with the pipeline the panel chose.
+     *
+     * `opts` comes from MarkingPanel.detectOptions(): which of the two optional
+     * stages run (Claude classification, SAM refinement), how permissive the
+     * blob finder should be, and whether to capture a new frame instead of
+     * detecting on the one already on screen. Absent (an agent-initiated
+     * detect, or an older caller), the server defaults apply.
+     */
+    async function runDetect(opts) {
+        const cfg = (opts && typeof opts === 'object') ? opts : {};
+        const tune = {};
+        if (typeof cfg.use_claude_review === 'boolean') tune.use_claude_review = cfg.use_claude_review;
+        if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
+        if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
@@ -910,14 +935,15 @@ const OperateManager = (function () {
         // Detect on the frame already on screen when there is one — the operator
         // is looking at it, and re-capturing would disturb the LED/room light.
         const shown = $('op-img-bottom');
-        let hasFrame = !!(shown && shown.classList.contains('has-frame'));
+        let hasFrame = !cfg.fresh && !!(shown && shown.classList.contains('has-frame'));
         try {
             // Phase 1 — when the viewport is empty, capture and SHOW the image
             // FIRST (no SAM yet), so the operator sees what detection will run on
             // before it runs, rather than the image appearing only at the end.
             if (!hasFrame) {
                 setBusyText('Capturing…');
-                const cap = await postJSON('/api/devices/detect_embryos', { capture_only: true });
+                const cap = await postJSON('/api/devices/detect_embryos',
+                    Object.assign({ capture_only: true }, tune));
                 if (cap.frame && cap.frame.jpeg_b64) {
                     _lastBottom = cap.frame;
                     setImg('op-img-bottom', 'op-ph-bottom', cap.frame);
@@ -925,8 +951,9 @@ const OperateManager = (function () {
                 }
             }
             // Phase 2 — run SAM on the frame now on screen, then overlay results.
-            setBusyText('Detecting…');
-            const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: hasFrame });
+            setBusyText(detectingCaption(tune));
+            const d = await postJSON('/api/devices/detect_embryos',
+                Object.assign({ use_last_frame: hasFrame }, tune));
             if (d.frame && d.frame.jpeg_b64) {
                 _lastBottom = d.frame;
                 setImg('op-img-bottom', 'op-ph-bottom', d.frame);
@@ -1951,7 +1978,7 @@ const OperateManager = (function () {
             goTo: pane => showPane(pane),
         },
         marking: {
-            detect: () => runDetect(),
+            detect: opts => runDetect(opts),
             register: () => confirmMarks(),
             clear: () => clearMarks(),
             // Session verbs — only meaningful while the agent is waiting.

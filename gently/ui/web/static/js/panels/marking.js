@@ -38,6 +38,51 @@ const MarkingPanel = (() => {
     const hosts = new Set();
     let ticker = null;
 
+    // Detection is a three-stage pipeline, and which stages run is the
+    // operator's call:
+    //
+    //   blobs   flat-field + scale-matched blob finder. Sets RECALL — every
+    //           later stage only removes or refines what this proposes.
+    //   claude  classifies each candidate crop and drops the ones that are not
+    //           embryos. Removes only, never adds. Needs an API key.
+    //   sam     segments inside the boxes it is handed, for an outline and an
+    //           area. Needs the checkpoint on the device layer.
+    //
+    // Sensitivity is the blob finder's min_relative_peak: how strong a
+    // candidate must be next to the strongest one on the frame. Permissive
+    // proposes more and leans on the filter; strict cuts at the source.
+    const SETTINGS_KEY = 'gently.detect.settings';
+    const SENSITIVITY = [
+        { id: 'permissive', label: 'Permissive', peak: 0, hint: 'Propose more, let the filter cut' },
+        { id: 'balanced', label: 'Balanced', peak: 0.35, hint: 'Middle ground' },
+        { id: 'strict', label: 'Strict', peak: 0.6, hint: 'Only strong blobs' },
+    ];
+    const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false };
+    let settings = Object.assign({}, DEFAULTS);
+    try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+        if (saved && typeof saved === 'object') settings = Object.assign({}, DEFAULTS, saved);
+    } catch (e) { /* defaults */ }
+
+    function saveSettings() {
+        try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* not fatal */ }
+    }
+
+    function sensitivity() {
+        return SENSITIVITY.find(x => x.id === settings.sensitivity) || SENSITIVITY[0];
+    }
+
+    // What the Detect verb should run. operate.js owns the request; this panel
+    // owns the choice.
+    function detectOptions() {
+        return {
+            use_claude_review: !!settings.claude,
+            use_sam: !!settings.sam,
+            min_relative_peak: sensitivity().peak,
+            fresh: !!settings.fresh,
+        };
+    }
+
     const state = () => SharedState.get('marking') || {};
     const verbs = () =>
         (typeof OperateManager !== 'undefined' && OperateManager.marking) || null;
@@ -80,13 +125,37 @@ const MarkingPanel = (() => {
         hosts.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
+            const sens = sensitivity();
             el.innerHTML = `
               <div class="lp">
                 <div class="lp-head">
-                  <span class="lp-title">Marking</span>
+                  <span class="lp-title">Detect</span>
                   ${s.detecting
                     ? `<span class="mk-busy">detecting… ${secs}s</span>`
                     : ''}
+                </div>
+
+                <div class="mk-pipe" role="group" aria-label="Detection pipeline">
+                  <span class="mk-stage is-fixed" title="Flat-field + blob candidate finder. Sets recall: the later stages only remove or refine what this proposes.">Blobs</span>
+                  <span class="mk-arrow" aria-hidden="true">›</span>
+                  <button type="button" class="mk-stage" data-set="claude" aria-pressed="${settings.claude}"
+                          title="Claude classifies each candidate crop and drops the ones that are not embryos. Removes only; needs an API key.">Claude filter</button>
+                  <span class="mk-arrow" aria-hidden="true">›</span>
+                  <button type="button" class="mk-stage" data-set="sam" aria-pressed="${settings.sam}"
+                          title="SAM segments inside each candidate box for an outline and an area. Needs the checkpoint on the device layer.">SAM outline</button>
+                </div>
+
+                <div class="mk-opts">
+                  <label class="mk-opt">
+                    <span class="mk-opt-cap">Sensitivity</span>
+                    <select class="mk-select" data-set="sensitivity" title="${escape(sens.hint)}">
+                      ${SENSITIVITY.map(o => `<option value="${o.id}"${o.id === settings.sensitivity ? ' selected' : ''}>${o.label}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label class="mk-opt mk-opt-check" title="Capture a new frame instead of detecting on the one already on screen.">
+                    <input type="checkbox" data-set="fresh"${settings.fresh ? ' checked' : ''}>
+                    <span class="mk-opt-cap">New capture</span>
+                  </label>
                 </div>
 
                 <div class="mk-counts">
@@ -101,7 +170,7 @@ const MarkingPanel = (() => {
                 </div>
 
                 <div class="mk-acts">
-                  <button class="lp-btn" data-act="detect" ${s.detecting ? 'disabled' : ''}
+                  <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}
                     >${s.detecting ? 'Detecting…' : 'Detect'}</button>
                   <button class="lp-btn" data-act="register" ${marked ? '' : 'disabled'}
                           title="${marked ? '' : 'Nothing marked to register'}"
@@ -167,13 +236,36 @@ const MarkingPanel = (() => {
                 const v = verbs();
                 if (!v) return;
                 const fn = v[b.dataset.act];
-                // `data-index` is only present on the per-marker role toggles.
-                if (typeof fn === 'function') fn(b.dataset.index);
+                // Detect carries the pipeline the operator chose; the other
+                // verbs take `data-index`, present only on the role toggles.
+                if (typeof fn !== 'function') return;
+                if (b.dataset.act === 'detect') fn(detectOptions());
+                else fn(b.dataset.index);
+            };
+        });
+
+        // The two optional stages toggle in place. Re-render rather than
+        // mutate, so every mounted copy of the panel agrees.
+        el.querySelectorAll('.mk-stage[data-set]').forEach(b => {
+            b.onclick = () => {
+                const key = b.dataset.set;
+                settings[key] = !settings[key];
+                saveSettings();
+                render();
+            };
+        });
+
+        el.querySelectorAll('select[data-set], input[data-set]').forEach(input => {
+            input.onchange = () => {
+                settings[input.dataset.set] =
+                    input.type === 'checkbox' ? !!input.checked : input.value;
+                saveSettings();
+                render();
             };
         });
     }
 
-    return { mount, unmount, render, _elapsed: elapsed };
+    return { mount, unmount, render, _elapsed: elapsed, _options: detectOptions };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = MarkingPanel;

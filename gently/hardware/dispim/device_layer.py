@@ -3127,6 +3127,9 @@ class DeviceLayerServer(Service):
             pixel_size_um = data.get("pixel_size_um", DEFAULT_PIXEL_SIZE_UM)
             objective_mag = data.get("objective_mag", DEFAULT_OBJECTIVE_MAG)
             use_claude_review = data.get("use_claude_review", True)
+            # SAM contributes outlines, not positions: without it the blob
+            # candidates are still the answer, and the call needs no GPU.
+            use_sam = bool(data.get("use_sam", True))
             data.get("min_confidence", 0.7)
             exposure_ms = data.get("exposure_ms")
             brightness_percentile = data.get("brightness_percentile", 99.0)
@@ -3282,6 +3285,7 @@ class DeviceLayerServer(Service):
                 min_area,
                 max_area,
                 min_relative_peak,
+                use_sam,
             )
 
             # Save image if volume_dir configured
@@ -3353,6 +3357,7 @@ class DeviceLayerServer(Service):
         min_area: int | None,
         max_area: int | None,
         min_relative_peak: float | None = None,
+        use_sam: bool = True,
     ) -> dict:
         """Run SAM detection synchronously (called from thread).
 
@@ -3370,6 +3375,7 @@ class DeviceLayerServer(Service):
                     pixel_size_um=pixel_size_um,
                     objective_mag=objective_mag,
                     use_claude_review=use_claude_review,
+                    use_sam=use_sam,
                     save_visualizations=True,
                     output_dir=Path("./detection_results"),
                     brightness_percentile=brightness_percentile,
