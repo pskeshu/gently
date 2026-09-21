@@ -179,3 +179,23 @@ async def test_a_snap_uses_the_embryos_exposure_and_records_what_it_used() -> No
     )
     # The ledger must agree with the camera, or dose accounting is fiction.
     assert emb.total_exposure_ms == 35.0, f"recorded {emb.total_exposure_ms} ms for a 35 ms snap"
+
+
+def test_a_field_the_caller_did_not_send_is_left_alone() -> None:
+    """The route's own defaults are not a configuration anyone chose.
+
+    `exposure_ms` and `num_slices` can be set per embryo by the agent
+    (`update_embryo_params`, the resolution tools). If a UI start wrote the
+    route's defaults for every key it did not receive, an operator pressing
+    Start with an untouched field would silently reset what the agent had
+    configured — the UI and the agent fighting over the same field, which is
+    worse than the original bug of dropping the value.
+    """
+    emb = _embryo("embryo_1", exposure_ms=35.0, num_slices=7)
+    r = _app({"embryo_1": emb}, _orch()).post(
+        "/api/devices/timelapse/start",
+        json={"interval_seconds": 120},  # neither field sent
+    )
+    assert r.status_code == 200
+    assert emb.exposure_ms == 35.0, "an untouched exposure field reset the embryo to 10 ms"
+    assert emb.num_slices == 7, "an untouched slice field reset the embryo to 50"

@@ -2032,14 +2032,25 @@ def create_router(server) -> APIRouter:
         # Apply what the panel asked for to the embryos this run will image —
         # the same resolution orchestrator.start uses for embryo_ids=None, so
         # the set that gets the settings is the set that gets imaged.
+        #
+        # Only keys the caller actually SENT. The route has its own defaults
+        # (10 ms, 50 slices) for the rest of its work, and writing those onto
+        # every embryo would silently undo a per-embryo exposure set through
+        # `update_embryo_params` or the resolution tools — the agent would
+        # configure an embryo and a UI start with an untouched field would
+        # quietly reset it.
         experiment = _require_agent_with_experiment().experiment
         targets = embryo_ids or [e.id for e in experiment.embryos.values() if not e.should_skip]
+        sent_exposure = payload.get("exposure_ms") is not None
+        sent_slices = raw_slices is not None
         for eid in targets:
             emb = experiment.embryos.get(eid)
             if emb is None:
                 continue
-            emb.exposure_ms = exposure_ms
-            emb.num_slices = num_slices
+            if sent_exposure:
+                emb.exposure_ms = exposure_ms
+            if sent_slices:
+                emb.num_slices = num_slices
 
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
