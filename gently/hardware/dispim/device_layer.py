@@ -381,7 +381,8 @@ class DeviceLayerServer(Service):
                     y_max_mm=box["y_max"] / 1000.0,
                 )
                 logger.info(
-                    "ASI Tiger firmware soft limits applied (%s): X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
+                    "ASI Tiger firmware soft limits applied (%s): "
+                    "X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
                     "operator region" if env else "defaults",
                     box["x_min"],
                     box["x_max"],
