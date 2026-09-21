@@ -115,6 +115,39 @@ const MarkingPanel = (() => {
         return Math.round((Date.now() - s.startedAt) / 1000);
     }
 
+    /**
+     * Where the operator stands, as a sentence.
+     *
+     * This used to be two big numbers side by side — "0 MARKED  4 REGISTERED" —
+     * which reads as a pair of comparable quantities and is not one. They are
+     * different kinds of thing at different stages of the same journey:
+     *
+     *   marked      points placed on THIS frame, held in the browser, lost on
+     *               reload, and the only thing Register acts on
+     *   registered  embryos the server holds for the session — the roster the
+     *               rail lists and the SPIM head drives to
+     *
+     * The confusing state is after a successful Register, when the pair reads
+     * "0 marked, 4 registered" with two dead buttons: nothing wrong, but it
+     * looks like a failure. Said as a sentence, that state reads as the success
+     * it is — and the count that matters is the one the next verb will act on.
+     */
+    function standing(marked, registered) {
+        if (marked) {
+            // "not yet registered" already says the roster is behind; adding
+            // "nothing registered yet" after it said the same thing twice.
+            const roster = registered
+                ? ` \u00b7 <span class="mk-dim">${registered} embryo${registered === 1 ? '' : 's'} in the roster</span>`
+                : '';
+            return `<b>${marked}</b> marked, not yet registered${roster}`;
+        }
+        if (registered) {
+            return `<b>${registered}</b> embryo${registered === 1 ? '' : 's'} registered`
+                + ` \u00b7 <span class="mk-dim">click the image or Detect to add more</span>`;
+        }
+        return '<span class="mk-dim">Nothing marked yet — click the image, or Detect</span>';
+    }
+
     function render() {
         const s = state();
         if (s.detecting) startTicker(); else stopTicker();
@@ -158,16 +191,7 @@ const MarkingPanel = (() => {
                   </label>
                 </div>
 
-                <div class="mk-counts">
-                  <div class="mk-count">
-                    <b class="mk-n">${marked}</b>
-                    <span class="mk-cap">marked</span>
-                  </div>
-                  <div class="mk-count">
-                    <b class="mk-n">${registered}</b>
-                    <span class="mk-cap">registered</span>
-                  </div>
-                </div>
+                <p class="mk-state">${standing(marked, registered)}</p>
 
                 <div class="mk-acts">
                   <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}

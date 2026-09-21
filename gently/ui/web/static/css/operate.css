@@ -1335,3 +1335,13 @@
     color: var(--op-ink);
 }
 .mk-opt-check input { accent-color: var(--accent, #3b82f6); }
+
+/* Where the operator stands, as a sentence rather than two bare numbers. */
+.mk-state {
+    margin: 0 0 var(--op-2);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--op-ink);
+}
+.mk-state b { font-variant-numeric: tabular-nums; }
+.mk-state .mk-dim { color: var(--op-ink-dim); }
