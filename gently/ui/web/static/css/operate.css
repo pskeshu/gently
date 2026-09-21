@@ -1337,7 +1337,41 @@
 .mk-arrow { color: var(--op-ink-dim); font-size: 0.7rem; }
 /* Detect closes the chain it runs: the chips read left to right and the verb
    sits at the end of them, not down among the verbs that act on marks. */
-.mk-detect { margin-left: 14px; }
+/* Detect is the verb the whole panel exists for, so it is a filled button —
+   the one solid thing here. Outlining it in accent (as it was) gave it the
+   same language as a switched-on pipeline chip, and it read as a fourth stage
+   rather than the control that runs the other three.
+
+   Theme order follows main.css: dark is the default (:root) and light
+   overrides it, so the light rule must come second or `:root` wins at equal
+   specificity — which is exactly what happened the first time. At 0.72rem
+   this is small text, so both pairings clear 4.5:1 (dark ink on #60a5fa is
+   7.4, white on #2563eb is 5.2) where white on the plain accent sits at 3.7. */
+.mk-detect {
+    margin-left: 14px;
+    font-weight: 600;
+    background: var(--accent, #60a5fa);
+    border-color: var(--accent, #60a5fa);
+    color: #0d1117;
+}
+.mk-detect:hover:not(:disabled) {
+    background: var(--accent-hover, #93c5fd);
+    border-color: var(--accent-hover, #93c5fd);
+    color: #0d1117;
+}
+.mk-detect:disabled { opacity: 0.55; }
+
+[data-theme="light"] .mk-detect {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+[data-theme="light"] .mk-detect:hover:not(:disabled) {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #fff;
+}
+
 /* The chips are pills and the verb is a button, but side by side they still
    read as one run of controls — a rule says where the chain ends. */
 .mk-detect::before {

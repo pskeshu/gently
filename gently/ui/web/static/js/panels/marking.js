@@ -184,7 +184,7 @@ const MarkingPanel = (() => {
                   <span class="mk-arrow" aria-hidden="true">›</span>
                   <button type="button" class="mk-stage" data-set="sam" aria-pressed="${settings.sam}"
                           title="SAM segments inside each candidate box for an outline and an area. Needs the checkpoint on the device layer.">SAM outline</button>
-                  <button class="lp-btn mk-detect mk-primary" data-act="detect" ${s.detecting ? 'disabled' : ''}
+                  <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}
                           title="Run the pipeline above on the bottom camera"
                     >${s.detecting ? 'Detecting…' : 'Detect'}</button>
                 </div>
