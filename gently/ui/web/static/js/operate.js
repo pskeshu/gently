@@ -305,9 +305,11 @@ const OperateManager = (function () {
                 host.style.gridTemplateColumns = `repeat(${s.length}, minmax(0, 1fr))`;
                 // Ups on the top row, downs on the bottom, columns aligned by
                 // magnitude, so the control maps to the motion.
+                // Signed, because on the call "▲ 5000" read as the diSPIM
+                // plugin's "bring to 5000" — an absolute go-to. +/− says relative.
                 host.innerHTML =
-                    s.map(v => `<button class="op-nbtn" data-nudge="${v}" type="button">▲&nbsp;${v}</button>`).join('') +
-                    s.map(v => `<button class="op-nbtn" data-nudge="${-v}" type="button">▼&nbsp;${v}</button>`).join('');
+                    s.map(v => `<button class="op-nbtn" data-nudge="${v}" type="button" title="Raise ${v} µm">▲&nbsp;+${v}</button>`).join('') +
+                    s.map(v => `<button class="op-nbtn" data-nudge="${-v}" type="button" title="Lower ${v} µm">▼&nbsp;−${v}</button>`).join('');
             }
             host.querySelectorAll('[data-nudge]').forEach(b => {
                 const d = Number(b.dataset.nudge);
@@ -336,6 +338,9 @@ const OperateManager = (function () {
                 g.dataset.status = st.status;
                 g.classList.toggle('is-near-floor',
                     st.status === 'ok' && st.floor != null && st.floor < 100);
+                // In flight: the nudges going pale said nothing (#109). Now the
+                // gauge says so, and the caption below it names the state.
+                g.classList.toggle('is-moving', busy);
             }
             const read = $(cfg.root + '-pos');
             if (read) {
@@ -368,7 +373,7 @@ const OperateManager = (function () {
             const statusText = st.status === 'absent' ? 'axis not present on this rig'
                 : st.status === 'error' ? 'position unavailable' : null;
             const band = $(cfg.root + '-band');
-            if (band) band.textContent = statusText || bandLabel();
+            if (band) band.textContent = statusText || (busy ? 'moving…' : bandLabel());
             const floor = $(cfg.root + '-floor');
             if (floor) floor.textContent = st.floor == null ? '—' : Math.round(st.floor);
             const foot = $(cfg.root + '-foot');
@@ -383,7 +388,7 @@ const OperateManager = (function () {
                 toastFail('Too close to the floor for that step');
                 return;
             }
-            busy = true; renderNudges();
+            busy = true; render();
             try {
                 absorb(await postJSON(cfg.nudge, { delta }));
                 if (cfg.onDown && delta < 0) cfg.onDown();
@@ -392,7 +397,7 @@ const OperateManager = (function () {
                 // Even a refused nudge reports the real position — take it.
                 if (e && e.data && e.data.position != null) absorb(e.data);
                 toastFail(`${cfg.label} nudge blocked (${why(e)})`);
-            } finally { busy = false; renderNudges(); }
+            } finally { busy = false; render(); }
         }
 
         async function refresh() {
@@ -454,6 +459,12 @@ const OperateManager = (function () {
             if (el) el.hidden = !eng;
             const dd = $(`op-lock-${p}-d`);
             if (dd) dd.textContent = d == null ? '—' : Math.round(d);
+            // #139: "-2 µm to floor" sat in the same soft orange as 1970 for
+            // half an hour. Below the floor is a different state, not a number.
+            const below = d != null && d < 0;
+            if (el) el.classList.toggle('is-below', below);
+            const unit = el && el.querySelector('.op-lock-txt i');
+            if (unit) unit.textContent = below ? 'µm BELOW floor' : 'µm to floor';
         });
         const cam = $('op-cam-bottom');
         if (cam) cam.classList.toggle('is-locked', eng);
@@ -462,6 +473,18 @@ const OperateManager = (function () {
     // Always reachable, unlike the old design where clearing the latch lived on
     // a step you might never arrive at — lower the head, never reach it, and XY
     // stayed locked forever with no escape short of clearing sessionStorage.
+    // #109. One request, no client-side gate, no busy check: the whole point
+    // is that it works while a nudge is in flight. Both axes re-read after.
+    async function haltMotion() {
+        try {
+            const r = await postJSON('/api/devices/motion/halt', {});
+            toast(`Halted: ${(r.halted || []).join(', ') || 'nothing moving'}`);
+        } catch (e) {
+            toastFail(`HALT failed (${why(e)})`);
+        } finally {
+            fd.refresh(); bz.refresh();
+        }
+    }
     async function backOff() {
         try {
             fd.absorb(await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
@@ -1730,6 +1753,8 @@ const OperateManager = (function () {
             b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
         document.querySelectorAll('[data-backoff]').forEach(b =>
             b.addEventListener('click', backOff));
+        const halt = $('op-halt');
+        if (halt) halt.addEventListener('click', haltMotion);
 
         const modes = $('op-modes');
         if (modes) {

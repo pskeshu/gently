@@ -1505,6 +1505,20 @@ def create_router(server) -> APIRouter:
             logger.debug("fdrive read failed: %s", exc)
             raise HTTPException(status_code=502, detail=f"fdrive read failed: {exc}") from exc
 
+    @router.post("/api/devices/motion/halt")
+    async def halt_motion():
+        """Stop all stage motion now. Not behind require_control: a halt that
+        says "you do not have control" is the one answer a safety control may
+        never give (#109)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.halt_motion()
+        except Exception as exc:
+            logger.exception("motion halt failed")
+            raise HTTPException(status_code=502, detail=f"halt failed: {exc}") from exc
+
     @router.post("/api/devices/spim/fdrive/nudge", dependencies=[Depends(require_control)])
     async def nudge_fdrive(payload: dict = Body(...)):  # noqa: B008
         """Nudge the SPIM-head F-drive by {delta} µm (fenced; never below floor)."""

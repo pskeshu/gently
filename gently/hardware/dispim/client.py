@@ -1120,6 +1120,10 @@ class DiSPIMMicroscope(Microscope):
         """Current SPIM-head F-drive position + limits + distance to floor."""
         return await self._api_get("/api/spim/fdrive")
 
+    async def halt_motion(self) -> dict:
+        """Stop every positioner now (F-drive, XY, bottom Z). See #109."""
+        return await self._api_post("/api/motion/halt", {})
+
     async def nudge_fdrive(self, delta: float) -> dict:
         """Fenced relative move of the SPIM-head F-drive by ``delta`` µm."""
         return await self._api_post("/api/spim/fdrive/nudge", {"delta": float(delta)})

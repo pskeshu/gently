@@ -39,6 +39,7 @@ INDEX = WEB / "templates" / "index.html"
 # looked up with $('id'); attribute hooks are queried by selector.
 CONTROLS = {
     "op-spim-toggle": "$('op-spim-toggle')",
+    "op-halt": "$('op-halt')",
     "op-calibrate": "$('op-calibrate')",
     "op-modes": "$('op-modes')",
     "op-tl-stop": "$('op-tl-stop')",

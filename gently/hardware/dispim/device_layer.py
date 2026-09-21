@@ -2848,6 +2848,32 @@ class DeviceLayerServer(Service):
             }
         )
 
+    async def handle_halt_motion(self, request):
+        """POST /api/motion/halt — stop every positioner, now.
+
+        MMCore ``stop(label)`` maps to the adapter's Stop, which on an ASI
+        Tiger sends HALT. An in-flight nudge's ``waitForDevice`` returns as
+        soon as the axis stops, so the nudge request then reports the real
+        (halted) position on its own. Ungated on purpose: a stop button that
+        answers "you do not have control" is worse than no stop button.
+        """
+        halted: list[str] = []
+        errors: dict[str, str] = {}
+        for key in ("fdrive", "xy_stage", "z_stage"):
+            dev = self.devices.get(key)
+            if dev is None:
+                continue
+            try:
+                await asyncio.to_thread(self.system.core.stop, dev.name)
+                halted.append(key)
+            except Exception as exc:
+                errors[key] = str(exc)
+        logger.warning("Motion HALT: stopped %s errors=%s", halted, errors)
+        return web.json_response(
+            {"success": not errors, "halted": halted, "errors": errors},
+            status=200 if not errors else 502,
+        )
+
     async def handle_get_bottom_z(self, request):
         """GET /api/stage/bottom_z — bottom-camera focus Z position + limits."""
         return self._axis_status_response("z_stage", "Bottom-Z (z_stage)")
@@ -3921,6 +3947,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/stage/bottom_z/nudge", self.handle_nudge_bottom_z)
         self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
+        self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
         self._app.router.add_get("/api/properties", self.handle_get_properties)
