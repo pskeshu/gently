@@ -954,7 +954,7 @@ const OperateManager = (function () {
         if (_lsTimer) clearTimeout(_lsTimer);
         _lsTimer = setTimeout(() => {
             postJSON('/api/devices/lightsheet/live/params',
-                { galvo: _galvo, piezo: _piezo, exposure: 20, side: 'A' }).catch(() => {});
+                { galvo: _galvo, piezo: _piezo, side: 'A' }).catch(() => {});
         }, 120);
     }
     function nudgeGalvo(d) {
