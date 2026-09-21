@@ -1,0 +1,180 @@
+/* Rig menu — the microscope's home in the header chrome (rig-menu.js).
+   Extends the existing status chip and popover rather than replacing them, so
+   the header keeps one vocabulary: same pill, same dot, same drop shadow. */
+
+/* ── the chip ───────────────────────────────────────────────── */
+.rig-chip { gap: 0.45rem; color: var(--text); }
+.rig-chip:hover { border-color: var(--accent); }
+.rig-chip-sep { color: var(--border-strong, var(--border)); }
+.rig-chip-temp { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* A rig that is down is not a neutral fact: amber says "not ready", red says
+   "it fell over". Both stay quiet enough for a header. */
+.status-dot.error { background: #ef4444; opacity: 1; }
+.status-dot.partial { background: var(--accent-orange, #f59e0b); }
+
+/* ── the menu ───────────────────────────────────────────────── */
+.rig-menu { width: 316px; padding: 0.35rem 0; }
+
+.rig-sec { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border); }
+.rig-sec:last-child { border-bottom: 0; }
+.rig-sec-quiet { padding-top: 0.5rem; padding-bottom: 0.5rem; opacity: 0.85; }
+
+.rig-sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+.rig-sec-quiet .rig-sec-head { margin-bottom: 0; align-items: center; }
+
+.rig-sec-label {
+    font-size: 0.64rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.rig-sec-meta {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.rig-state { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+.rig-state-connected { color: var(--accent-green); }
+.rig-state-partial { color: var(--accent-orange, #f59e0b); }
+.rig-state-error { color: #ef4444; }
+.rig-state-off { color: var(--text-muted); }
+
+.rig-temp-now { font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── boot progress ──────────────────────────────────────────── */
+.rig-progress { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.rig-progress-bar {
+    flex-grow: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg-hover);
+    overflow: hidden;
+}
+.rig-progress-bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width 0.3s ease;
+}
+.rig-progress-text { font-size: 0.68rem; color: var(--text-muted); }
+
+/* ── actions ────────────────────────────────────────────────── */
+.rig-actions { display: flex; align-items: center; gap: 0.4rem; }
+
+.rig-btn {
+    flex-grow: 1;
+    min-height: 28px;
+    padding: 0.3rem 0.6rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.rig-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.rig-btn:disabled { opacity: 0.45; cursor: default; }
+.rig-btn-go:hover:not(:disabled) { border-color: var(--accent-green); color: var(--accent-green); }
+.rig-btn-stop:hover:not(:disabled) { border-color: #ef4444; color: #ef4444; }
+
+.rig-field { display: flex; align-items: center; gap: 0.35rem; }
+.rig-field-label { font-size: 0.7rem; color: var(--text-muted); }
+.rig-input {
+    width: 62px;
+    min-height: 28px;
+    padding: 0.2rem 0.4rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+.rig-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.rig-hint {
+    margin-top: 0.45rem;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: #ef4444;
+}
+
+/* ── room light switch ──────────────────────────────────────── */
+.rig-switch {
+    width: 38px;
+    height: 22px;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.rig-switch.on { background: var(--accent); border-color: var(--accent); }
+.rig-switch-knob {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+    transition: transform 0.15s ease;
+}
+.rig-switch.on .rig-switch-knob { transform: translateX(16px); }
+.rig-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .rig-progress-bar span, .rig-switch-knob { transition: none; }
+}
+
+/* ── the temperature fold (Devices tab) ─────────────────────────
+   The chart is history; the number is the fact. Collapsed, this costs one
+   line and still answers "is the water where I set it". */
+.devices-tempwrap {
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+}
+.devices-tempwrap-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.25rem;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-muted);
+    text-align: left;
+}
+.devices-tempwrap-head:hover { color: var(--text); }
+.devices-tempwrap-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.devices-tempwrap-chev { flex: none; transition: transform 0.15s ease; }
+.devices-tempwrap:not(.is-collapsed) .devices-tempwrap-chev { transform: rotate(90deg); }
+.devices-tempwrap-title {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.devices-tempwrap-now {
+    font-size: 0.78rem;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+.devices-tempwrap.is-collapsed .devices-temp-graph { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+    .devices-tempwrap-chev { transition: none; }
+}

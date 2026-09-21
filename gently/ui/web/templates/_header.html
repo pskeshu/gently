@@ -59,28 +59,78 @@
             </svg>
         </button>
         {% if is_live %}
-        <!-- Connection status button -->
-        <div class="status-button-wrapper">
-            <button class="status-button" id="status-button" onclick="toggleStatusPopover(event)">
+        {# The rig lives in the chrome, not inside a tab. The chip is the one
+           always-visible answer to "is the microscope up", and the menu behind
+           it carries the controls that used to sit on the Devices tab —
+           start/stop, the console, water, room light — so they are reachable
+           from wherever the operator actually is (rig-menu.js). #}
+        <div class="status-button-wrapper rig-wrapper">
+            <button class="status-button rig-chip" id="status-button" aria-haspopup="true" aria-expanded="false"
+                    aria-controls="status-popover" onclick="toggleStatusPopover(event)">
                 <div class="status-dot" id="status-dot"></div>
                 <span id="status-text">Connecting</span>
+                <span class="rig-chip-sep" id="rig-chip-sep" hidden>|</span>
+                <span class="rig-chip-temp" id="rig-chip-temp" hidden></span>
                 <svg class="status-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
             </button>
-            <div class="status-popover hidden" id="status-popover">
-                <div class="status-popover-row">
-                    <span class="status-popover-label">Gently</span>
-                    <span class="status-popover-value">
+            <div class="status-popover rig-menu hidden" id="status-popover" role="dialog" aria-label="Rig">
+
+                <div class="rig-sec">
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">Device layer</span>
+                        <span class="rig-state" id="rig-dl-state">—</span>
+                        <span class="rig-sec-meta" id="rig-dl-meta"></span>
+                    </div>
+                    <div class="rig-progress" id="rig-dl-progress" hidden>
+                        <div class="rig-progress-bar"><span id="rig-dl-progress-fill"></span></div>
+                        <span class="rig-progress-text" id="rig-dl-progress-text"></span>
+                    </div>
+                    <div class="rig-actions">
+                        <button type="button" class="rig-btn rig-btn-go" id="rig-dl-start">Start</button>
+                        <button type="button" class="rig-btn rig-btn-stop" id="rig-dl-stop">Stop</button>
+                        <button type="button" class="rig-btn" id="rig-dl-log">Log</button>
+                    </div>
+                    <div class="rig-hint" id="rig-dl-hint" hidden></div>
+                </div>
+
+                <div class="rig-sec" id="rig-temp-sec" hidden>
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">Water</span>
+                        <span class="rig-temp-now" id="rig-temp-now">—</span>
+                        <span class="rig-sec-meta" id="rig-temp-state"></span>
+                    </div>
+                    <div class="rig-actions">
+                        <label class="rig-field">
+                            <span class="rig-field-label">Set</span>
+                            <input type="number" step="0.1" min="4" max="40" id="rig-temp-input"
+                                   class="rig-input" aria-label="Target water temperature in Celsius">
+                        </label>
+                        <button type="button" class="rig-btn" id="rig-temp-apply">Apply</button>
+                    </div>
+                </div>
+
+                <div class="rig-sec" id="rig-light-sec" hidden>
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">Room light</span>
+                        <span class="rig-sec-meta" id="rig-light-state">—</span>
+                        <button type="button" class="rig-switch" id="rig-light-toggle"
+                                role="switch" aria-checked="false" aria-label="Room light">
+                            <span class="rig-switch-knob"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="rig-sec rig-sec-quiet">
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">Gently</span>
                         <span class="status-badge offline" id="status-gently-badge">Connecting</span>
-                    </span>
-                </div>
-                <div class="status-popover-row">
-                    <span class="status-popover-label">Microscope</span>
-                    <span class="status-popover-value">
+                        <span class="rig-sec-label">Microscope</span>
                         <span class="status-badge offline" id="status-microscope-badge">--</span>
-                    </span>
+                    </div>
                 </div>
+
             </div>
         </div>
         {% endif %}

@@ -20,11 +20,61 @@ const TemperatureGraph = (() => {
     let _samples = [];
     let _session = "current";
 
+    // The chart sits inside a fold. The fold, not this module, decides whether
+    // the plot is on screen; this module only decides whether there is anything
+    // to plot. Keeping those separate is why `hidden` here and the collapsed
+    // class over there never fight.
+    const OPEN_KEY = "gently.tempchart.open";
+
+    function wrap() { return document.getElementById("devices-tempwrap"); }
+
+    function setWrapVisible(on) {
+        const w = wrap();
+        if (w) w.hidden = !on;
+    }
+
+    function setCollapsed(collapsed) {
+        const w = wrap();
+        const btn = document.getElementById("devices-tempwrap-toggle");
+        if (!w || !btn) return;
+        w.classList.toggle("is-collapsed", collapsed);
+        btn.setAttribute("aria-expanded", String(!collapsed));
+        btn.title = collapsed ? "Show the last hour" : "Hide the chart";
+        // Re-render on expand: the SVG is sized from clientWidth, which is 0
+        // while the fold is shut.
+        if (!collapsed) render();
+    }
+
+    function initFold() {
+        const btn = document.getElementById("devices-tempwrap-toggle");
+        if (!btn || btn.dataset.wired === "1") return;
+        btn.dataset.wired = "1";
+        let open = false;
+        try { open = localStorage.getItem(OPEN_KEY) === "1"; } catch (e) { /* collapsed */ }
+        setCollapsed(!open);
+        btn.addEventListener("click", () => {
+            const nowCollapsed = !wrap().classList.contains("is-collapsed");
+            setCollapsed(nowCollapsed);
+            try { localStorage.setItem(OPEN_KEY, nowCollapsed ? "0" : "1"); } catch (e) { /* not fatal */ }
+        });
+    }
+
+    function renderHeadline() {
+        const el = document.getElementById("devices-tempwrap-now");
+        if (!el) return;
+        const last = _samples[_samples.length - 1];
+        const w = last && last.water_c != null ? Number(last.water_c).toFixed(1) + "°" : "";
+        const sp = last && last.setpoint_c != null ? Number(last.setpoint_c) : null;
+        const off = (sp != null && last.water_c != null) ? Math.abs(Number(last.water_c) - sp) : null;
+        el.textContent = w + (off != null && off <= 0.3 ? " · at setpoint" : (sp != null ? " → " + sp.toFixed(1) + "°" : ""));
+    }
+
     function init(container, sessionId) {
         ClientEventBus.off("TEMPERATURE_UPDATE", onEvent);
         _root = container;
         _session = sessionId || "current";
         _samples = [];
+        initFold();
         backfill();
         ClientEventBus.on("TEMPERATURE_UPDATE", onEvent);
     }
@@ -62,12 +112,15 @@ const TemperatureGraph = (() => {
         if (!_root) return;
         _root.innerHTML = '';
         _root.hidden = true;
+        setWrapVisible(false);
     }
 
     function render() {
         if (!_root) return;
         if (!_samples.length) { renderEmpty(); return; }
         _root.hidden = false;
+        setWrapVisible(true);
+        renderHeadline();
 
         const W = _root.clientWidth || 480;
         const H = 160;

@@ -37,19 +37,39 @@ body.ux-v2 .v2-nav-item.active {
     color: var(--accent, #2f6df6);
     font-weight: 600;
 }
-body.ux-v2 .v2-rail-chat {
+body.ux-v2 .v2-nav-icon { width: 17px; height: 17px; flex: none; opacity: .85; }
+body.ux-v2 .v2-nav-item.active .v2-nav-icon { opacity: 1; }
+
+/* Collapse control: last in the rail, same shape as a nav item so the rail
+   reads as one column rather than a list with a footer. */
+body.ux-v2 .v2-rail-collapse {
     margin-top: auto;
-    display: flex; align-items: center; gap: 9px;
-    background: none; border: 1px solid var(--border, #e4e9f0); border-radius: 10px;
-    padding: 9px 12px; cursor: pointer;
-    font: inherit; font-size: 13px;
-    color: var(--text-secondary, #475569);
-    transition: border-color .15s, color .15s;
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: 0; cursor: pointer; text-align: left;
+    padding: 8px 10px; border-radius: 8px;
+    font: inherit; font-size: 12.5px;
+    color: var(--text-muted, #94a3b8);
+    transition: background .15s, color .15s;
 }
-body.ux-v2 .v2-rail-chat:hover { border-color: var(--accent, #2f6df6); color: var(--accent, #2f6df6); }
-body.ux-v2 .v2-rail-orb {
-    width: 18px; height: 18px; border-radius: 50%; flex: none;
-    background: radial-gradient(closest-side at 38% 34%, #fff, #bcd3ff 42%, var(--accent, #2f6df6) 100%);
+body.ux-v2 .v2-rail-collapse:hover { background: var(--bg-hover, #f1f5f9); color: var(--text, #0f172a); }
+body.ux-v2 .v2-rail-collapse-icon { width: 17px; height: 17px; flex: none; transition: transform .18s ease; }
+
+/* ── Collapsed rail ────────────────────────────────────────────
+   A strip of icons: labels and group headings go, the icons stay put at the
+   same x so nothing appears to jump, and the native title attribute names
+   each destination on hover. Width is animated; the main column takes the
+   space back because the rail is a flex item with a fixed basis. */
+body.ux-v2 .v2-rail {
+    transition: flex-basis .18s ease, padding .18s ease;
+}
+body.ux-v2.rail-collapsed .v2-rail { flex-basis: 56px; padding-left: 8px; padding-right: 8px; }
+body.ux-v2.rail-collapsed .v2-nav-text { display: none; }
+body.ux-v2.rail-collapsed .v2-nav-label { height: 10px; padding: 8px 0 2px; overflow: hidden; text-indent: -999em; }
+body.ux-v2.rail-collapsed .v2-nav-item,
+body.ux-v2.rail-collapsed .v2-rail-collapse { justify-content: center; padding-left: 0; padding-right: 0; }
+body.ux-v2.rail-collapsed .v2-rail-collapse-icon { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) {
+    body.ux-v2 .v2-rail, body.ux-v2 .v2-rail-collapse-icon { transition: none; }
 }
 
 /* ── Session-context strip (top of main) ───────────────────── */
