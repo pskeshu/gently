@@ -178,3 +178,83 @@
 @media (prefers-reduced-motion: reduce) {
     .devices-tempwrap-chev { transition: none; }
 }
+
+/* ── the temperature chart ──────────────────────────────────────
+   One series (water) against a reference (setpoint). Series hue #3b82f6 in
+   both themes, checked against the chart surface; the drift colour #d97706 is
+   status, used one at a time and always beside a label that says how far off.
+   Grid and axis text wear ink tokens, never the data colour. */
+.devices-temp-graph { position: relative; }
+
+.temp-chart { display: block; overflow: visible; }
+
+/* Reference: the setpoint and the band that counts as "there". */
+.temp-band { fill: var(--text-muted); opacity: 0.09; }
+.temp-setpoint-line {
+    stroke: var(--text-muted);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    opacity: 0.75;
+}
+.temp-ref-label {
+    fill: var(--text-muted);
+    font-size: 10px;
+    text-anchor: start;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Recessive chrome: hairline, solid, one step off the surface. */
+.temp-grid-line { stroke: var(--temp-grid-line-color); stroke-width: 1; }
+.temp-grid-label {
+    fill: var(--temp-grid-label-color);
+    font-size: 10px;
+    text-anchor: end;
+    font-variant-numeric: tabular-nums;
+}
+.temp-x-start { text-anchor: start; }
+.temp-x-end { text-anchor: end; }
+
+/* The data — the only loud thing here. */
+.temp-water-line {
+    stroke: #3b82f6;
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+.temp-end-dot {
+    fill: #3b82f6;
+    stroke: var(--bg-card);      /* 2px surface ring keeps it legible on the line */
+    stroke-width: 2;
+}
+.temp-end-dot.is-drifting { fill: #d97706; }
+.temp-end-label {
+    fill: var(--text);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.temp-end-label.is-drifting { fill: #d97706; }
+
+/* Crosshair: readers aim at a time, not at a 2px line. */
+.temp-cross { stroke: var(--text-muted); stroke-width: 1; opacity: 0.5; }
+.temp-cross-dot { fill: var(--bg-card); stroke: #3b82f6; stroke-width: 2; }
+.temp-hit { cursor: crosshair; }
+.temp-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.temp-tip {
+    position: absolute;
+    top: 0;
+    pointer-events: none;
+    padding: 3px 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+.temp-tip strong { font-variant-numeric: tabular-nums; color: var(--text); }
+.temp-tip span { color: var(--text-muted); }
+
+/* The fold's heading carries the same judgement as the chart's end marker. */
+.devices-tempwrap-now.is-drifting { color: #d97706; }
