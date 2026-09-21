@@ -1505,6 +1505,35 @@ def create_router(server) -> APIRouter:
             logger.debug("fdrive read failed: %s", exc)
             raise HTTPException(status_code=502, detail=f"fdrive read failed: {exc}") from exc
 
+    @router.get("/api/devices/stage/envelope")
+    async def stage_envelope_get():
+        """Live XY safety envelope (µm) + current position."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_stage_envelope()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"envelope read failed: {exc}") from exc
+
+    @router.post("/api/devices/stage/envelope", dependencies=[Depends(require_control)])
+    async def stage_envelope_set(payload: dict = Body(...)):  # noqa: B008
+        """Set the XY safety envelope from the Map's Edit region wizard (#107)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        vals = {k: _num(payload.get(k)) for k in ("x_min", "x_max", "y_min", "y_max")}
+        if any(v is None for v in vals.values()):
+            raise HTTPException(status_code=400, detail="x_min, x_max, y_min, y_max (µm) required")
+        try:
+            res = await client.set_stage_envelope(**vals)
+        except Exception as exc:
+            logger.exception("envelope set failed")
+            raise HTTPException(status_code=502, detail=f"envelope set failed: {exc}") from exc
+        if not res.get("success", True):
+            raise HTTPException(status_code=409, detail=res.get("error", "refused"))
+        return res
+
     @router.post("/api/devices/motion/halt")
     async def halt_motion():
         """Stop all stage motion now. Not behind require_control: a halt that

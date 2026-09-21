@@ -1120,6 +1120,24 @@ class DiSPIMMicroscope(Microscope):
         """Current SPIM-head F-drive position + limits + distance to floor."""
         return await self._api_get("/api/spim/fdrive")
 
+    async def get_stage_envelope(self) -> dict:
+        """The live XY safety envelope (µm) and current position."""
+        return await self._api_get("/api/stage/envelope")
+
+    async def set_stage_envelope(
+        self, x_min: float, x_max: float, y_min: float, y_max: float
+    ) -> dict:
+        """Set the XY safety envelope (µm): firmware first, software follows (#107)."""
+        return await self._api_post(
+            "/api/stage/envelope",
+            {
+                "x_min": float(x_min),
+                "x_max": float(x_max),
+                "y_min": float(y_min),
+                "y_max": float(y_max),
+            },
+        )
+
     async def halt_motion(self) -> dict:
         """Stop every positioner now (F-drive, XY, bottom Z). See #109."""
         return await self._api_post("/api/motion/halt", {})

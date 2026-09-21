@@ -115,8 +115,8 @@ def center_and_verify_embryo_plan(
     logger.info("Target stage: (%.2f, %.2f) um", target_pos[0], target_pos[1])
 
     # Check if target position is within stage limits
-    x_min, x_max = xy_stage._x_limits
-    y_min, y_max = xy_stage._y_limits
+    x_min, x_max = xy_stage.x_limits
+    y_min, y_max = xy_stage.y_limits
 
     if not (x_min <= target_pos[0] <= x_max):
         logger.error(

@@ -244,10 +244,12 @@ class DeviceLayerServer(Service):
             if sidecar.exists():
                 with open(sidecar) as sf:
                     override = yaml.safe_load(sf) or {}
-                if isinstance(override, dict) and override.get("temperature"):
+                if isinstance(override, dict):
                     self.config = self.config or {}
-                    self.config["temperature"] = override["temperature"]
-                    logger.info("Applied thermalizer override from %s", sidecar)
+                    for key in ("temperature", "xy_envelope"):
+                        if override.get(key):
+                            self.config[key] = override[key]
+                            logger.info("Applied %s override from %s", key, sidecar)
         except Exception:
             logger.warning("config.local.yml merge failed", exc_info=True)
         logger.info("Config loaded from %s", self.config_path)
@@ -362,19 +364,30 @@ class DeviceLayerServer(Service):
                 XY_STAGE_Y_MIN_UM,
             )
 
+            # The operator-set region (Map → Edit region, #107) wins over the
+            # code defaults when one has been saved.
+            env = (self.config or {}).get("xy_envelope") or {}
+            box = {
+                "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
+                "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
+                "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
+                "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
+            }
             try:
                 xy_stage.set_firmware_limits(
-                    x_min_mm=XY_STAGE_X_MIN_UM / 1000.0,
-                    x_max_mm=XY_STAGE_X_MAX_UM / 1000.0,
-                    y_min_mm=XY_STAGE_Y_MIN_UM / 1000.0,
-                    y_max_mm=XY_STAGE_Y_MAX_UM / 1000.0,
+                    x_min_mm=box["x_min"] / 1000.0,
+                    x_max_mm=box["x_max"] / 1000.0,
+                    y_min_mm=box["y_min"] / 1000.0,
+                    y_max_mm=box["y_max"] / 1000.0,
                 )
                 logger.info(
-                    "ASI Tiger firmware soft limits applied: X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
-                    XY_STAGE_X_MIN_UM,
-                    XY_STAGE_X_MAX_UM,
-                    XY_STAGE_Y_MIN_UM,
-                    XY_STAGE_Y_MAX_UM,
+                    "ASI Tiger firmware soft limits applied (%s): "
+                    "X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
+                    "operator region" if env else "defaults",
+                    box["x_min"],
+                    box["x_max"],
+                    box["y_min"],
+                    box["y_max"],
                 )
             except ValueError as exc:
                 # Current position is outside the envelope — refuse to start
@@ -2239,9 +2252,12 @@ class DeviceLayerServer(Service):
             return web.json_response({"success": False, "error": str(e)}, status=502)
 
     def _write_temp_sidecar(self, temp_cfg: dict) -> None:
-        """Persist the temperature block to config/config.local.yml (merged over
-        config.yml at boot). Best-effort; 0600 perms since it may hold the MQTT
-        password. Keeps config.yml (and its comments) untouched."""
+        self._write_sidecar("temperature", temp_cfg)
+
+    def _write_sidecar(self, key: str, value: dict) -> None:
+        """Persist one top-level block to config/config.local.yml (merged over
+        config.yml at boot). Best-effort; 0600 perms since the temperature block
+        may hold the MQTT password. Keeps config.yml (and its comments) untouched."""
         try:
             import os
 
@@ -2250,7 +2266,7 @@ class DeviceLayerServer(Service):
             if sidecar.exists():
                 with open(sidecar) as f:
                     existing = yaml.safe_load(f) or {}
-            existing["temperature"] = temp_cfg
+            existing[key] = value
             # Create with 0600 up front so the plaintext MQTT password is never
             # briefly world/group-readable (O_CREAT mode only applies to new files;
             # the follow-up chmod downgrades any pre-existing loose-perm file).
@@ -2847,6 +2863,67 @@ class DeviceLayerServer(Service):
                 "distance_to_floor": new_pos - float(lo),
             }
         )
+
+    def _envelope_payload(self, xy_stage) -> dict:
+        (x_lo, x_hi), (y_lo, y_hi) = xy_stage.x_limits, xy_stage.y_limits
+        out: dict = {
+            "success": True,
+            "x_min": x_lo,
+            "x_max": x_hi,
+            "y_min": y_lo,
+            "y_max": y_hi,
+            "position": None,
+        }
+        try:
+            cur = xy_stage.read()[xy_stage.name]["value"]
+            out["position"] = {"x": float(cur[0]), "y": float(cur[1])}
+        except Exception as exc:
+            logger.debug("XY read for envelope payload failed: %s", exc)
+        return out
+
+    async def handle_get_envelope(self, request):
+        """GET /api/stage/envelope — the live XY safety envelope, µm, plus position."""
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        return web.json_response(self._envelope_payload(xy_stage))
+
+    async def handle_set_envelope(self, request):
+        """POST /api/stage/envelope — set the XY safety envelope (#107).
+
+        Body: {"x_min", "x_max", "y_min", "y_max"} in µm. Written to the Tiger
+        firmware first and read back; the software fence follows only on
+        success. Refused (409) when the stage is currently outside the new box —
+        drive inside it first. Persisted so the next boot re-applies it.
+        """
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        try:
+            body = await request.json()
+            box = {k: float(body[k]) for k in ("x_min", "x_max", "y_min", "y_max")}
+        except Exception:
+            return web.json_response(
+                {"success": False, "error": "x_min, x_max, y_min, y_max (µm) required"},
+                status=400,
+            )
+        try:
+            async with self.pause_state_updates():
+                await asyncio.to_thread(
+                    xy_stage.set_firmware_limits,
+                    box["x_min"] / 1000.0,
+                    box["x_max"] / 1000.0,
+                    box["y_min"] / 1000.0,
+                    box["y_max"] / 1000.0,
+                )
+        except ValueError as exc:  # degenerate box, or stage outside it
+            return web.json_response({"success": False, "error": str(exc)}, status=409)
+        except Exception as exc:
+            logger.exception("Envelope write failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=502)
+        self._write_sidecar("xy_envelope", box)
+        logger.warning("XY envelope set by operator: %s", box)
+        return web.json_response(self._envelope_payload(xy_stage))
 
     async def handle_halt_motion(self, request):
         """POST /api/motion/halt — stop every positioner, now.
@@ -3948,6 +4025,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
+        self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
+        self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
         self._app.router.add_get("/api/properties", self.handle_get_properties)

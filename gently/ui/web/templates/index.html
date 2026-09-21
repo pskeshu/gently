@@ -835,6 +835,7 @@
                         <g id="devices-map-axis-emphasis"></g>
                         <g id="devices-map-coverslip"></g>
                         <g id="devices-map-zones"></g>
+                        <g id="devices-map-region-preview"></g>
                         <g id="devices-map-zone-labels"></g>
                         <g id="devices-map-origin"></g>
                         <g id="devices-map-axes"></g>
@@ -878,6 +879,37 @@
                                 <span class="devices-readout-value" id="devices-map-y">—</span>
                             </div>
                         </div>
+                        <!-- #107. Ryan: "sometimes the embryos that we put on the
+                             coverslip are outside the map region." The region is the
+                             XY safety envelope; this is the only place it is edited. -->
+                        <button class="devices-region-btn" id="devices-region-edit" type="button">Edit region</button>
+                    </div>
+                    <!-- A guided walk, not a form: start the bottom camera so the
+                         operator can see where the stage is, then send them to each
+                         corner with the joystick and capture it there. -->
+                    <div class="devices-region-wiz" id="devices-region-wiz" hidden>
+                        <div class="devices-readout-head">
+                            <span class="devices-readout-title">Safe region</span>
+                            <span class="devices-region-steps" id="devices-region-steps" aria-label="progress"></span>
+                        </div>
+                        <div class="devices-region-cam" id="devices-region-camwrap" hidden>
+                            <img id="devices-region-cam" alt="Bottom camera, live">
+                            <span class="devices-region-cam-ph" id="devices-region-cam-ph">Starting camera…</span>
+                        </div>
+                        <svg class="devices-region-schem" id="devices-region-schem" viewBox="0 0 160 100" aria-hidden="true"></svg>
+                        <p class="devices-region-say" id="devices-region-say"></p>
+                        <div class="devices-region-xy" id="devices-region-xy" hidden>
+                            <span>X <b id="devices-region-x">—</b></span><span>Y <b id="devices-region-y">—</b></span><i>µm</i>
+                        </div>
+                        <label class="devices-region-inset" id="devices-region-inset-row" hidden>Inset <input type="number" step="any" id="devices-region-inset" value="0"> µm
+                            <small>If you drove to the outer corners the stage can physically reach, inset ~850 µm: a fast joystick overshoots by up to ~680 µm before it stops.</small>
+                        </label>
+                        <div class="devices-region-actions">
+                            <button type="button" id="devices-region-cancel">Cancel</button>
+                            <button type="button" id="devices-region-back" hidden>Back</button>
+                            <button type="button" id="devices-region-next" class="devices-region-apply">Start</button>
+                        </div>
+                        <div class="devices-region-result" id="devices-region-result"></div>
                     </div>
                     </div>
 
