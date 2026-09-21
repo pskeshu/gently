@@ -878,12 +878,26 @@
 /* Marking sits under the frame as a full-width card, so it reads across rather
    than down: counts on the left, verbs on the right, note beneath. It uses the
    same .op-block card as the instrument rail — one panel look, not two. */
+/* Rows that wrap as wholes. This was a two-column grid built for the old
+   counts/actions pair; the detector's chain and settings fell into those
+   columns and, in the narrow layout, the auto column squeezed the chips into
+   two-line pills and the panel to 275px. */
 .op-block-marking .lp {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    gap: 4px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
+.mk-config,
+.mk-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 18px;
+}
+.mk-foot { justify-content: space-between; }
+.mk-config > .mk-pipe,
+.mk-config > .mk-opts { margin-bottom: 0; }
+.mk-foot .mk-state { margin: 0; }
 
 .op-block-marking .lp-head { grid-column: 1 / -1; }
 
@@ -1321,6 +1335,19 @@
 }
 .mk-stage[aria-pressed="false"] { text-decoration: line-through; opacity: 0.75; }
 .mk-arrow { color: var(--op-ink-dim); font-size: 0.7rem; }
+/* Detect closes the chain it runs: the chips read left to right and the verb
+   sits at the end of them, not down among the verbs that act on marks. */
+.mk-detect { margin-left: 14px; }
+/* The chips are pills and the verb is a button, but side by side they still
+   read as one run of controls — a rule says where the chain ends. */
+.mk-detect::before {
+    content: '';
+    position: absolute;
+    margin-left: -8px;
+    width: 1px;
+    height: 16px;
+    background: var(--op-rule);
+}
 
 .mk-opts { display: flex; align-items: center; gap: var(--op-3); margin-bottom: var(--op-2); }
 .mk-opt { display: flex; align-items: center; gap: 5px; }

@@ -175,6 +175,7 @@ const MarkingPanel = (() => {
                     : ''}
                 </div>
 
+                <div class="mk-config">
                 <div class="mk-pipe" role="group" aria-label="Detection pipeline">
                   <span class="mk-stage is-fixed" title="Flat-field + blob candidate finder. Sets recall: the later stages only remove or refine what this proposes.">Blobs</span>
                   <span class="mk-arrow" aria-hidden="true">›</span>
@@ -183,6 +184,9 @@ const MarkingPanel = (() => {
                   <span class="mk-arrow" aria-hidden="true">›</span>
                   <button type="button" class="mk-stage" data-set="sam" aria-pressed="${settings.sam}"
                           title="SAM segments inside each candidate box for an outline and an area. Needs the checkpoint on the device layer.">SAM outline</button>
+                  <button class="lp-btn mk-detect mk-primary" data-act="detect" ${s.detecting ? 'disabled' : ''}
+                          title="Run the pipeline above on the bottom camera"
+                    >${s.detecting ? 'Detecting…' : 'Detect'}</button>
                 </div>
 
                 <div class="mk-opts">
@@ -197,18 +201,18 @@ const MarkingPanel = (() => {
                     <span class="mk-opt-cap">New capture</span>
                   </label>
                 </div>
+                </div>
 
-                ${marked ? `<p class="mk-state">${standing(marked, registered)}</p>` : ''}
-
-                <div class="mk-acts">
-                  <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}
-                    >${s.detecting ? 'Detecting…' : 'Detect'}</button>
-                  ${marked ? `
+                ${marked ? `
+                <div class="mk-foot">
+                  <p class="mk-state">${standing(marked, registered)}</p>
+                  <div class="mk-acts">
                   <button class="lp-btn mk-primary" data-act="register"
                           title="Add these to the roster">Register ${marked}</button>
-                  <button class="lp-btn" data-act="clear"
-                          title="Discard pending marks">Clear</button>` : ''}
-                </div>
+                    <button class="lp-btn" data-act="clear"
+                            title="Discard pending marks">Clear</button>
+                  </div>
+                </div>` : ''}
 
                 ${session(s)}
                 ${s.note ? `<p class="mk-note">${escape(s.note)}</p>` : ''}
