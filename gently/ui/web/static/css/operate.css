@@ -1442,6 +1442,14 @@
     font-size: 0.7rem;
     font-variant-numeric: tabular-nums;
 }
+/* The unit beside a number is not a label: .op-label is uppercased, and µ
+   uppercases to Μ, which reads as M — 25 ΜM is a different quantity. */
+.op-unit {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: var(--op-ink-dim);
+}
 .cal-num:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
 .cal-adv {
     margin-top: var(--op-2);
@@ -1460,3 +1468,4 @@
     padding: 2px 6px;
 }
 .op-btn-quiet:hover { color: var(--op-ink); border-color: var(--op-rule); }
+
