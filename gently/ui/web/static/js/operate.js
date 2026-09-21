@@ -1241,6 +1241,7 @@ const OperateManager = (function () {
         const emb = _embryos.find(e => e.id === _selected);
         if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
         renderBorrow(emb);
+        renderCalibrateAll();
         // The verb says which of the two things it does. Running it again over
         // a fit that already exists is a different decision from calibrating
         // something that has none, and the button used to read the same.
@@ -1260,6 +1261,10 @@ const OperateManager = (function () {
     // ── borrowing a fit ─────────────────────────────────────────────────────
     // Named, not generic: an operator about to copy numbers onto a live embryo
     // should see whose numbers and how good they are before pressing anything.
+    // The server's LOW_CONFIDENCE_R2 (gently/app/tools/calibration_tools.py):
+    // below this a focus sweep is reported as low confidence.
+    const LOW_CONFIDENCE_R2 = 0.5;
+
     // Same metric as the server: the WORSE of the two ends decides, since an
     // acquisition spans both galvo extremes and the weaker end dominates.
     const fitScore = e => {
@@ -1282,6 +1287,53 @@ const OperateManager = (function () {
         return best;
     }
 
+    // Embryos that would be calibrated by "the rest": no fit, not skipped.
+    const uncalibrated = () => _embryos.filter(e => !e.should_skip && !hasFit(e));
+
+    function renderCalibrateAll() {
+        const btn = $('op-cal-all');
+        if (!btn) return;
+        const pending = uncalibrated();
+        // One embryo left is just the Calibrate button next to it; a batch
+        // verb for a batch of one is noise.
+        if (pending.length < 2) { btn.hidden = true; return; }
+        btn.hidden = false;
+        if (!btn.disabled) btn.textContent = `Calibrate ${pending.length} uncalibrated`;
+    }
+
+    async function calibrateAll() {
+        const pending = uncalibrated();
+        if (!pending.length) return;
+        const btn = $('op-cal-all'), out = $('op-cal-result');
+        const t0 = Date.now();
+        const tick = setInterval(() => {
+            if (btn) btn.textContent = `Calibrating ${pending.length}… `
+                + `${Math.round((Date.now() - t0) / 1000)}s`;
+        }, 1000);
+        if (btn) { btn.disabled = true; btn.textContent = `Calibrating ${pending.length}… 0s`; }
+        if (out) out.textContent = 'sweeping…';
+        // No embryo id: the run walks the slide, so the progress panel should
+        // take frames from whichever embryo is under the objective.
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(null);
+        try {
+            const d = await postJSON('/api/devices/calibrate/all',
+                Object.assign({ scope: 'uncalibrated' }, calibrationSettings()));
+            const ok = (d.calibrated || []).length, bad = (d.failed || []).length;
+            if (bad) toastFail(`${ok} calibrated, ${bad} failed: ${(d.failed || []).join(', ')}`);
+            else toast(`Calibrated ${ok} embryo${ok === 1 ? '' : 's'}`);
+            if (typeof CalProgressPanel !== 'undefined') {
+                CalProgressPanel.finish(!bad, bad ? `${bad} failed` : `${ok} calibrated`);
+            }
+        } catch (e) {
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
+            toastFail(`Calibrate all failed (${why(e)})`);
+        } finally {
+            clearInterval(tick);
+            if (btn) btn.disabled = false;
+            renderCalTarget();
+        }
+    }
+
     function renderBorrow(emb) {
         const btn = $('op-cal-borrow'), note = $('op-cal-borrow-note');
         const best = emb ? bestSource(emb) : null;
@@ -1291,10 +1343,20 @@ const OperateManager = (function () {
         btn.hidden = false;
         note.hidden = false;
         btn.textContent = `Borrow embryo ${labelFor(best.emb)}’s fit`;
-        note.textContent = `Copies the best fit on the slide (embryo `
-            + `${labelFor(best.emb)}, R² ${best.score.toFixed(2)}) instead of `
-            + `spending ~60 exposures. Slope drifts across the field — verify `
-            + `with one acquisition before a timelapse.`;
+        // Calling a bad fit "the best on the slide" is true and misleading at
+        // once. Below the module's own low-confidence line the offer stays —
+        // an operator may know something the R² does not — but it says what it
+        // is rather than recommending it. This is not hypothetical: the rig's
+        // own embryo_1 carries R² 0.06.
+        note.textContent = best.score < LOW_CONFIDENCE_R2
+            ? `Embryo ${labelFor(best.emb)}'s fit is poor (R² ${best.score.toFixed(2)}) — `
+              + `below the low-confidence line. Calibrating this embryo is probably `
+              + `better than copying that.`
+            : `Copies the best fit on the slide (embryo ${labelFor(best.emb)}, `
+              + `R² ${best.score.toFixed(2)}) instead of spending ~60 exposures. `
+              + `Slope drifts across the field — verify with one acquisition `
+              + `before a timelapse.`;
+        note.classList.toggle('op-cap-warn', best.score < LOW_CONFIDENCE_R2);
     }
 
     async function borrowCalibration() {
@@ -1982,7 +2044,11 @@ const OperateManager = (function () {
         publishRoster();
         publishMarking();
         if (!_active) return;
-        publishRoster(); renderSpimTarget(); renderSingle();
+        // renderCalTarget was missing here: the Calibration pane kept whatever
+        // it last drew, so an embryo calibrated by the agent (or by the pane's
+        // own borrow) still read "not calibrated" until something else forced
+        // a redraw. Every pane that shows per-embryo state redraws here.
+        publishRoster(); renderSpimTarget(); renderSingle(); renderCalTarget();
     }
 
     function wire() {
@@ -2025,6 +2091,8 @@ const OperateManager = (function () {
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
         const borrow = $('op-cal-borrow');
         if (borrow) borrow.addEventListener('click', borrowCalibration);
+        const all = $('op-cal-all');
+        if (all) all.addEventListener('click', calibrateAll);
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>

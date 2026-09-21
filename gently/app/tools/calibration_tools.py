@@ -11,6 +11,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Below this, a focus sweep's Gaussian fit is reported as low confidence. It is
+# the module's own line (it has warned on it for as long as the sweep has
+# existed); naming it lets the surfaces that offer to REUSE a fit say plainly
+# that the one on offer is a poor one, instead of calling it "the best".
+LOW_CONFIDENCE_R2 = 0.5
+
 import numpy as np  # noqa: E402
 
 from gently.analysis.core import AdaptiveSweepState, FitFunction, fit_focus_curve  # noqa: E402
@@ -1279,7 +1285,7 @@ async def calibrate_embryo(
             total_exposures += sweep_exposures
 
             # Check for sweep failure
-            if result_dict["r_squared"] < 0.5:
+            if result_dict["r_squared"] < LOW_CONFIDENCE_R2:
                 logger.warning(
                     "Low confidence for %s (R2=%.3f)", galvo_name, result_dict["r_squared"]
                 )
@@ -1435,9 +1441,21 @@ async def calibrate_all_embryos(
     embryo_ids: list[str] | None = None,
     skip_edge_detection: bool = False,
     z_buffer_um: float = 25.0,
+    galvo_top: float | None = None,
+    galvo_bottom: float | None = None,
+    edge_step: float = 0.05,
+    edge_max_range: float = 0.5,
+    edge_tolerance_deg: float = 0.20,
+    inset_fraction: float = 0.4,
     context: dict | None = None,
 ) -> str:
-    """Calibrate all embryos sequentially with Claude vision"""
+    """Calibrate embryos sequentially with Claude vision.
+
+    Takes the same parameters as `calibrate_embryo` and forwards them
+    unchanged. It used to accept only two of the eight, so "calibrate this
+    one" and "calibrate the rest" ran different recipes — the batch silently
+    reverted to defaults for the five that place the calibration points.
+    """
     agent = ctx_get(context, "agent")
 
     if not agent:
@@ -1462,6 +1480,12 @@ async def calibrate_all_embryos(
             embryo_id=eid,
             skip_edge_detection=skip_edge_detection,
             z_buffer_um=z_buffer_um,
+            galvo_top=galvo_top,
+            galvo_bottom=galvo_bottom,
+            edge_step=edge_step,
+            edge_max_range=edge_max_range,
+            edge_tolerance_deg=edge_tolerance_deg,
+            inset_fraction=inset_fraction,
             context=context,
         )
         # Get first two lines of result

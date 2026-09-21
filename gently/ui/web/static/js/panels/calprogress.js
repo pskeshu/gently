@@ -50,6 +50,9 @@ const CalProgressPanel = (() => {
     let _shown = -1;      // index being displayed; -1 = follow the newest
     let _running = false;
     let _embryo = null;
+    // A batch walks the slide, so its frames come from several embryos and the
+    // phase line has to say which one is under the objective right now.
+    let _walk = false;
     let _idle = null;
     let _bound = false;
 
@@ -142,7 +145,10 @@ const CalProgressPanel = (() => {
         // The phase is the RUN's phase (the newest frame), even while you are
         // looking back at an earlier one — otherwise scrubbing the strip makes
         // it look as though the run went backwards.
-        wrap.querySelector('.cp-phase').textContent = phaseOf(_frames[_frames.length - 1]);
+        const latest = _frames[_frames.length - 1];
+        const who = _walk ? (latest.metadata || {}).embryo_id : null;
+        wrap.querySelector('.cp-phase').textContent =
+            phaseOf(latest) + (who ? ` · ${who}` : '');
         wrap.querySelector('.cp-count').textContent =
             `${_frames.length} frame${_frames.length === 1 ? '' : 's'}`;
         wrap.querySelector('.cp-dot').hidden = !_running;
@@ -181,11 +187,15 @@ const CalProgressPanel = (() => {
         // A frame for a different embryo belongs to a different run.
         if (_running && _embryo && emb && emb !== _embryo) return;
         if (!_running) {
-            // Nobody pressed Calibrate here — the agent is calibrating. Show it.
+            // Nobody pressed Calibrate here — the agent is calibrating. Show it,
+            // and do not pin it to one embryo: the agent may be walking the
+            // slide too, and dropping the other embryos' frames would make a
+            // batch look like it stalled after the first one.
             _frames = [];
             _shown = -1;
             _running = true;
-            _embryo = emb || null;
+            _embryo = null;
+            _walk = true;
         }
         _frames.push(data);
         if (_frames.length > MAX_FRAMES) {
@@ -204,6 +214,8 @@ const CalProgressPanel = (() => {
         _shown = -1;
         _running = true;
         _embryo = embryoId || null;
+        // No id means "whatever the run visits" — a batch, not one embryo.
+        _walk = !embryoId;
         armIdle();
         if (!_host) return;
         const wrap = _host.querySelector('.cp');

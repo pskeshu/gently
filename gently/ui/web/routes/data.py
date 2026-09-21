@@ -101,6 +101,48 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=503, detail="Agent not ready")
         return agent
 
+    def _calibration_args(payload: dict) -> dict:
+        """The pane's calibration settings, validated. Absent keys keep defaults.
+
+        Every key here is a real parameter of `calibrate_embryo` that the pane
+        used to have no way to reach: whether Claude vision hunts for the galvo
+        edges (and the bounds to use instead when it does not), how far above
+        the coverslip to look, and the two numbers that place the pair of
+        calibration points inside the detected range — which the tool's own
+        docstring warns produce noise-amplified slopes on small embryos when
+        they are wrong.
+
+        Shared by the single-embryo route and the batch, so "calibrate this
+        one" and "calibrate the rest" cannot quietly run different recipes.
+        """
+        args: dict = {}
+        if payload.get("skip_edge_detection") is not None:
+            args["skip_edge_detection"] = bool(payload["skip_edge_detection"])
+        for key, cast, lo, hi in (
+            ("galvo_top", float, -10.0, 10.0),
+            ("galvo_bottom", float, -10.0, 10.0),
+            ("edge_step", float, 0.001, 1.0),
+            ("edge_max_range", float, 0.01, 5.0),
+            ("edge_tolerance_deg", float, 0.0, 2.0),
+            ("inset_fraction", float, 0.0, 0.49),
+            ("z_buffer_um", float, 0.0, 500.0),
+        ):
+            if payload.get(key) is None:
+                continue
+            try:
+                val = cast(payload[key])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f"{key} must be a number") from exc
+            if not (lo <= val <= hi):
+                raise HTTPException(status_code=400, detail=f"{key} must be within [{lo}, {hi}]")
+            args[key] = val
+        # inset_fraction is applied to each side, so 0.5 collapses the two
+        # calibration points onto one another and the slope fit has no baseline.
+        top, bottom = args.get("galvo_top"), args.get("galvo_bottom")
+        if top is not None and bottom is not None and top == bottom:
+            raise HTTPException(status_code=400, detail="galvo_top and galvo_bottom are equal")
+        return args
+
     def _require_calibrated(embryo_ids, payload):
         """Refuse to start unless every named embryo carries a real fit.
 
@@ -1321,40 +1363,7 @@ def create_router(server) -> APIRouter:
         import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
         from gently.harness.tools.registry import get_tool_registry
 
-        # The pane's settings, not a fixed recipe. Everything here is a real
-        # parameter of calibrate_embryo that was previously left at its default
-        # with no way to say otherwise: whether Claude vision hunts for the
-        # galvo edges (and the bounds to use instead when it does not), how far
-        # above the coverslip to look, and the two numbers that place the pair
-        # of calibration points inside the detected range — which the tool's own
-        # docstring warns produce noise-amplified slopes on small embryos when
-        # they are wrong. Absent keys keep the tool's defaults.
-        args: dict = {"embryo_id": embryo_id}
-        if payload.get("skip_edge_detection") is not None:
-            args["skip_edge_detection"] = bool(payload["skip_edge_detection"])
-        for key, cast, lo, hi in (
-            ("galvo_top", float, -10.0, 10.0),
-            ("galvo_bottom", float, -10.0, 10.0),
-            ("edge_step", float, 0.001, 1.0),
-            ("edge_max_range", float, 0.01, 5.0),
-            ("edge_tolerance_deg", float, 0.0, 2.0),
-            ("inset_fraction", float, 0.0, 0.49),
-            ("z_buffer_um", float, 0.0, 500.0),
-        ):
-            if payload.get(key) is None:
-                continue
-            try:
-                val = cast(payload[key])
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail=f"{key} must be a number") from exc
-            if not (lo <= val <= hi):
-                raise HTTPException(status_code=400, detail=f"{key} must be within [{lo}, {hi}]")
-            args[key] = val
-        # inset_fraction is applied to each side, so 0.5 collapses the two
-        # calibration points onto one another and the slope fit has no baseline.
-        if args.get("galvo_top") is not None and args.get("galvo_bottom") is not None:
-            if args["galvo_top"] == args["galvo_bottom"]:
-                raise HTTPException(status_code=400, detail="galvo_top and galvo_bottom are equal")
+        args: dict = {"embryo_id": embryo_id, **_calibration_args(payload)}
 
         registry = get_tool_registry()
         try:
@@ -1373,6 +1382,77 @@ def create_router(server) -> APIRouter:
         calibration = dict(getattr(emb, "calibration", {}) or {}) if emb else {}
         agent.experiment.notify_embryos_changed()
         return {"success": True, "message": message, "calibration": calibration}
+
+    @router.post("/api/devices/calibrate/all", dependencies=[Depends(require_control)])
+    async def calibrate_all_route(payload: dict = Body(default={})):  # noqa: B008
+        """Calibrate several embryos in one go. Body: {scope, ...cal settings}.
+
+        `scope` is "uncalibrated" (the default) or "all"; an explicit
+        `embryo_ids` list overrides both.
+
+        The default is deliberate. The underlying tool, called with no ids,
+        takes `list(experiment.embryos.keys())` — every embryo, including the
+        ones already calibrated and the ones marked skip. Each of those is
+        sixty to eighty exposures of laser on a live sample, so "calibrate
+        all" as written re-burns dose on embryos that need nothing. This route
+        resolves the list itself and defaults to the embryos that actually
+        lack a fit.
+        """
+        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
+        from gently.harness.tools.registry import get_tool_registry
+
+        agent = _require_agent_with_experiment()
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+
+        embryos = agent.experiment.embryos
+        requested = payload.get("embryo_ids")
+        if requested:
+            unknown = [eid for eid in requested if eid not in embryos]
+            if unknown:
+                raise HTTPException(status_code=404, detail=f"unknown embryos: {unknown}")
+            targets = list(requested)
+        else:
+            scope = str(payload.get("scope") or "uncalibrated")
+            if scope not in ("uncalibrated", "all"):
+                raise HTTPException(status_code=400, detail="scope must be uncalibrated or all")
+            targets = [
+                eid
+                for eid, emb in embryos.items()
+                if not emb.should_skip
+                and (scope == "all" or not (emb.calibration or {}).get("slope_um_per_deg"))
+            ]
+        if not targets:
+            raise HTTPException(status_code=409, detail="No embryos need calibrating")
+
+        args = {"embryo_ids": targets, **_calibration_args(payload)}
+        registry = get_tool_registry()
+        try:
+            message = await registry.execute(
+                "calibrate_all_embryos", args, {"agent": agent, "client": client}
+            )
+        except Exception as exc:
+            logger.exception("Batch calibration failed")
+            raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
+        if isinstance(message, str) and message.startswith("Error"):
+            raise HTTPException(status_code=502, detail=message)
+
+        calibrated = [
+            eid
+            for eid in targets
+            if (getattr(embryos.get(eid), "calibration", {}) or {}).get("slope_um_per_deg")
+        ]
+        agent.experiment.notify_embryos_changed()
+        # Which ones FAILED is the part an operator acts on, so it is reported
+        # rather than buried in the tool's prose.
+        return {
+            "success": True,
+            "attempted": targets,
+            "calibrated": calibrated,
+            "failed": [eid for eid in targets if eid not in calibrated],
+            "message": message,
+        }
 
     @router.get("/api/devices/embryos/{embryo_id}/calibration/sources")
     async def calibration_sources(embryo_id: str):

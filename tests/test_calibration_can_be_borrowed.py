@@ -191,3 +191,139 @@ def test_the_sources_listing_excludes_the_embryo_asking() -> None:
     body = _app(embryos).get("/api/devices/embryos/embryo_1/calibration/sources").json()
     assert [s["embryo_id"] for s in body["sources"]] == ["embryo_2"]
     assert body["sources"][0]["quality"] == 0.8
+
+
+# ---------------------------------------------------------------------------
+# Calibrating several at once
+# ---------------------------------------------------------------------------
+
+
+def _batch_app(embryos: dict[str, EmbryoState], executed: list, monkeypatch) -> TestClient:
+    """Like `_app`, but with a connected client and the tool stubbed.
+
+    The real `calibrate_all_embryos` drives hardware. What is under test is
+    which embryos the route hands it and which settings ride along.
+    """
+    import gently.harness.tools.registry as registry_mod
+
+    server = MagicMock()
+    agent = server.agent_bridge.agent
+    agent.experiment.embryos = embryos
+    client = MagicMock()
+    client.is_connected = True
+    agent.client = client
+    agent.lightsheet_monitor = None
+
+    async def _execute(name, args, ctx):
+        executed.append((name, args))
+        for eid in args.get("embryo_ids") or []:
+            emb = embryos.get(eid)
+            if emb is not None and eid != "stubborn":
+                emb.calibration = {"slope_um_per_deg": 100.0, "r_squared": 0.9}
+        return "done"
+
+    reg = MagicMock()
+    reg.execute = _execute
+    app = FastAPI()
+    app.include_router(create_router(server))
+    app.dependency_overrides[auth.require_control] = lambda: True
+    # Through monkeypatch, not a bare assignment: the route imports
+    # get_tool_registry at call time, so a permanent rebind here hands every
+    # later test in the session a mock registry. It did — four unrelated
+    # "is this tool registered" tests went red and passed again in isolation.
+    monkeypatch.setattr(registry_mod, "get_tool_registry", lambda: reg)
+    return TestClient(app)
+
+
+def test_the_batch_skips_embryos_that_already_have_a_fit(monkeypatch) -> None:
+    """Each needless calibration is ~70 exposures of laser on a live embryo."""
+    executed: list = []
+    embryos = {
+        "done": _emb("done", top=0.9, bot=0.9),
+        "todo": _emb("todo"),
+        "skipped": _emb("skipped", should_skip=True),
+    }
+    r = _batch_app(embryos, executed, monkeypatch).post("/api/devices/calibrate/all", json={})
+    assert r.status_code == 200, r.text
+    assert executed[0][1]["embryo_ids"] == ["todo"], (
+        "the batch re-calibrated an embryo that already had a fit, or reached for one marked skip"
+    )
+
+
+def test_scope_all_means_all_but_still_not_the_skipped(monkeypatch) -> None:
+    executed: list = []
+    embryos = {
+        "done": _emb("done", top=0.9, bot=0.9),
+        "todo": _emb("todo"),
+        "skipped": _emb("skipped", should_skip=True),
+    }
+    _batch_app(embryos, executed, monkeypatch).post(
+        "/api/devices/calibrate/all", json={"scope": "all"}
+    )
+    assert sorted(executed[0][1]["embryo_ids"]) == ["done", "todo"]
+
+
+def test_the_batch_runs_the_same_recipe_as_one_embryo(monkeypatch) -> None:
+    executed: list = []
+    embryos = {"todo": _emb("todo")}
+    _batch_app(embryos, executed, monkeypatch).post(
+        "/api/devices/calibrate/all",
+        json={"skip_edge_detection": True, "inset_fraction": 0.25, "z_buffer_um": 40},
+    )
+    args = executed[0][1]
+    assert args["skip_edge_detection"] is True
+    assert args["inset_fraction"] == 0.25 and args["z_buffer_um"] == 40.0, (
+        "the pane's settings were dropped for the batch, so 'calibrate this one' "
+        "and 'calibrate the rest' would run different recipes"
+    )
+
+
+def test_a_partial_batch_names_what_failed(monkeypatch) -> None:
+    """Which ones failed is the part an operator acts on."""
+    executed: list = []
+    embryos = {"todo": _emb("todo"), "stubborn": _emb("stubborn")}
+    r = _batch_app(embryos, executed, monkeypatch).post("/api/devices/calibrate/all", json={})
+    body = r.json()
+    assert body["calibrated"] == ["todo"]
+    assert body["failed"] == ["stubborn"]
+
+
+def test_nothing_to_calibrate_is_a_refusal(monkeypatch) -> None:
+    executed: list = []
+    r = _batch_app({"done": _emb("done", top=0.9, bot=0.9)}, executed, monkeypatch).post(
+        "/api/devices/calibrate/all", json={}
+    )
+    assert r.status_code == 409
+    assert not executed, "the tool was invoked with nothing to do"
+
+
+def test_a_poor_fit_is_not_offered_as_the_best_one() -> None:
+    """The rig's own embryo_1 carries R² 0.06; calling that "best" misleads.
+
+    The offer stays — an operator may know something R² does not — but the
+    copy has to say what it is. Threshold is the module's own low-confidence
+    line, not a new invention.
+    """
+    from gently.app.tools.calibration_tools import LOW_CONFIDENCE_R2
+
+    assert LOW_CONFIDENCE_R2 == 0.5
+    js = OPERATE_JS.read_text(encoding="utf-8")
+    assert re.search(r"const LOW_CONFIDENCE_R2 = 0\.5;", js), (
+        "the pane no longer knows the low-confidence line and will call any fit "
+        "the best one on the slide"
+    )
+    render = re.search(r"function renderBorrow\(emb\) \{(.*?)\n    \}", js, re.S)
+    assert render and "best.score < LOW_CONFIDENCE_R2" in render.group(1), (
+        "a poor fit is advertised as 'the best fit on the slide' again"
+    )
+
+
+def test_the_threshold_is_not_duplicated_as_a_literal() -> None:
+    """One line, one definition — the sweep warns on the same number."""
+    src = (
+        Path(__file__).resolve().parents[1] / "gently" / "app" / "tools" / "calibration_tools.py"
+    ).read_text(encoding="utf-8")
+    assert 'result_dict["r_squared"] < LOW_CONFIDENCE_R2' in src, (
+        "the sweep's low-confidence warning went back to a bare literal, so the "
+        "pane and the sweep can now disagree about what 'poor' means"
+    )

@@ -1542,3 +1542,5 @@
 .cp-thumb.is-key { border-color: var(--op-ink-dim); border-style: dashed; }
 .cp-thumb:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
 [data-theme="light"] .cp { background: var(--op-panel, #fff); }
+/* A caption that is warning rather than explaining. */
+.op-cap-warn { color: var(--op-warn); }
