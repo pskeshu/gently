@@ -1345,3 +1345,6 @@
 }
 .mk-state b { font-variant-numeric: tabular-nums; }
 .mk-state .mk-dim { color: var(--op-ink-dim); }
+
+/* The verb that the marks are waiting for. */
+.lp-btn.mk-primary { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }

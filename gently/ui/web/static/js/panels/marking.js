@@ -52,10 +52,19 @@ const MarkingPanel = (() => {
     // candidate must be next to the strongest one on the frame. Permissive
     // proposes more and leans on the filter; strict cuts at the source.
     const SETTINGS_KEY = 'gently.detect.settings';
+    // The blob finder ranks candidates by peak strength and keeps the ones at
+    // least `peak` as strong as the strongest blob on the frame. That is the
+    // whole setting: a floor relative to the best thing in the image, not an
+    // absolute brightness — so it behaves the same on a dim frame as a bright
+    // one. The labels carry the number, because "Permissive" alone says which
+    // way the dial turns but not what it does.
     const SENSITIVITY = [
-        { id: 'permissive', label: 'Permissive', peak: 0, hint: 'Propose more, let the filter cut' },
-        { id: 'balanced', label: 'Balanced', peak: 0.35, hint: 'Middle ground' },
-        { id: 'strict', label: 'Strict', peak: 0.6, hint: 'Only strong blobs' },
+        { id: 'permissive', label: 'Permissive · every peak', peak: 0,
+          hint: 'Keep every peak the finder can see, and let the Claude filter cut. Capped at 16 candidates while that filter is on.' },
+        { id: 'balanced', label: 'Balanced · \u226535% of the best', peak: 0.35,
+          hint: 'Keep blobs at least 35% as strong as the strongest one on the frame.' },
+        { id: 'strict', label: 'Strict · \u226560% of the best', peak: 0.6,
+          hint: 'Keep only blobs at least 60% as strong as the strongest one. What the detector uses when nothing is filtering.' },
     ];
     const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false };
     let settings = Object.assign({}, DEFAULTS);
@@ -133,19 +142,17 @@ const MarkingPanel = (() => {
      * it is — and the count that matters is the one the next verb will act on.
      */
     function standing(marked, registered) {
-        if (marked) {
-            // "not yet registered" already says the roster is behind; adding
-            // "nothing registered yet" after it said the same thing twice.
-            const roster = registered
-                ? ` \u00b7 <span class="mk-dim">${registered} embryo${registered === 1 ? '' : 's'} in the roster</span>`
-                : '';
-            return `<b>${marked}</b> marked, not yet registered${roster}`;
-        }
-        if (registered) {
-            return `<b>${registered}</b> embryo${registered === 1 ? '' : 's'} registered`
-                + ` \u00b7 <span class="mk-dim">click the image or Detect to add more</span>`;
-        }
-        return '<span class="mk-dim">Nothing marked yet — click the image, or Detect</span>';
+        // PANELS.md rule 6: a section with nothing to say takes no room. Before
+        // anything is marked there is nothing to report here — the hint under
+        // the frame already says clicking it marks, and the roster count lives
+        // in the Embryos rail beside this panel. So this line exists only while
+        // marks are pending, which is also the only time Register and Clear do
+        // anything.
+        if (!marked) return '';
+        const roster = registered
+            ? ` \u00b7 <span class="mk-dim">${registered} embryo${registered === 1 ? '' : 's'} in the roster</span>`
+            : '';
+        return `<b>${marked}</b> marked, not yet registered${roster}`;
     }
 
     function render() {
@@ -191,17 +198,16 @@ const MarkingPanel = (() => {
                   </label>
                 </div>
 
-                <p class="mk-state">${standing(marked, registered)}</p>
+                ${marked ? `<p class="mk-state">${standing(marked, registered)}</p>` : ''}
 
                 <div class="mk-acts">
                   <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}
                     >${s.detecting ? 'Detecting…' : 'Detect'}</button>
-                  <button class="lp-btn" data-act="register" ${marked ? '' : 'disabled'}
-                          title="${marked ? '' : 'Nothing marked to register'}"
-                    >Register${marked ? ` ${marked}` : ''}</button>
-                  <button class="lp-btn" data-act="clear" ${marked ? '' : 'disabled'}
-                          title="${marked ? 'Discard pending marks' : 'No pending marks'}"
-                    >Clear</button>
+                  ${marked ? `
+                  <button class="lp-btn mk-primary" data-act="register"
+                          title="Add these to the roster">Register ${marked}</button>
+                  <button class="lp-btn" data-act="clear"
+                          title="Discard pending marks">Clear</button>` : ''}
                 </div>
 
                 ${session(s)}
