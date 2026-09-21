@@ -1374,6 +1374,107 @@ def create_router(server) -> APIRouter:
         agent.experiment.notify_embryos_changed()
         return {"success": True, "message": message, "calibration": calibration}
 
+    @router.get("/api/devices/embryos/{embryo_id}/calibration/sources")
+    async def calibration_sources(embryo_id: str):
+        """Whose fit this embryo could borrow, best first.
+
+        Calibration costs sixty to eighty exposures of laser on a live embryo.
+        When another embryo on the same slide already carries a good fit, the
+        cheapest calibration is no calibration — `apply_calibration_to_embryos`
+        has existed as an agent tool for this the whole time, with an auto-pick
+        by R², and no surface ever offered it. The pane asks here so it can
+        name the source and its fit rather than showing an unexplained button.
+        """
+        from gently.app.tools.calibration_tools import rank_calibration_sources
+
+        agent = _require_agent_with_experiment()
+        if embryo_id not in agent.experiment.embryos:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+        ranked = rank_calibration_sources(agent.experiment.embryos)
+        return {
+            "sources": [
+                {
+                    "embryo_id": eid,
+                    "quality": round(score, 4),
+                    "slope_um_per_deg": cal.get("slope_um_per_deg"),
+                }
+                for eid, score, cal in ranked
+                if eid != embryo_id
+            ]
+        }
+
+    @router.post(
+        "/api/devices/embryos/{embryo_id}/calibration/borrow",
+        dependencies=[Depends(require_control)],
+    )
+    async def borrow_calibration(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
+        """Copy another embryo's fit onto this one. Body: {"source": id|"auto"}.
+
+        Runs through the registered tool, so the pane and the agent apply
+        calibrations by exactly the same path — including its deep copy, which
+        is what stops the two embryos aliasing one calibration dict.
+
+        Unlike `calibrate`, this needs no microscope: it moves numbers between
+        two embryos. That is the point — it is what you do when the rig is busy
+        or the dose budget is spent.
+        """
+        # The import registers the tool as well as naming the ranking helper,
+        # so the registry lookup below cannot miss.
+        from gently.app.tools.calibration_tools import rank_calibration_sources
+        from gently.harness.tools.registry import get_tool_registry
+
+        agent = _require_agent_with_experiment()
+        if embryo_id not in agent.experiment.embryos:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+
+        source = str(payload.get("source") or "auto")
+        if source in ("auto", "best"):
+            ranked = [
+                (eid, score, cal)
+                for eid, score, cal in rank_calibration_sources(agent.experiment.embryos)
+                if eid != embryo_id
+            ]
+            if not ranked:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No other embryo carries a calibration to borrow",
+                )
+            source = ranked[0][0]
+        elif source == embryo_id:
+            raise HTTPException(status_code=400, detail="an embryo cannot borrow from itself")
+        elif source not in agent.experiment.embryos:
+            raise HTTPException(status_code=404, detail=f"unknown source embryo {source}")
+
+        registry = get_tool_registry()
+        try:
+            message = await registry.execute(
+                "apply_calibration_to_embryos",
+                {
+                    "source_embryo_id": source,
+                    "target_embryo_ids": [embryo_id],
+                    "overwrite_existing": True,
+                },
+                {"agent": agent},
+            )
+        except Exception as exc:
+            logger.exception("Borrowing calibration for %s failed", embryo_id)
+            raise HTTPException(status_code=502, detail=f"apply failed: {exc}") from exc
+
+        emb = agent.experiment.embryos.get(embryo_id)
+        calibration = dict(getattr(emb, "calibration", {}) or {}) if emb else {}
+        if not calibration:
+            # The tool reports its refusals in prose; a pane that showed
+            # "done" over an embryo that is still uncalibrated would be the
+            # false-success the calibration gate exists to prevent.
+            raise HTTPException(status_code=502, detail=str(message))
+        agent.experiment.notify_embryos_changed()
+        return {
+            "success": True,
+            "source_embryo_id": source,
+            "calibration": calibration,
+            "message": message,
+        }
+
     @router.post("/api/embryos/roles", dependencies=[Depends(require_control)])
     async def set_embryo_roles(payload: dict = Body(...)):  # noqa: B008
         """Assign experimental roles to embryos — the Operate "Run" step.

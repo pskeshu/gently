@@ -1223,27 +1223,102 @@ const OperateManager = (function () {
             toastFail(`Calibrate failed (${why(e)})`);
         } finally {
             clearInterval(tick);
-            if (b) { b.disabled = false; b.textContent = 'Calibrate'; }
-            renderCalTarget();
+            if (b) b.disabled = false;
+            renderCalTarget();   // restores the verb: Calibrate / Recalibrate
         }
     }
 
     // The calibration pane names its subject and reports the fit it has, if any
     // — the same field the server-side gate checks, so the pane shows what a run
     // would refuse rather than leaving it to be discovered at Start.
+    const hasFit = emb => {
+        const slope = Number(((emb && emb.calibration) || {}).slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0;
+    };
+
     function renderCalTarget() {
         const t = $('op-cal-target');
         const emb = _embryos.find(e => e.id === _selected);
         if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        renderBorrow(emb);
+        // The verb says which of the two things it does. Running it again over
+        // a fit that already exists is a different decision from calibrating
+        // something that has none, and the button used to read the same.
+        const b = $('op-calibrate');
+        if (b && !b.disabled) b.textContent = hasFit(emb) ? 'Recalibrate' : 'Calibrate';
         const out = $('op-cal-result');
         if (!out || !emb) return;
-        const slope = Number(((emb.calibration || {}).slope_um_per_deg));
-        if (Number.isFinite(slope) && slope !== 0) {
+        if (hasFit(emb)) {
             const r2 = (emb.calibration || {}).r_squared;
-            out.textContent = `${slope.toFixed(1)} µm/deg`
+            out.textContent = `${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
                 + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
         } else {
             out.textContent = 'not calibrated';
+        }
+    }
+
+    // ── borrowing a fit ─────────────────────────────────────────────────────
+    // Named, not generic: an operator about to copy numbers onto a live embryo
+    // should see whose numbers and how good they are before pressing anything.
+    // Same metric as the server: the WORSE of the two ends decides, since an
+    // acquisition spans both galvo extremes and the weaker end dominates.
+    const fitScore = e => {
+        const c = (e || {}).calibration || {};
+        const ends = [c.r_squared_top, c.r_squared_bottom].filter(v => v != null);
+        return ends.length ? Math.min(...ends) : Number(c.r_squared || 0);
+    };
+
+    function bestSource(forEmbryo) {
+        const others = _embryos.filter(e => e.id !== (forEmbryo || {}).id
+            && !e.should_skip && hasFit(e));
+        if (!others.length) return null;
+        others.sort((a, b) => fitScore(b) - fitScore(a));
+        const best = { emb: others[0], score: fitScore(others[0]) };
+        // Only offer a fit that is actually BETTER than the one this embryo
+        // already has. Otherwise the pane offers a downgrade, or — once a fit
+        // has been borrowed — offers to borrow a copy of itself back, which is
+        // what the source embryo did after the first borrow.
+        if (hasFit(forEmbryo) && best.score <= fitScore(forEmbryo)) return null;
+        return best;
+    }
+
+    function renderBorrow(emb) {
+        const btn = $('op-cal-borrow'), note = $('op-cal-borrow-note');
+        const best = emb ? bestSource(emb) : null;
+        // Nothing to lend, nothing to say, no room taken.
+        if (!btn || !note) return;
+        if (!best) { btn.hidden = true; note.hidden = true; return; }
+        btn.hidden = false;
+        note.hidden = false;
+        btn.textContent = `Borrow embryo ${labelFor(best.emb)}’s fit`;
+        note.textContent = `Copies the best fit on the slide (embryo `
+            + `${labelFor(best.emb)}, R² ${best.score.toFixed(2)}) instead of `
+            + `spending ~60 exposures. Slope drifts across the field — verify `
+            + `with one acquisition before a timelapse.`;
+    }
+
+    async function borrowCalibration() {
+        if (!_selected) { toastFail('Select an embryo first'); return; }
+        const b = $('op-cal-borrow'), out = $('op-cal-result');
+        const label = b ? b.textContent : '';
+        if (b) { b.disabled = true; b.textContent = 'Copying…'; }
+        if (out) out.textContent = 'copying…';
+        try {
+            const d = await postJSON(
+                `/api/devices/embryos/${_selected}/calibration/borrow`, { source: 'auto' });
+            const cal = d.calibration || {};
+            toast(`Applied ${d.source_embryo_id}'s calibration`);
+            // Write it onto the local copy rather than waiting for the
+            // EMBRYOS_UPDATE broadcast: the render in `finally` would
+            // otherwise redraw "not calibrated" over an embryo the server has
+            // just confirmed calibrated, for as long as the round trip takes.
+            const mine = _embryos.find(e => e.id === _selected);
+            if (mine) mine.calibration = cal;
+        } catch (e) {
+            toastFail(`Could not borrow a fit (${why(e)})`);
+        } finally {
+            if (b) { b.disabled = false; b.textContent = label; }
+            renderCalTarget();
         }
     }
 
@@ -1948,6 +2023,8 @@ const OperateManager = (function () {
         // back-off button. Restored, and pinned by a test that counts them.
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        const borrow = $('op-cal-borrow');
+        if (borrow) borrow.addEventListener('click', borrowCalibration);
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>

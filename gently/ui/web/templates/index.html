@@ -754,8 +754,15 @@
                       </div>
 
                       <div class="op-actions">
+                        {# The cheapest calibration is no calibration. When another
+                           embryo on the slide already carries a good fit, borrowing
+                           it costs zero exposures — the tool has existed for this
+                           all along and no surface offered it. Hidden entirely when
+                           nothing has a fit to lend. #}
+                        <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
                         <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
                       </div>
+                      <p class="op-cap" id="op-cal-borrow-note" hidden></p>
 
                       {# What the run is looking at, while it looks. Empty —
                          and takes no room — until frames arrive. #}

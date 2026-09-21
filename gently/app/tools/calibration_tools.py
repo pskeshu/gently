@@ -1491,6 +1491,29 @@ def _calibration_quality_score(cal: dict) -> float:
     return float(min(vals)) if vals else 0.0
 
 
+def rank_calibration_sources(embryos: dict) -> list[tuple[str, float, dict]]:
+    """Calibrated embryos, best fit first.
+
+    One metric, one place. The auto-pick inside `apply_calibration_to_embryos`
+    and the Operate pane's "borrow a fit" both need to know which embryo has
+    the best calibration AND how good it is — the pane so it can say whose fit
+    it is about to copy, rather than offering an unexplained button. Two
+    implementations of "best" would drift, and the one the UI showed would
+    stop being the one the tool used.
+
+    Skipped and uncalibrated embryos are not sources. Sorted by
+    ``min(r_squared_top, r_squared_bottom)`` — see `_calibration_quality_score`
+    for why the worse end is the one that matters.
+    """
+    ranked = [
+        (eid, _calibration_quality_score(emb.calibration), emb.calibration)
+        for eid, emb in embryos.items()
+        if not emb.should_skip and emb.calibration
+    ]
+    ranked.sort(key=lambda t: t[1], reverse=True)
+    return ranked
+
+
 def _format_quality(cal: dict) -> str:
     """Human-readable summary of a calibration's fit quality."""
     if not cal:
@@ -1566,17 +1589,12 @@ def apply_calibration_to_embryos(
     # Auto-pick by quality.
     ranking_lines = []
     if source_embryo_id == "auto" or source_embryo_id == "best":
-        ranked = []
-        for eid, emb in agent.experiment.embryos.items():
-            if emb.should_skip or not emb.calibration:
-                continue
-            ranked.append((eid, _calibration_quality_score(emb.calibration), emb.calibration))
+        ranked = rank_calibration_sources(agent.experiment.embryos)
         if not ranked:
             return (
                 "No calibrated embryos available for auto-pick. "
                 "Run calibrate_embryo / calibrate_all_embryos first."
             )
-        ranked.sort(key=lambda t: t[1], reverse=True)
         source_embryo_id = ranked[0][0]
         ranking_lines.append("Ranking by min(R²_top, R²_bot):")
         for eid, _score, cal in ranked:
