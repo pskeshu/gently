@@ -1409,3 +1409,15 @@
 
 /* The verb that the marks are waiting for. */
 .lp-btn.mk-primary { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+
+/* A glyph verb in the narrow rail: square, quiet, and the same hit size as
+   the word it replaces — the row is 168px wide and the label must not wrap. */
+.rp-btn.is-compact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+.rp-btn.rp-centre.is-compact:hover { color: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); }

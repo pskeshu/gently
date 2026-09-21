@@ -1580,7 +1580,15 @@ const OperateManager = (function () {
                 // showFit: the rail is beside every pane, so calibration state is
                 // visible wherever you are — including before you reach the run
                 // and discover the gate refusing it.
-                RosterPanel.mount('op-erail-list', { actions: ['remove'], showFit: true });
+                //
+                // centre: likewise. The rail is the embryo list on EVERY pane,
+                // and the SPIM head is where "go to that embryo" is actually
+                // wanted — it already says "stage is elsewhere" and blanks the
+                // frame, but the only ways to act on that were to leave for the
+                // bottom camera and click the dish, or for Acquisition and press
+                // Centre there. The pane that reports the gap can now close it.
+                RosterPanel.mount('op-erail-list',
+                    { actions: ['centre', 'remove'], showFit: true, compact: true });
             }
             if ($('op-roster')) {
                 RosterPanel.mount('op-roster',
