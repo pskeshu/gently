@@ -104,6 +104,27 @@ def test_the_rail_collapses_and_does_not_offer_the_agent_twice() -> None:
         )
 
 
+def test_the_display_range_is_one_row_under_the_camera() -> None:
+    """Label, histogram, Auto, Reset — on a line, not a stacked panel.
+
+    As three rows (heading, 60px histogram, its own button row) the display
+    range took ~132px directly beneath the frame: more area than the image it
+    describes, on the page whose subject is that image.
+    """
+    js = (WEB / "static" / "js" / "panels" / "imageview.js").read_text(encoding="utf-8")
+    css = (WEB / "static" / "css" / "operate.css").read_text(encoding="utf-8")
+    assert '<div class="iv-row">' in js, (
+        "the display range is no longer a single row — it is back to costing the camera its height"
+    )
+    assert "lp-head" not in js, "the display panel grew its heading row back"
+    assert re.search(r"\.iv-hist\s*\{[^}]*height:\s*30px", css, re.S), (
+        "the histogram is no longer the compact 30px strip"
+    )
+    # The parts must still be there: this is a shrink, not a removal.
+    for part in ("data-hist", 'data-h="lo"', 'data-h="hi"', "data-auto", "data-reset"):
+        assert part in js, f"the display range lost {part} in the shrink"
+
+
 def test_a_rig_that_was_asked_for_and_is_not_running_says_so() -> None:
     """The banner offers Start, takes "not now" for an answer, and never nags a
     session that chose to work without the microscope."""

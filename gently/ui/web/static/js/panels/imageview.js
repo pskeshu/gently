@@ -168,22 +168,26 @@ const ImageView = (() => {
     function buildPanel(v, containerId, host) {
         ensureFilter(v);
 
+        // One row, not three. The display range is set once and then watched;
+        // as a stacked panel (heading, 60px histogram, its own button row) it
+        // took ~132px directly under the camera — more area than the image it
+        // describes, on the page whose subject is that image.
         host.innerHTML = `
-          <div class="lp">
-            <div class="lp-head">
+          <div class="lp lp-compact">
+            <div class="iv-row">
               <span class="lp-title">Display</span>
               <span class="iv-src" title="Histogram of the displayed 8-bit frame, which the device layer has already percentile-stretched. Not raw camera counts (#149).">as displayed</span>
-            </div>
-            <div class="iv-hist" data-hist>
-              <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
-              <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
-                   aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
-              <div class="iv-h iv-h-hi" data-h="hi" role="slider" tabindex="0"
-                   aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-            <div class="iv-acts">
-              <button type="button" class="lp-btn" data-auto>Auto</button>
-              <button type="button" class="lp-btn" data-reset>Reset</button>
+              <div class="iv-hist" data-hist>
+                <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
+                <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
+                     aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
+                <div class="iv-h iv-h-hi" data-h="hi" role="slider" tabindex="0"
+                     aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
+              </div>
+              <div class="iv-acts">
+                <button type="button" class="lp-btn" data-auto>Auto</button>
+                <button type="button" class="lp-btn" data-reset>Reset</button>
+              </div>
             </div>
           </div>`;
 

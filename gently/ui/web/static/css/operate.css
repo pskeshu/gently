@@ -900,10 +900,24 @@
     cursor: help;
 }
 
+/* The display range lives on one line: label, histogram, the two verbs. The
+   histogram keeps the full width it had — it is the part that must stay
+   readable — and gives back the two rows of chrome that surrounded it. */
+.iv-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 5px;   /* room for the handle grips, which hang below */
+}
+.iv-row .lp-title { flex: none; }
+.iv-row .iv-src { flex: none; margin-right: 2px; }
+.iv-row .iv-hist { flex: 1 1 auto; min-width: 120px; }
+.iv-row .iv-acts { flex: none; display: flex; gap: 4px; }
+
 .iv-hist {
     position: relative;
-    height: 60px;
-    margin-bottom: 10px;
+    height: 30px;
+    margin-bottom: 0;
     border-radius: 3px;
     /* Black-to-white behind the bars: the axis being windowed, made literal. */
     background: linear-gradient(90deg, #0b0f14, #2b3441);
