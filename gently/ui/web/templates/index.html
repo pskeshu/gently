@@ -756,6 +756,10 @@
                       <div class="op-actions">
                         <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
                       </div>
+
+                      {# What the run is looking at, while it looks. Empty —
+                         and takes no room — until frames arrive. #}
+                      <div id="op-cal-progress"></div>
                     </div>
                     <figure class="op-preview" id="op-preview" hidden>
                       <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
@@ -1548,6 +1552,7 @@
     <script src="/static/js/panels/camera.js"></script>
     <script src="/static/js/panels/roster.js"></script>
     <script src="/static/js/panels/marking.js"></script>
+    <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>

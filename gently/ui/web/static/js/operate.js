@@ -1199,6 +1199,9 @@ const OperateManager = (function () {
         }, 1000);
         if (b) { b.disabled = true; b.textContent = 'Calibrating… 0s'; }
         if (out) out.textContent = 'sweeping…';
+        // The frames this run is about to take are already broadcast; the
+        // progress panel shows them as they land.
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(_selected);
         try {
             const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`,
                 calibrationSettings());
@@ -1209,8 +1212,14 @@ const OperateManager = (function () {
                     ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
                     : 'done';
             }
+            if (typeof CalProgressPanel !== 'undefined') {
+                CalProgressPanel.finish(true, out ? out.textContent : '');
+            }
         } catch (e) {
             if (out) out.textContent = 'failed';
+            // The frames stay up on a failure — they are the evidence of WHERE
+            // it went wrong, which is exactly what a bare 'failed' withholds.
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
             toastFail(`Calibrate failed (${why(e)})`);
         } finally {
             clearInterval(tick);
@@ -1940,6 +1949,7 @@ const OperateManager = (function () {
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
         wireCalForm();
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>
             b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b =>

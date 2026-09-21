@@ -1469,3 +1469,76 @@
 }
 .op-btn-quiet:hover { color: var(--op-ink); border-color: var(--op-rule); }
 
+/* ── calibration progress ───────────────────────────────────────────────────
+   The frames a calibration is judging, while it judges them. Dark first, light
+   override second — the file's order is the tie-break at equal specificity. */
+.cp {
+    margin-top: var(--op-2);
+    padding: var(--op-2) var(--op-3);
+    border: 1px solid var(--op-rule);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.cp-head {
+    display: flex;
+    align-items: center;
+    gap: var(--op-2);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.cp-phase { color: var(--op-ink); letter-spacing: 0.04em; }
+.cp-count { margin-left: auto; font-family: var(--op-mono); font-variant-numeric: tabular-nums; }
+/* A pulse while frames are still coming, gone the moment they stop. */
+.cp-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent, #3b82f6);
+    animation: cp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .cp-dot { animation: none; } }
+.cp-stage {
+    display: flex;
+    justify-content: center;
+    background: #000;
+    border-radius: 6px;
+    min-height: 90px;
+    overflow: hidden;
+}
+.cp-img { max-width: 100%; max-height: 260px; object-fit: contain; display: block; }
+.cp-cap {
+    font-family: var(--op-mono);
+    font-size: 0.7rem;
+    color: var(--op-ink-dim);
+    min-height: 1em;
+}
+.cp-strip {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+}
+.cp-thumb {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: #000;
+    cursor: pointer;
+    overflow: hidden;
+}
+.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-thumb.is-on { border-color: var(--accent, #3b82f6); }
+/* The conclusions — the fitted curves, the montage, the summary — are what you
+   scroll back for, so they are findable in a strip of near-identical frames. */
+.cp-thumb.is-key { border-color: var(--op-ink-dim); border-style: dashed; }
+.cp-thumb:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+[data-theme="light"] .cp { background: var(--op-panel, #fff); }
