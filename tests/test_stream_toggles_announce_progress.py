@@ -47,6 +47,26 @@ def test_both_stream_toggles_name_the_verb_in_progress() -> None:
     assert "aria-busy" in js, "the pending state is no longer announced to screen readers"
 
 
+def test_the_pending_state_is_on_screen_long_enough_to_read() -> None:
+    """A warm device layer answers in tens of milliseconds.
+
+    Without a floor the honest "Starting…" rendered for a frame and the
+    operator saw only an abrupt flip — which is indistinguishable from the
+    defect this replaced, and was reported as exactly that.
+    """
+    js = OPERATE_JS.read_text(encoding="utf-8")
+    m = re.search(r"MIN_PENDING_MS\s*=\s*(\d+)", js)
+    assert m, "the minimum pending time is gone"
+    floor = int(m.group(1))
+    assert floor >= 250, f"{floor}ms of feedback is a flicker, not a state"
+    # The caller's state change runs through the same timer, so the label can
+    # never skip from "Start camera" straight to "Stop camera".
+    assert "done(() => {" in js, (
+        "the toggles no longer hand their state change to the pending helper, so a fast "
+        "response will jump past the in-flight label again"
+    )
+
+
 def test_a_pending_control_does_not_render_as_a_forbidden_one() -> None:
     css = OPERATE_CSS.read_text(encoding="utf-8")
     block = re.search(r"\.op-btn\.is-pending[^{]*\{([^}]*)\}", css, re.S)

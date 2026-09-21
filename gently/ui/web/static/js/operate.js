@@ -835,8 +835,15 @@ const OperateManager = (function () {
     // cursor — the visual language of "you may not press this", used to mean
     // "your press is being carried out". Now it names the verb in progress and
     // spins, stays at full strength, and only the cursor says "wait".
+    // A state that flashes past is not feedback. When the device layer is warm
+    // the stream call answers in tens of milliseconds, so the honest "Starting…"
+    // rendered for a frame and the operator saw only an abrupt flip — the
+    // complaint that started this. Hold it long enough to be read.
+    const MIN_PENDING_MS = 320;
+
     function pending(btn, verb) {
-        if (!btn) return () => {};
+        if (!btn) return settle => { if (settle) settle(); };
+        const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
         const label = btn.textContent;
         btn.disabled = true;
         btn.classList.add('is-pending');
@@ -851,11 +858,20 @@ const OperateManager = (function () {
         // Restores the label the operator pressed. On success the caller's
         // applyX() overwrites it with the new one a beat later; on failure it
         // is what the button should have said all along.
-        return () => {
-            btn.disabled = false;
-            btn.classList.remove('is-pending');
-            btn.removeAttribute('aria-busy');
-            btn.textContent = label;
+        // `settle` is the caller's state change (applyX). It runs when the
+        // pending state has had its minimum time, so the label goes
+        // "Start camera" → "Starting…" → "Stop camera" in that order, never
+        // skipping the middle.
+        return settle => {
+            const now = (window.performance && performance.now) ? performance.now() : Date.now();
+            const left = Math.max(0, MIN_PENDING_MS - (now - t0));
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.classList.remove('is-pending');
+                btn.removeAttribute('aria-busy');
+                btn.textContent = label;
+                if (settle) settle();
+            }, left);
         };
     }
 
@@ -866,9 +882,10 @@ const OperateManager = (function () {
             const ep = _bottomOn ? '/api/devices/bottom_camera/stream/stop'
                 : '/api/devices/bottom_camera/stream/start';
             const d = await postJSON(ep, {});
-            done();
-            applyBottomCam(!!d.streaming);
-            _bottomWasOn = _bottomOn;
+            done(() => {
+                applyBottomCam(!!d.streaming);
+                _bottomWasOn = _bottomOn;
+            });
         } catch (e) { done(); toastFail(`Camera toggle failed (${why(e)})`); }
     }
     function applyBottomCam(on) {
@@ -991,9 +1008,10 @@ const OperateManager = (function () {
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
             const d = await postJSON(ep, {});
-            done();
-            applySpim(!!d.streaming);
-            _spimWasOn = _spimOn;
+            done(() => {
+                applySpim(!!d.streaming);
+                _spimWasOn = _spimOn;
+            });
         } catch (e) { done(); toastFail(`SPIM view toggle failed (${why(e)})`); }
     }
     function applySpim(on) {
