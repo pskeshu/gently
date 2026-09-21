@@ -829,16 +829,47 @@ const OperateManager = (function () {
     }
 
     // ══ BOTTOM PANE ═════════════════════════════════════════════════════════
+    // A stream that takes a second to come up needs the button to say so. The
+    // old behaviour was to disable it and leave the label alone, so for the
+    // whole wait it read "Start camera" at 40% opacity with a not-allowed
+    // cursor — the visual language of "you may not press this", used to mean
+    // "your press is being carried out". Now it names the verb in progress and
+    // spins, stays at full strength, and only the cursor says "wait".
+    function pending(btn, verb) {
+        if (!btn) return () => {};
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.classList.add('is-pending');
+        btn.textContent = '';
+        const spin = document.createElement('span');
+        spin.className = 'op-btn-spin';
+        spin.setAttribute('aria-hidden', 'true');
+        btn.appendChild(spin);
+        btn.appendChild(document.createTextNode(verb));
+        // Screen readers get the same fact, not just the spinner.
+        btn.setAttribute('aria-busy', 'true');
+        // Restores the label the operator pressed. On success the caller's
+        // applyX() overwrites it with the new one a beat later; on failure it
+        // is what the button should have said all along.
+        return () => {
+            btn.disabled = false;
+            btn.classList.remove('is-pending');
+            btn.removeAttribute('aria-busy');
+            btn.textContent = label;
+        };
+    }
+
     async function toggleBottomCam() {
-        const b = $('op-cam-toggle'); if (b) b.disabled = true;
+        const b = $('op-cam-toggle');
+        const done = pending(b, _bottomOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _bottomOn ? '/api/devices/bottom_camera/stream/stop'
                 : '/api/devices/bottom_camera/stream/start';
             const d = await postJSON(ep, {});
+            done();
             applyBottomCam(!!d.streaming);
             _bottomWasOn = _bottomOn;
-        } catch (e) { toastFail(`Camera toggle failed (${why(e)})`); }
-        finally { if (b) b.disabled = false; }
+        } catch (e) { done(); toastFail(`Camera toggle failed (${why(e)})`); }
     }
     function applyBottomCam(on) {
         _bottomOn = on;
@@ -955,14 +986,15 @@ const OperateManager = (function () {
 
     // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
-        const b = $('op-spim-toggle'); if (b) b.disabled = true;
+        const b = $('op-spim-toggle');
+        const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
             const d = await postJSON(ep, {});
+            done();
             applySpim(!!d.streaming);
             _spimWasOn = _spimOn;
-        } catch (e) { toastFail(`SPIM view toggle failed (${why(e)})`); }
-        finally { if (b) b.disabled = false; }
+        } catch (e) { done(); toastFail(`SPIM view toggle failed (${why(e)})`); }
     }
     function applySpim(on) {
         _spimOn = on;
