@@ -44,6 +44,11 @@ const RosterPanel = (() => {
         centre: {
             cls: 'rp-centre',
             text: 'Centre',
+            // A crosshair over a dot: the stage brought onto this embryo.
+            icon: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"'
+                + ' stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
+                + '<circle cx="12" cy="12" r="6.5"></circle><circle cx="12" cy="12" r="1.6" fill="currentColor"></circle>'
+                + '<path d="M12 2v3"></path><path d="M12 19v3"></path><path d="M2 12h3"></path><path d="M19 12h3"></path></svg>',
             title: 'Centre the stage on this embryo',
             verb: 'centre',
         },
@@ -56,6 +61,10 @@ const RosterPanel = (() => {
             actions: (opts && opts.actions) || [],
             emptyAction: opts && opts.emptyAction,
             showFit: !!(opts && opts.showFit),
+            // The rail is ~168px beside the frame. A word-width button there
+            // pushes "Embryo 1  −184, −585" onto three wrapped lines, so its
+            // verbs draw as glyphs with the label carried by title/aria-label.
+            compact: !!(opts && opts.compact),
         });
         if (mounts.size === 1) {
             SharedState.on('embryos', render);
@@ -143,8 +152,10 @@ const RosterPanel = (() => {
                          data-verb="toggleRole" data-id="${esc(emb.id)}"
                          >${isRef ? 'ref' : 'subj'}</button>`;
             }
-            return `<button class="rp-btn ${a.cls}" type="button" title="${a.title}"
-                     data-verb="${a.verb}" data-id="${esc(emb.id)}">${a.text}</button>`;
+            const glyph = opts.compact && a.icon ? a.icon : a.text;
+            return `<button class="rp-btn ${a.cls}${opts.compact ? ' is-compact' : ''}" type="button"
+                     title="${a.title}" aria-label="${a.title}"
+                     data-verb="${a.verb}" data-id="${esc(emb.id)}">${glyph}</button>`;
         }).join('');
 
         // Two states, deliberately distinct: `is-sel` is membership of the

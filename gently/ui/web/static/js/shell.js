@@ -12,8 +12,37 @@
 const Shell = (() => {
     let railItems = [];
 
+    const COLLAPSE_KEY = 'gently.rail.collapsed';
+
     function setActive(tabName) {
         railItems.forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+    }
+
+    // The rail collapses to an icon strip. The choice is per browser and
+    // survives reloads: an operator who wants the width for the camera should
+    // not have to reclaim it every session. localStorage can throw (private
+    // window, blocked site data), so every access is guarded and the rail
+    // simply stays expanded if it cannot be read.
+    function applyCollapsed(on) {
+        document.body.classList.toggle('rail-collapsed', on);
+        const btn = document.getElementById('v2-rail-collapse');
+        if (btn) {
+            btn.setAttribute('aria-expanded', String(!on));
+            btn.title = on ? 'Expand the sidebar' : 'Collapse the sidebar';
+        }
+    }
+
+    function initCollapse() {
+        const btn = document.getElementById('v2-rail-collapse');
+        if (!btn) return;
+        let saved = false;
+        try { saved = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { /* stays expanded */ }
+        applyCollapsed(saved);
+        btn.addEventListener('click', () => {
+            const on = !document.body.classList.contains('rail-collapsed');
+            applyCollapsed(on);
+            try { localStorage.setItem(COLLAPSE_KEY, on ? '1' : '0'); } catch (e) { /* not fatal */ }
+        });
     }
 
     function currentTab() {
@@ -49,10 +78,7 @@ const Shell = (() => {
             ClientEventBus.on('EMBRYOS_UPDATE', () => renderStrip());
         }
 
-        const chatBtn = document.getElementById('v2-rail-chat');
-        if (chatBtn) chatBtn.addEventListener('click', () => {
-            if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) AgentChat.togglePanel(true);
-        });
+        initCollapse();
 
         renderStrip();
     }

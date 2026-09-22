@@ -213,5 +213,5 @@ const LogConsole = (function () {
     }
 
     document.addEventListener('DOMContentLoaded', wire);
-    return { open, close, toggle };
+    return { open, close, toggle, selectSource };
 })();

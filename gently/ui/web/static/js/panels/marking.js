@@ -38,6 +38,60 @@ const MarkingPanel = (() => {
     const hosts = new Set();
     let ticker = null;
 
+    // Detection is a three-stage pipeline, and which stages run is the
+    // operator's call:
+    //
+    //   blobs   flat-field + scale-matched blob finder. Sets RECALL — every
+    //           later stage only removes or refines what this proposes.
+    //   claude  classifies each candidate crop and drops the ones that are not
+    //           embryos. Removes only, never adds. Needs an API key.
+    //   sam     segments inside the boxes it is handed, for an outline and an
+    //           area. Needs the checkpoint on the device layer.
+    //
+    // Sensitivity is the blob finder's min_relative_peak: how strong a
+    // candidate must be next to the strongest one on the frame. Permissive
+    // proposes more and leans on the filter; strict cuts at the source.
+    const SETTINGS_KEY = 'gently.detect.settings';
+    // The blob finder ranks candidates by peak strength and keeps the ones at
+    // least `peak` as strong as the strongest blob on the frame. That is the
+    // whole setting: a floor relative to the best thing in the image, not an
+    // absolute brightness — so it behaves the same on a dim frame as a bright
+    // one. The labels carry the number, because "Permissive" alone says which
+    // way the dial turns but not what it does.
+    const SENSITIVITY = [
+        { id: 'permissive', label: 'Permissive · every peak', peak: 0,
+          hint: 'Keep every peak the finder can see, and let the Claude filter cut. Capped at 16 candidates while that filter is on.' },
+        { id: 'balanced', label: 'Balanced · \u226535% of the best', peak: 0.35,
+          hint: 'Keep blobs at least 35% as strong as the strongest one on the frame.' },
+        { id: 'strict', label: 'Strict · \u226560% of the best', peak: 0.6,
+          hint: 'Keep only blobs at least 60% as strong as the strongest one. What the detector uses when nothing is filtering.' },
+    ];
+    const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false };
+    let settings = Object.assign({}, DEFAULTS);
+    try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+        if (saved && typeof saved === 'object') settings = Object.assign({}, DEFAULTS, saved);
+    } catch (e) { /* defaults */ }
+
+    function saveSettings() {
+        try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* not fatal */ }
+    }
+
+    function sensitivity() {
+        return SENSITIVITY.find(x => x.id === settings.sensitivity) || SENSITIVITY[0];
+    }
+
+    // What the Detect verb should run. operate.js owns the request; this panel
+    // owns the choice.
+    function detectOptions() {
+        return {
+            use_claude_review: !!settings.claude,
+            use_sam: !!settings.sam,
+            min_relative_peak: sensitivity().peak,
+            fresh: !!settings.fresh,
+        };
+    }
+
     const state = () => SharedState.get('marking') || {};
     const verbs = () =>
         (typeof OperateManager !== 'undefined' && OperateManager.marking) || null;
@@ -70,6 +124,37 @@ const MarkingPanel = (() => {
         return Math.round((Date.now() - s.startedAt) / 1000);
     }
 
+    /**
+     * Where the operator stands, as a sentence.
+     *
+     * This used to be two big numbers side by side — "0 MARKED  4 REGISTERED" —
+     * which reads as a pair of comparable quantities and is not one. They are
+     * different kinds of thing at different stages of the same journey:
+     *
+     *   marked      points placed on THIS frame, held in the browser, lost on
+     *               reload, and the only thing Register acts on
+     *   registered  embryos the server holds for the session — the roster the
+     *               rail lists and the SPIM head drives to
+     *
+     * The confusing state is after a successful Register, when the pair reads
+     * "0 marked, 4 registered" with two dead buttons: nothing wrong, but it
+     * looks like a failure. Said as a sentence, that state reads as the success
+     * it is — and the count that matters is the one the next verb will act on.
+     */
+    function standing(marked, registered) {
+        // PANELS.md rule 6: a section with nothing to say takes no room. Before
+        // anything is marked there is nothing to report here — the hint under
+        // the frame already says clicking it marks, and the roster count lives
+        // in the Embryos rail beside this panel. So this line exists only while
+        // marks are pending, which is also the only time Register and Clear do
+        // anything.
+        if (!marked) return '';
+        const roster = registered
+            ? ` \u00b7 <span class="mk-dim">${registered} embryo${registered === 1 ? '' : 's'} in the roster</span>`
+            : '';
+        return `<b>${marked}</b> marked, not yet registered${roster}`;
+    }
+
     function render() {
         const s = state();
         if (s.detecting) startTicker(); else stopTicker();
@@ -80,36 +165,54 @@ const MarkingPanel = (() => {
         hosts.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
+            const sens = sensitivity();
             el.innerHTML = `
               <div class="lp">
                 <div class="lp-head">
-                  <span class="lp-title">Marking</span>
+                  <span class="lp-title">Detect</span>
                   ${s.detecting
                     ? `<span class="mk-busy">detecting… ${secs}s</span>`
                     : ''}
                 </div>
 
-                <div class="mk-counts">
-                  <div class="mk-count">
-                    <b class="mk-n">${marked}</b>
-                    <span class="mk-cap">marked</span>
-                  </div>
-                  <div class="mk-count">
-                    <b class="mk-n">${registered}</b>
-                    <span class="mk-cap">registered</span>
-                  </div>
+                <div class="mk-config">
+                <div class="mk-pipe" role="group" aria-label="Detection pipeline">
+                  <span class="mk-stage is-fixed" title="Flat-field + blob candidate finder. Sets recall: the later stages only remove or refine what this proposes.">Blobs</span>
+                  <span class="mk-arrow" aria-hidden="true">›</span>
+                  <button type="button" class="mk-stage" data-set="claude" aria-pressed="${settings.claude}"
+                          title="Claude classifies each candidate crop and drops the ones that are not embryos. Removes only; needs an API key.">Claude filter</button>
+                  <span class="mk-arrow" aria-hidden="true">›</span>
+                  <button type="button" class="mk-stage" data-set="sam" aria-pressed="${settings.sam}"
+                          title="SAM segments inside each candidate box for an outline and an area. Needs the checkpoint on the device layer.">SAM outline</button>
+                  <button class="lp-btn mk-detect" data-act="detect" ${s.detecting ? 'disabled' : ''}
+                          title="Run the pipeline above on the bottom camera"
+                    >${s.detecting ? 'Detecting…' : 'Detect'}</button>
                 </div>
 
-                <div class="mk-acts">
-                  <button class="lp-btn" data-act="detect" ${s.detecting ? 'disabled' : ''}
-                    >${s.detecting ? 'Detecting…' : 'Detect'}</button>
-                  <button class="lp-btn" data-act="register" ${marked ? '' : 'disabled'}
-                          title="${marked ? '' : 'Nothing marked to register'}"
-                    >Register${marked ? ` ${marked}` : ''}</button>
-                  <button class="lp-btn" data-act="clear" ${marked ? '' : 'disabled'}
-                          title="${marked ? 'Discard pending marks' : 'No pending marks'}"
-                    >Clear</button>
+                <div class="mk-opts">
+                  <label class="mk-opt">
+                    <span class="mk-opt-cap">Sensitivity</span>
+                    <select class="mk-select" data-set="sensitivity" title="${escape(sens.hint)}">
+                      ${SENSITIVITY.map(o => `<option value="${o.id}"${o.id === settings.sensitivity ? ' selected' : ''}>${o.label}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label class="mk-opt mk-opt-check" title="Capture a new frame instead of detecting on the one already on screen.">
+                    <input type="checkbox" data-set="fresh"${settings.fresh ? ' checked' : ''}>
+                    <span class="mk-opt-cap">New capture</span>
+                  </label>
                 </div>
+                </div>
+
+                ${marked ? `
+                <div class="mk-foot">
+                  <p class="mk-state">${standing(marked, registered)}</p>
+                  <div class="mk-acts">
+                  <button class="lp-btn mk-primary" data-act="register"
+                          title="Add these to the roster">Register ${marked}</button>
+                    <button class="lp-btn" data-act="clear"
+                            title="Discard pending marks">Clear</button>
+                  </div>
+                </div>` : ''}
 
                 ${session(s)}
                 ${s.note ? `<p class="mk-note">${escape(s.note)}</p>` : ''}
@@ -167,13 +270,36 @@ const MarkingPanel = (() => {
                 const v = verbs();
                 if (!v) return;
                 const fn = v[b.dataset.act];
-                // `data-index` is only present on the per-marker role toggles.
-                if (typeof fn === 'function') fn(b.dataset.index);
+                // Detect carries the pipeline the operator chose; the other
+                // verbs take `data-index`, present only on the role toggles.
+                if (typeof fn !== 'function') return;
+                if (b.dataset.act === 'detect') fn(detectOptions());
+                else fn(b.dataset.index);
+            };
+        });
+
+        // The two optional stages toggle in place. Re-render rather than
+        // mutate, so every mounted copy of the panel agrees.
+        el.querySelectorAll('.mk-stage[data-set]').forEach(b => {
+            b.onclick = () => {
+                const key = b.dataset.set;
+                settings[key] = !settings[key];
+                saveSettings();
+                render();
+            };
+        });
+
+        el.querySelectorAll('select[data-set], input[data-set]').forEach(input => {
+            input.onchange = () => {
+                settings[input.dataset.set] =
+                    input.type === 'checkbox' ? !!input.checked : input.value;
+                saveSettings();
+                render();
             };
         });
     }
 
-    return { mount, unmount, render, _elapsed: elapsed };
+    return { mount, unmount, render, _elapsed: elapsed, _options: detectOptions };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = MarkingPanel;

@@ -12,6 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/boot-banner.css">
+    <link rel="stylesheet" href="/static/css/rig-menu.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
@@ -131,29 +132,67 @@
          real column that pushes .app-main). Header + navbar stay full-width above. -->
     <div class="app-shell">
     {% if ux_v2 %}
+    {# The rail carries an icon per destination so it stays readable when it is
+       collapsed to a strip (shell.js remembers the choice). The agent is NOT
+       here: it is the docked right rail and Ctrl/Cmd+J, and a third entry
+       point on the opposite edge only made the workspace noisier. #}
     <aside class="v2-rail" id="v2-rail">
       <nav class="v2-nav">
         <div class="v2-nav-group">
           <div class="v2-nav-label">Now</div>
-          <button class="v2-nav-item" data-tab="home">Home</button>
-          <button class="v2-nav-item" data-tab="experiment">Operations</button>
-          <button class="v2-nav-item" data-tab="embryos">Embryos</button>
+          <button class="v2-nav-item" data-tab="home" title="Home">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.8V21h14V9.8"></path></svg>
+            <span class="v2-nav-text">Home</span>
+          </button>
+          <button class="v2-nav-item" data-tab="experiment" title="Operations">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 12h10"></path><path d="M4 17h13"></path><circle cx="18" cy="12" r="2"></circle></svg>
+            <span class="v2-nav-text">Operations</span>
+          </button>
+          <button class="v2-nav-item" data-tab="embryos" title="Embryos">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3.2"></circle></svg>
+            <span class="v2-nav-text">Embryos</span>
+          </button>
         </div>
         <div class="v2-nav-group">
           <div class="v2-nav-label">Library</div>
-          <button class="v2-nav-item" data-tab="plans">Plans</button>
-          <button class="v2-nav-item" data-tab="sessions">Sessions</button>
-          <button class="v2-nav-item" data-tab="notebook">Notebook</button>
-          <button class="v2-nav-item" data-tab="gallery">Gallery</button>
+          <button class="v2-nav-item" data-tab="plans" title="Plans">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14v16H5z"></path><path d="M8.5 9h7"></path><path d="M8.5 13h7"></path></svg>
+            <span class="v2-nav-text">Plans</span>
+          </button>
+          <button class="v2-nav-item" data-tab="sessions" title="Sessions">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 1.8"></path></svg>
+            <span class="v2-nav-text">Sessions</span>
+          </button>
+          <button class="v2-nav-item" data-tab="notebook" title="Notebook">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h11v16H7z"></path><path d="M7 4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2"></path><path d="M10.5 9h4.5"></path></svg>
+            <span class="v2-nav-text">Notebook</span>
+          </button>
+          <button class="v2-nav-item" data-tab="gallery" title="Gallery">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="m4 15.5 4.5-4 4 3.5 3-2.5L20 17"></path><circle cx="9" cy="9" r="1.3"></circle></svg>
+            <span class="v2-nav-text">Gallery</span>
+          </button>
         </div>
         <div class="v2-nav-group">
           <div class="v2-nav-label">System</div>
-          <button class="v2-nav-item" data-tab="devices">Devices</button>
-          <button class="v2-nav-item" data-tab="calibration">Calibration</button>
-          <button class="v2-nav-item" data-tab="events">Logs</button>
+          <button class="v2-nav-item" data-tab="devices" title="Devices">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3.5"></path><path d="M9 6.5h6l-1.2 5H10.2z"></path><path d="M12 11.5V21"></path><path d="M8 21h8"></path></svg>
+            <span class="v2-nav-text">Devices</span>
+          </button>
+          <button class="v2-nav-item" data-tab="calibration" title="Calibration">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4v4"></path><path d="M12 16v4"></path><path d="M4 12h4"></path><path d="M16 12h4"></path></svg>
+            <span class="v2-nav-text">Calibration</span>
+          </button>
+          <button class="v2-nav-item" data-tab="events" title="Logs">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14"></path><path d="M5 10h14"></path><path d="M5 15h9"></path><path d="M5 20h6"></path></svg>
+            <span class="v2-nav-text">Logs</span>
+          </button>
         </div>
       </nav>
-      <button class="v2-rail-chat" id="v2-rail-chat"><span class="v2-rail-orb"></span>Talk to Gently</button>
+      <button class="v2-rail-collapse" id="v2-rail-collapse" type="button"
+              aria-controls="v2-rail" aria-expanded="true" title="Collapse the sidebar">
+        <svg class="v2-rail-collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 7l-5 5 5 5"></path></svg>
+        <span class="v2-nav-text">Collapse</span>
+      </button>
     </aside>
     {% endif %}
     <div class="app-main">
@@ -434,56 +473,14 @@
                     </div>
                 </div>
                 <div class="devices-status">
-                    <div class="devices-temp" id="devices-temp" title="Temperature controller" hidden>
-                        <span class="devices-temp-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/>
-                            </svg>
-                        </span>
-                        <span class="devices-temp-readout" id="devices-temp-readout" title="Water temperature → setpoint">—</span>
-                        <input class="devices-temp-input" id="devices-temp-input" type="number"
-                               min="0" max="99.9" step="0.1" inputmode="decimal" placeholder="°C"
-                               aria-label="Target temperature in Celsius">
-                        <button class="devices-temp-set" id="devices-temp-set" type="button"
-                                title="Set temperature setpoint">Set</button>
-                    </div>
-                    <button class="devices-room-light" id="devices-room-light-toggle" type="button"
-                            title="Toggle room light" aria-pressed="false" hidden disabled>
-                        <span class="devices-room-light-bulb" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M9 18h6"/>
-                                <path d="M10 21h4"/>
-                                <path d="M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/>
-                            </svg>
-                        </span>
-                        <span class="devices-room-light-label" id="devices-room-light-label">Room light</span>
-                    </button>
                     <span class="devices-status-led" id="devices-stream-pill">disconnected</span>
                     <span class="devices-status-meta" id="devices-status-meta">no data</span>
                 </div>
             </div>
 
-            <!-- Device-layer supervision card (device-layer.js) — runtime mirror
-                 of the launch gate's hardware block: status + Start/Stop + log tail. -->
-            <div class="devices-layer-card" id="devices-layer-card" hidden>
-                <div class="devices-layer-head">
-                    <span class="devices-card-title">Device Layer</span>
-                    <span class="devices-status-pill" id="devices-layer-pill">unknown</span>
-                    <span class="devices-layer-meta" id="devices-layer-meta"></span>
-                    <span class="devices-layer-hint" id="devices-layer-hint" hidden></span>
-                </div>
-                <div class="devices-layer-actions">
-                    <button type="button" class="devices-layer-btn is-primary"
-                            id="devices-layer-start">Start</button>
-                    <button type="button" class="devices-layer-btn"
-                            id="devices-layer-stop">Stop</button>
-                    <button type="button" class="devices-layer-log-toggle"
-                            id="devices-layer-log-toggle" aria-expanded="false">Log</button>
-                </div>
-                <pre class="devices-layer-log" id="devices-layer-log" hidden></pre>
-            </div>
+            {# The device layer, water and room light moved into the header's rig
+               menu (rig-menu.js): they belong to the rig, not to this tab, and the
+               card's height belongs to the camera. #}
 
             <!-- Operate view: three independent instrument surfaces.
                  Bottom cam (see the dish, focus, find embryos) · SPIM head (bring
@@ -703,9 +700,79 @@
                         <span class="op-num" id="op-cal-target">no embryo selected</span></div>
                       <div class="op-row"><span class="op-label">Piezo–galvo</span>
                         <span class="op-num" id="op-cal-result">—</span></div>
+
+                      {# The routine's own parameters, not a fixed recipe. Edge
+                         detection and the z buffer are the two an operator
+                         changes between samples; the rest place the pair of
+                         calibration points inside the detected galvo range and
+                         are wrong to touch without a reason, so they sit behind
+                         a disclosure. Defaults match calibrate_embryo. #}
+                      <div class="op-row op-row-wrap cal-opts">
+                        <label class="cal-opt">
+                          <input type="checkbox" id="cal-edges" checked>
+                          <span class="op-label">Find galvo edges</span>
+                        </label>
+                        <label class="cal-opt">
+                          <span class="op-label">Z buffer</span>
+                          <input type="number" class="cal-num" id="cal-zbuf" min="0" max="500" step="1" value="25">
+                          <span class="op-unit">µm</span>
+                        </label>
+                        <button type="button" class="op-btn op-btn-quiet" id="cal-more"
+                                aria-expanded="false" aria-controls="cal-adv">More…</button>
+                      </div>
+
+                      <div class="cal-adv" id="cal-adv" hidden>
+                        <div class="op-row op-row-wrap" id="cal-adv-bounds" hidden>
+                          <label class="cal-opt"><span class="op-label">Galvo top</span>
+                            <input type="number" class="cal-num" id="cal-gtop" step="0.01" placeholder="auto"></label>
+                          <label class="cal-opt"><span class="op-label">bottom</span>
+                            <input type="number" class="cal-num" id="cal-gbot" step="0.01" placeholder="auto"></label>
+                        </div>
+                        <div class="op-row op-row-wrap">
+                          <label class="cal-opt"><span class="op-label">Edge step</span>
+                            <input type="number" class="cal-num" id="cal-estep" min="0.001" max="1" step="0.01" value="0.05">
+                            <span class="op-unit">deg</span></label>
+                          <label class="cal-opt"><span class="op-label">Search range</span>
+                            <input type="number" class="cal-num" id="cal-erange" min="0.01" max="5" step="0.05" value="0.5">
+                            <span class="op-unit">deg</span></label>
+                        </div>
+                        <div class="op-row op-row-wrap">
+                          <label class="cal-opt"><span class="op-label">Edge tolerance</span>
+                            <input type="number" class="cal-num" id="cal-etol" min="0" max="2" step="0.01" value="0.2">
+                            <span class="op-unit">deg</span></label>
+                          <label class="cal-opt"><span class="op-label">Inset</span>
+                            <input type="number" class="cal-num" id="cal-inset" min="0" max="0.49" step="0.05" value="0.4">
+                            <span class="op-unit">of range</span></label>
+                        </div>
+                        <p class="op-cap" id="cal-adv-note">
+                          Tolerance widens the detected range; inset moves the two
+                          calibration points in from its ends. Together they set how
+                          far apart the points sit — too close and the two-point
+                          slope fit amplifies noise on small embryos.
+                        </p>
+                        <button type="button" class="op-btn op-btn-quiet" id="cal-reset">Reset to defaults</button>
+                      </div>
+
                       <div class="op-actions">
+                        {# The cheapest calibration is no calibration. When another
+                           embryo on the slide already carries a good fit, borrowing
+                           it costs zero exposures — the tool has existed for this
+                           all along and no surface offered it. Hidden entirely when
+                           nothing has a fit to lend. #}
+                        <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
+                        {# The rest of the slide, in one go. Absent when every
+                           embryo already has a fit — there is nothing to say. #}
+                        <button class="op-btn" id="op-cal-all" type="button" hidden>Calibrate the rest</button>
+                        {# Only where there is a fit to discard. Two clicks:
+                           the numbers it drops cost ~70 exposures to measure. #}
+                        <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
                         <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
                       </div>
+                      <p class="op-cap" id="op-cal-borrow-note" hidden></p>
+
+                      {# What the run is looking at, while it looks. Empty —
+                         and takes no room — until frames arrive. #}
+                      <div id="op-cal-progress"></div>
                     </div>
                     <figure class="op-preview" id="op-preview" hidden>
                       <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
@@ -1334,9 +1401,23 @@
                  Shared across device tabs; placed last so it sits at the
                  bottom (was between 3D and Manual, which put it at the top
                  of the Manual view). -->
-            <!-- hidden until a sample arrives; see temperature-graph.js -->
-            <section class="devices-temp-graph" id="devices-temp-graph"
-                     aria-label="Temperature trajectory" hidden></section>
+            {# Hidden until a sample arrives, and collapsed by default once it
+               does: 196px of steady water is 196px the camera is not getting.
+               The heading keeps the current reading visible, so folding it away
+               costs no information — only the shape of the last hour, which is
+               one click back (temperature-graph.js remembers the choice). #}
+            <div class="devices-tempwrap is-collapsed" id="devices-tempwrap" hidden>
+                <button type="button" class="devices-tempwrap-head" id="devices-tempwrap-toggle"
+                        aria-expanded="false" aria-controls="devices-temp-graph">
+                    <svg class="devices-tempwrap-chev" viewBox="0 0 24 24" width="13" height="13" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                         aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                    <span class="devices-tempwrap-title">Water temperature</span>
+                    <span class="devices-tempwrap-now" id="devices-tempwrap-now"></span>
+                </button>
+                <section class="devices-temp-graph" id="devices-temp-graph"
+                         aria-label="Temperature trajectory" hidden></section>
+            </div>
         </div>
     </div>
 
@@ -1484,10 +1565,13 @@
     <script src="/static/js/panels/camera.js"></script>
     <script src="/static/js/panels/roster.js"></script>
     <script src="/static/js/panels/marking.js"></script>
+    <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/operate.js"></script>
-    <script src="/static/js/device-layer.js"></script>
     <script src="/static/js/boot-banner.js"></script>
+    <!-- Rig menu: the header chip + the microscope controls behind it. Loads
+         after boot-banner.js, whose global device-layer poll it rides. -->
+    <script src="/static/js/rig-menu.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
@@ -1513,6 +1597,7 @@
         <span class="boot-banner-text" id="boot-banner-text"></span>
         <button type="button" class="boot-banner-btn" id="boot-banner-details" hidden>Details</button>
         <button type="button" class="boot-banner-btn" id="boot-banner-retry" hidden>Retry</button>
+        <button type="button" class="boot-banner-btn" id="boot-banner-notnow" hidden>Not now</button>
         <button type="button" class="boot-banner-x" id="boot-banner-close" aria-label="Dismiss" hidden>&times;</button>
     </div>
     {% if replay_enabled %}

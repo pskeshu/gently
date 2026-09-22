@@ -11,7 +11,11 @@
 const BootBanner = (function () {
     const STAGE_TOTAL = 5;
 
-    let _el, _text, _details, _retry, _close;
+    let _el, _text, _details, _retry, _close, _notNow;
+    // Whether the operator asked for the microscope at the launch gate. A
+    // software-only session chose to work without it, and a bar telling them
+    // so on every page would be nagging, not helping.
+    let _wantsHardware = null;
     let _timer = null;
     let _readyTimer = null;   // auto-dismiss timer for the "Microscope ready" flash
     let _pollMs = 0;
@@ -25,6 +29,7 @@ const BootBanner = (function () {
         _text = document.getElementById('boot-banner-text');
         _details = document.getElementById('boot-banner-details');
         _retry = document.getElementById('boot-banner-retry');
+        _notNow = document.getElementById('boot-banner-notnow');
         _close = document.getElementById('boot-banner-close');
         _dom = true;
     }
@@ -49,7 +54,12 @@ const BootBanner = (function () {
             acknowledge();
         });
         _retry.addEventListener('click', onRetry);
+        _notNow.addEventListener('click', acknowledge);
         _close.addEventListener('click', acknowledge);
+        fetch('/api/launch/prefs')
+            .then(r => (r.ok ? r.json() : null))
+            .then(p => { if (p && typeof p.hardware === 'boolean') _wantsHardware = p.hardware; })
+            .catch(() => { /* unknown: treated as "asked for it", below */ });
         setPoll(1500);
     }
 
@@ -129,8 +139,19 @@ const BootBanner = (function () {
                     : "The microscope didn't start.");
             btns({ details: true, retry: true, close: true });
             setPoll(6000);
+        } else if (state === 'stopped' && _wantsHardware !== false) {
+            // The operator asked for the microscope and it is not running —
+            // usually a device layer that was stopped, or a gate start that
+            // never took. Say so once, with the way to fix it, and take "not
+            // now" for an answer until the state changes.
+            setPoll(6000);
+            if (_ackedState === state) { _lastState = state; return; }
+            show('stopped');
+            _text.textContent = 'The microscope is not running.';
+            btns({ details: false, retry: true, close: false, notNow: true });
+            _retry.textContent = 'Start';
         } else {
-            // stopped (software-only session) or external with nothing to add.
+            // A software-only session, or external with nothing to add.
             hide();
             setPoll(6000);
         }
@@ -144,9 +165,11 @@ const BootBanner = (function () {
     function hide() {
         _el.hidden = true;
     }
-    function btns({ details, retry, close }) {
+    function btns({ details, retry, close, notNow }) {
         _details.hidden = !details;
         _retry.hidden = !retry;
+        _retry.textContent = 'Retry';
+        _notNow.hidden = !notNow;
         _close.hidden = !close;
     }
 

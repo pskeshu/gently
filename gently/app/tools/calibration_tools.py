@@ -11,6 +11,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Below this, a focus sweep's Gaussian fit is reported as low confidence. It is
+# the module's own line (it has warned on it for as long as the sweep has
+# existed); naming it lets the surfaces that offer to REUSE a fit say plainly
+# that the one on offer is a poor one, instead of calling it "the best".
+LOW_CONFIDENCE_R2 = 0.5
+
 import numpy as np  # noqa: E402
 
 from gently.analysis.core import AdaptiveSweepState, FitFunction, fit_focus_curve  # noqa: E402
@@ -1279,7 +1285,7 @@ async def calibrate_embryo(
             total_exposures += sweep_exposures
 
             # Check for sweep failure
-            if result_dict["r_squared"] < 0.5:
+            if result_dict["r_squared"] < LOW_CONFIDENCE_R2:
                 logger.warning(
                     "Low confidence for %s (R2=%.3f)", galvo_name, result_dict["r_squared"]
                 )
@@ -1435,9 +1441,21 @@ async def calibrate_all_embryos(
     embryo_ids: list[str] | None = None,
     skip_edge_detection: bool = False,
     z_buffer_um: float = 25.0,
+    galvo_top: float | None = None,
+    galvo_bottom: float | None = None,
+    edge_step: float = 0.05,
+    edge_max_range: float = 0.5,
+    edge_tolerance_deg: float = 0.20,
+    inset_fraction: float = 0.4,
     context: dict | None = None,
 ) -> str:
-    """Calibrate all embryos sequentially with Claude vision"""
+    """Calibrate embryos sequentially with Claude vision.
+
+    Takes the same parameters as `calibrate_embryo` and forwards them
+    unchanged. It used to accept only two of the eight, so "calibrate this
+    one" and "calibrate the rest" ran different recipes — the batch silently
+    reverted to defaults for the five that place the calibration points.
+    """
     agent = ctx_get(context, "agent")
 
     if not agent:
@@ -1462,6 +1480,12 @@ async def calibrate_all_embryos(
             embryo_id=eid,
             skip_edge_detection=skip_edge_detection,
             z_buffer_um=z_buffer_um,
+            galvo_top=galvo_top,
+            galvo_bottom=galvo_bottom,
+            edge_step=edge_step,
+            edge_max_range=edge_max_range,
+            edge_tolerance_deg=edge_tolerance_deg,
+            inset_fraction=inset_fraction,
             context=context,
         )
         # Get first two lines of result
@@ -1489,6 +1513,66 @@ def _calibration_quality_score(cal: dict) -> float:
         return float(cal.get("r_squared", 0.0) or 0.0)
     vals = [v for v in (top, bot) if v is not None]
     return float(min(vals)) if vals else 0.0
+
+
+def persist_calibration(agent, embryo) -> bool:
+    """Write one embryo's current calibration into its session record.
+
+    A fit only reaches `embryo.yaml` when the agent's `auto_save` happens to
+    run — it syncs every embryo on a conversation turn or a "significant
+    action". Nothing a UI route does triggers that, so a calibration changed
+    from a pane was durable by luck: borrowed on Tuesday, gone on Wednesday,
+    with the data in between taken on numbers no longer recorded anywhere.
+
+    `calibration` is passed explicitly (never None) because
+    `FileStore.register_embryo` COALESCES: None keeps whatever is already on
+    disk, which would silently defeat a clear.
+    """
+    store = getattr(agent, "store", None)
+    session_id = getattr(agent, "session_id", None)
+    if store is None or not session_id:
+        return False
+    try:
+        pos = (
+            getattr(embryo, "position_coarse", None)
+            or getattr(embryo, "stage_position", None)
+            or {}
+        )
+        store.register_embryo(
+            session_id,
+            embryo.id,
+            position_x=pos.get("x"),
+            position_y=pos.get("y"),
+            calibration=embryo.calibration if embryo.calibration is not None else {},
+            role=getattr(embryo, "role", None),
+        )
+        return True
+    except Exception:
+        logger.exception("Could not persist the calibration for %s", embryo.id)
+        return False
+
+
+def rank_calibration_sources(embryos: dict) -> list[tuple[str, float, dict]]:
+    """Calibrated embryos, best fit first.
+
+    One metric, one place. The auto-pick inside `apply_calibration_to_embryos`
+    and the Operate pane's "borrow a fit" both need to know which embryo has
+    the best calibration AND how good it is — the pane so it can say whose fit
+    it is about to copy, rather than offering an unexplained button. Two
+    implementations of "best" would drift, and the one the UI showed would
+    stop being the one the tool used.
+
+    Skipped and uncalibrated embryos are not sources. Sorted by
+    ``min(r_squared_top, r_squared_bottom)`` — see `_calibration_quality_score`
+    for why the worse end is the one that matters.
+    """
+    ranked = [
+        (eid, _calibration_quality_score(emb.calibration), emb.calibration)
+        for eid, emb in embryos.items()
+        if not emb.should_skip and emb.calibration
+    ]
+    ranked.sort(key=lambda t: t[1], reverse=True)
+    return ranked
 
 
 def _format_quality(cal: dict) -> str:
@@ -1566,17 +1650,12 @@ def apply_calibration_to_embryos(
     # Auto-pick by quality.
     ranking_lines = []
     if source_embryo_id == "auto" or source_embryo_id == "best":
-        ranked = []
-        for eid, emb in agent.experiment.embryos.items():
-            if emb.should_skip or not emb.calibration:
-                continue
-            ranked.append((eid, _calibration_quality_score(emb.calibration), emb.calibration))
+        ranked = rank_calibration_sources(agent.experiment.embryos)
         if not ranked:
             return (
                 "No calibrated embryos available for auto-pick. "
                 "Run calibrate_embryo / calibrate_all_embryos first."
             )
-        ranked.sort(key=lambda t: t[1], reverse=True)
         source_embryo_id = ranked[0][0]
         ranking_lines.append("Ranking by min(R²_top, R²_bot):")
         for eid, _score, cal in ranked:
@@ -1599,7 +1678,7 @@ def apply_calibration_to_embryos(
     if not target_embryo_ids:
         return "No target embryos. Nothing to do."
 
-    applied, skipped = [], []
+    applied, skipped, unsaved = [], [], []
     for tid in target_embryo_ids:
         if tid not in agent.experiment.embryos:
             skipped.append((tid, "not found"))
@@ -1612,6 +1691,11 @@ def apply_calibration_to_embryos(
         import copy
 
         tgt.calibration = copy.deepcopy(source.calibration)
+        # To disk as well as memory: a borrowed fit that vanishes at the next
+        # restore is worse than not offering one, because the volumes taken in
+        # between still claim to be calibrated.
+        if not persist_calibration(agent, tgt):
+            unsaved.append(tid)
         applied.append(tid)
 
     lines = []
@@ -1625,9 +1709,70 @@ def apply_calibration_to_embryos(
     lines.append("  " + (", ".join(applied) if applied else "(none)"))
     if skipped:
         lines.append(f"Skipped: {', '.join(f'{tid} ({reason})' for tid, reason in skipped)}")
+    if unsaved:
+        lines.append(
+            f"Not written to the session record: {', '.join(unsaved)} — applied in memory "
+            "only, so it will not survive a restore."
+        )
     lines.append(
         "Note: calibration is position-dependent — piezo-galvo slope can drift "
         "across the XY field. Verify with a quick acquisition on each target "
         "before committing to a full timelapse."
     )
     return "\n".join(lines)
+
+
+@tool(
+    name="clear_embryo_calibration",
+    description="""Discard an embryo's piezo-galvo fit, so it counts as uncalibrated again.
+
+Use when a fit is known to be wrong — a poor R², an embryo that has been moved or re-centred,
+or a calibration borrowed from another embryo that did not hold up. Clearing is the honest
+alternative to running acquisitions on numbers nobody trusts: the calibration gate refuses to
+start a run on an uncalibrated embryo, so a cleared fit stops silently-wrong data at the door
+rather than producing volumes that look real.
+
+Costs nothing and acquires nothing, but the fit it discards cost sixty to eighty exposures to
+measure. It cannot be undone — recovering it means calibrating again (or borrowing another
+embryo's fit with apply_calibration_to_embryos).""",
+    category=ToolCategory.CALIBRATION,
+    requires_microscope=False,
+    examples=[
+        ToolExample("Reset embryo 2's calibration", {"embryo_id": "embryo_2"}),
+    ],
+)
+def clear_embryo_calibration(embryo_id: str, context: dict | None = None) -> str:
+    """Drop one embryo's calibration, in memory and on disk.
+
+    Persisting matters: `embryo.calibration` is written into the session's
+    `embryo.yaml`, and a clear that only touched memory would come back at the
+    next restore — the operator would have reset it, seen it reset, and found
+    it calibrated again tomorrow with no record of which numbers were in use.
+    """
+    from gently.harness.tools.helpers import require_agent
+
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    embryo, err = get_embryo_or_error(agent, embryo_id)
+    if err:
+        return err
+
+    old = dict(embryo.calibration or {})
+    if not old:
+        return f"{embryo_id} has no calibration to clear."
+
+    embryo.calibration = {}
+
+    persisted = persist_calibration(agent, embryo)
+
+    try:
+        agent.experiment.notify_embryos_changed()
+    except Exception:
+        logger.debug("notify_embryos_changed failed", exc_info=True)
+
+    slope = old.get("slope_um_per_deg")
+    what = f"{slope:.1f} µm/deg ({_format_quality(old)})" if slope is not None else "a fit"
+    tail = "" if persisted else " (in memory only — it may return on the next session restore)"
+    return f"Cleared {embryo_id}'s calibration: discarded {what}.{tail}"

@@ -90,7 +90,10 @@ class DeviceLayerServer(Service):
         # SAM configuration
         self._sam_device = sam_device
         self._sam_detector = None  # Lazy loaded
-        self._sam_checkpoint = "sam_vit_b_01ec64.pth"
+        # None = resolve at use (env, storage root, repo root, cwd). A bare
+        # filename here resolved against this process's cwd, which is wherever
+        # the launcher happened to start it.
+        self._sam_checkpoint: str | None = None
         self._sam_model_type = "vit_b"
 
         # Task queue for plan execution
@@ -3127,6 +3130,9 @@ class DeviceLayerServer(Service):
             pixel_size_um = data.get("pixel_size_um", DEFAULT_PIXEL_SIZE_UM)
             objective_mag = data.get("objective_mag", DEFAULT_OBJECTIVE_MAG)
             use_claude_review = data.get("use_claude_review", True)
+            # SAM contributes outlines, not positions: without it the blob
+            # candidates are still the answer, and the call needs no GPU.
+            use_sam = bool(data.get("use_sam", True))
             data.get("min_confidence", 0.7)
             exposure_ms = data.get("exposure_ms")
             brightness_percentile = data.get("brightness_percentile", 99.0)
@@ -3282,6 +3288,7 @@ class DeviceLayerServer(Service):
                 min_area,
                 max_area,
                 min_relative_peak,
+                use_sam,
             )
 
             # Save image if volume_dir configured
@@ -3353,6 +3360,7 @@ class DeviceLayerServer(Service):
         min_area: int | None,
         max_area: int | None,
         min_relative_peak: float | None = None,
+        use_sam: bool = True,
     ) -> dict:
         """Run SAM detection synchronously (called from thread).
 
@@ -3370,6 +3378,7 @@ class DeviceLayerServer(Service):
                     pixel_size_um=pixel_size_um,
                     objective_mag=objective_mag,
                     use_claude_review=use_claude_review,
+                    use_sam=use_sam,
                     save_visualizations=True,
                     output_dir=Path("./detection_results"),
                     brightness_percentile=brightness_percentile,
@@ -4221,8 +4230,13 @@ class DeviceLayerServer(Service):
         missing = []
         if find_spec("segment_anything") is None:
             missing.append("segment-anything not installed (uv sync --extra sam)")
-        if not Path(self._sam_checkpoint).exists():
-            missing.append(f"checkpoint not found: {self._sam_checkpoint}")
+        from .sam_detection import checkpoint_missing_detail, find_checkpoint
+
+        found, searched = find_checkpoint(self._sam_checkpoint)
+        if found is None:
+            # Name the directories, not just the file: a readiness line saying
+            # a filename is missing does not say where to put it.
+            missing.append(checkpoint_missing_detail(searched))
 
         if missing:
             return "UNAVAILABLE · " + " · ".join(missing), False

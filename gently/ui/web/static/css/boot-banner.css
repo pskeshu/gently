@@ -53,6 +53,19 @@
     background: var(--accent-orange);
     animation: none;
 }
+/* Not running: the rig was asked for and is not up. Stated, not alarmed —
+   the operator may be deliberately working without it for a while. */
+.boot-banner.stopped {
+    border-color: var(--border-strong, var(--border));
+}
+.boot-banner.stopped .boot-banner-dot {
+    background: var(--text-muted);
+    animation: none;
+}
+.boot-banner.stopped .boot-banner-btn:first-of-type {
+    border-color: var(--accent);
+    color: var(--accent);
+}
 .boot-banner-text {
     flex: 1;
     min-width: 0;

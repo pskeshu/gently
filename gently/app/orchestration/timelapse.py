@@ -790,13 +790,19 @@ class TimelapseOrchestrator:
             acquisition_mode = getattr(embryo, "acquisition_mode", "volume")
 
             if acquisition_mode == "snap":
-                # Single 2D lightsheet image
+                # Single 2D lightsheet image. The embryo's own exposure — the
+                # call used to pass none, so every snap ran at the client's
+                # 10 ms default whatever the panel said, and then recorded the
+                # dose as a hard-coded 50 ms: the phototoxicity ledger was
+                # wrong by 5x on every snap embryo, in a system whose whole
+                # point is not over-exposing the sample.
+                exposure_ms = float(getattr(embryo, "exposure_ms", 10.0) or 10.0)
                 result = await self.client.capture_lightsheet_image(
                     piezo_position=piezo_center,
                     galvo_position=galvo_center,
+                    exposure_ms=exposure_ms,
                 )
                 num_frames = 1
-                exposure_ms = 50.0  # Default snap exposure
             else:
                 # Full 3D volume (default)
                 result = await self.client.acquire_volume(

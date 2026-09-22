@@ -82,7 +82,12 @@ def text_transform_rules() -> tuple[list[Rule], list[str]]:
     for sheet in sorted((WEB / "static" / "css").rglob("*.css")):
         # Comments first: prose is full of commas and braces, and this repo
         # comments heavily. Left in, it parses as selectors.
-        css = re.sub(r"/\*.*?\*/", "", sheet.read_text(), flags=re.DOTALL)
+        # encoding is explicit: this suite is run on the Windows microscope PCs,
+        # where the default is cp1252 and the first µ in a stylesheet raises
+        # UnicodeDecodeError. That failure looks like a broken test rather than
+        # a broken template, so the check that exists to catch an uppercased µ
+        # was itself dying on one.
+        css = re.sub(r"/\*.*?\*/", "", sheet.read_text(encoding="utf-8"), flags=re.DOTALL)
         for block in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
             selector_group, body = block.group(1), block.group(2)
             declared = re.search(r"text-transform\s*:\s*([A-Za-z-]+)", body)
@@ -168,7 +173,7 @@ def test_no_micron_is_uppercased() -> None:
     offences: list[str] = []
     for template in sorted((WEB / "templates").rglob("*.html")):
         finder = MicronFinder()
-        finder.feed(template.read_text())
+        finder.feed(template.read_text(encoding="utf-8"))
         for line, chain, text in finder.hits:
             resolved = resolve_text_transform(chain, rules)
             if resolved and resolved[0] == "uppercase":

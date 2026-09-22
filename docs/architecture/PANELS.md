@@ -125,6 +125,7 @@ constraint.
 | Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
 | Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |
 | Roster | the embryo list | rail + Acquisition | actions declared per mount; `showFit` reads the gate's field |
+| CalProgress | the frames a calibration is judging | Calibration | reads the existing image broadcast; owns no run |
 
 The Roster panel is the clearest case of rule 1 paying off: it replaced
 `renderEmbryoRail` and `renderRoster`, which were ~80% the same code with
@@ -142,6 +143,30 @@ at all.
 ImageView is the exception to rule 2: zoom and contrast are view state, not
 instrument state, so they stay per-mount. Two people looking at one microscope
 still want their own magnification.
+
+CalProgress is rule 6 at its most literal: it is **absent** until frames
+arrive, and an idle Calibration pane is 0px taller for its presence. It is
+also the panel that owns the least — it starts nothing and stops nothing. It
+subscribes to `IMAGE_RECEIVED`, the broadcast every pushed image already rode,
+and narrates whatever calibration frames go past. That is why it also shows a
+calibration the AGENT started from chat, which the pane itself never knew
+about: the panel is watching the instrument, not the button.
+
+The Calibration pane's verbs are worth reading together, because each one
+answers "how do I get a fit?" differently and the pane shows only the ones
+that apply:
+
+| Verb | When it appears | What it costs |
+|---|---|---|
+| Calibrate / Recalibrate | always; the word depends on whether a fit exists | ~60–80 exposures |
+| Borrow embryo N's fit | another embryo has a **better** fit | nothing |
+| Calibrate N uncalibrated | two or more embryos lack a fit | ~70 each |
+| Clear fit | this embryo has one | nothing, and it cannot be undone |
+
+Borrow hides rather than offering a downgrade — without that rule it offers
+the source embryo a copy of its own fit back the moment one borrow completes
+— and it says plainly when the best fit on the slide is below
+`LOW_CONFIDENCE_R2`, rather than calling a bad fit "the best".
 
 Next: the calibration tab (#108) mounts Light and Camera. Manual mode's
 bespoke laser UI is replaced once the shared one is proven on the rig —

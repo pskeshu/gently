@@ -185,6 +185,19 @@ const OperateManager = (function () {
         }
         return data;
     }
+    async function deleteJSON(url) {
+        const res = await fetch(url, { method: 'DELETE' });
+        const text = await res.text().catch(() => '');
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) { /* not JSON */ }
+        if (!res.ok) {
+            const e = new Error(`${res.status} ${data.detail || data.error || text}`);
+            e.status = res.status;
+            e.data = data;
+            throw e;
+        }
+        return data;
+    }
     async function getJSON(url) {
         const res = await fetch(url);
         const text = await res.text().catch(() => '');
@@ -844,16 +857,64 @@ const OperateManager = (function () {
     }
 
     // ══ BOTTOM PANE ═════════════════════════════════════════════════════════
+    // A stream that takes a second to come up needs the button to say so. The
+    // old behaviour was to disable it and leave the label alone, so for the
+    // whole wait it read "Start camera" at 40% opacity with a not-allowed
+    // cursor — the visual language of "you may not press this", used to mean
+    // "your press is being carried out". Now it names the verb in progress and
+    // spins, stays at full strength, and only the cursor says "wait".
+    // A state that flashes past is not feedback. When the device layer is warm
+    // the stream call answers in tens of milliseconds, so the honest "Starting…"
+    // rendered for a frame and the operator saw only an abrupt flip — the
+    // complaint that started this. Hold it long enough to be read.
+    const MIN_PENDING_MS = 320;
+
+    function pending(btn, verb) {
+        if (!btn) return settle => { if (settle) settle(); };
+        const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.classList.add('is-pending');
+        btn.textContent = '';
+        const spin = document.createElement('span');
+        spin.className = 'op-btn-spin';
+        spin.setAttribute('aria-hidden', 'true');
+        btn.appendChild(spin);
+        btn.appendChild(document.createTextNode(verb));
+        // Screen readers get the same fact, not just the spinner.
+        btn.setAttribute('aria-busy', 'true');
+        // Restores the label the operator pressed. On success the caller's
+        // applyX() overwrites it with the new one a beat later; on failure it
+        // is what the button should have said all along.
+        // `settle` is the caller's state change (applyX). It runs when the
+        // pending state has had its minimum time, so the label goes
+        // "Start camera" → "Starting…" → "Stop camera" in that order, never
+        // skipping the middle.
+        return settle => {
+            const now = (window.performance && performance.now) ? performance.now() : Date.now();
+            const left = Math.max(0, MIN_PENDING_MS - (now - t0));
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.classList.remove('is-pending');
+                btn.removeAttribute('aria-busy');
+                btn.textContent = label;
+                if (settle) settle();
+            }, left);
+        };
+    }
+
     async function toggleBottomCam() {
-        const b = $('op-cam-toggle'); if (b) b.disabled = true;
+        const b = $('op-cam-toggle');
+        const done = pending(b, _bottomOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _bottomOn ? '/api/devices/bottom_camera/stream/stop'
                 : '/api/devices/bottom_camera/stream/start';
             const d = await postJSON(ep, {});
-            applyBottomCam(!!d.streaming);
-            _bottomWasOn = _bottomOn;
-        } catch (e) { toastFail(`Camera toggle failed (${why(e)})`); }
-        finally { if (b) b.disabled = false; }
+            done(() => {
+                applyBottomCam(!!d.streaming);
+                _bottomWasOn = _bottomOn;
+            });
+        } catch (e) { done(); toastFail(`Camera toggle failed (${why(e)})`); }
     }
     function applyBottomCam(on) {
         _bottomOn = on;
@@ -863,11 +924,36 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
 
+    // Name the stages that are actually running: "blobs" and "blobs + Claude +
+    // SAM" take very different amounts of time, and a caption that says only
+    // "Detecting…" leaves an operator watching a spinner with no idea whether
+    // 20 seconds is normal.
+    function detectingCaption(tune) {
+        const parts = ['blobs'];
+        if (tune.use_claude_review !== false) parts.push('Claude');
+        if (tune.use_sam !== false) parts.push('SAM');
+        return `Detecting… ${parts.join(' + ')}`;
+    }
+
     function setBusyText(t) {
         const el = document.querySelector('#op-busy-bottom .op-cam-busy-txt');
         if (el) el.textContent = t;
     }
-    async function runDetect() {
+    /**
+     * Run the detector with the pipeline the panel chose.
+     *
+     * `opts` comes from MarkingPanel.detectOptions(): which of the two optional
+     * stages run (Claude classification, SAM refinement), how permissive the
+     * blob finder should be, and whether to capture a new frame instead of
+     * detecting on the one already on screen. Absent (an agent-initiated
+     * detect, or an older caller), the server defaults apply.
+     */
+    async function runDetect(opts) {
+        const cfg = (opts && typeof opts === 'object') ? opts : {};
+        const tune = {};
+        if (typeof cfg.use_claude_review === 'boolean') tune.use_claude_review = cfg.use_claude_review;
+        if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
+        if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
@@ -877,14 +963,15 @@ const OperateManager = (function () {
         // Detect on the frame already on screen when there is one — the operator
         // is looking at it, and re-capturing would disturb the LED/room light.
         const shown = $('op-img-bottom');
-        let hasFrame = !!(shown && shown.classList.contains('has-frame'));
+        let hasFrame = !cfg.fresh && !!(shown && shown.classList.contains('has-frame'));
         try {
             // Phase 1 — when the viewport is empty, capture and SHOW the image
             // FIRST (no SAM yet), so the operator sees what detection will run on
             // before it runs, rather than the image appearing only at the end.
             if (!hasFrame) {
                 setBusyText('Capturing…');
-                const cap = await postJSON('/api/devices/detect_embryos', { capture_only: true });
+                const cap = await postJSON('/api/devices/detect_embryos',
+                    Object.assign({ capture_only: true }, tune));
                 if (cap.frame && cap.frame.jpeg_b64) {
                     _lastBottom = cap.frame;
                     setImg('op-img-bottom', 'op-ph-bottom', cap.frame);
@@ -892,8 +979,9 @@ const OperateManager = (function () {
                 }
             }
             // Phase 2 — run SAM on the frame now on screen, then overlay results.
-            setBusyText('Detecting…');
-            const d = await postJSON('/api/devices/detect_embryos', { use_last_frame: hasFrame });
+            setBusyText(detectingCaption(tune));
+            const d = await postJSON('/api/devices/detect_embryos',
+                Object.assign({ use_last_frame: hasFrame }, tune));
             if (d.frame && d.frame.jpeg_b64) {
                 _lastBottom = d.frame;
                 setImg('op-img-bottom', 'op-ph-bottom', d.frame);
@@ -970,14 +1058,16 @@ const OperateManager = (function () {
 
     // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
-        const b = $('op-spim-toggle'); if (b) b.disabled = true;
+        const b = $('op-spim-toggle');
+        const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
             const d = await postJSON(ep, {});
-            applySpim(!!d.streaming);
-            _spimWasOn = _spimOn;
-        } catch (e) { toastFail(`SPIM view toggle failed (${why(e)})`); }
-        finally { if (b) b.disabled = false; }
+            done(() => {
+                applySpim(!!d.streaming);
+                _spimWasOn = _spimOn;
+            });
+        } catch (e) { done(); toastFail(`SPIM view toggle failed (${why(e)})`); }
     }
     function applySpim(on) {
         _spimOn = on;
@@ -1020,6 +1110,112 @@ const OperateManager = (function () {
         renderSubnavMeta();
     }
 
+    // ── calibration settings ────────────────────────────────────────────────
+    // calibrate_embryo takes these; the pane used to send none of them, so a
+    // rig whose galvo range is already known still paid for a Claude-vision
+    // edge hunt, and the two numbers that place the calibration points inside
+    // that range could not be touched at all. Defaults here MUST match the
+    // tool's, so an untouched pane behaves exactly as before.
+    const CAL_KEY = 'gently.calibrate.settings';
+    const CAL_DEFAULTS = {
+        edges: true,        // skip_edge_detection = !edges
+        zbuf: 25,           // z_buffer_um
+        estep: 0.05,        // edge_step (deg)
+        erange: 0.5,        // edge_max_range (deg)
+        etol: 0.2,          // edge_tolerance_deg
+        inset: 0.4,         // inset_fraction
+        gtop: null,         // galvo_top, only with edge detection off
+        gbot: null,         // galvo_bottom
+    };
+    let _cal = Object.assign({}, CAL_DEFAULTS);
+    try {
+        const saved = JSON.parse(localStorage.getItem(CAL_KEY) || '{}');
+        if (saved && typeof saved === 'object') _cal = Object.assign({}, CAL_DEFAULTS, saved);
+    } catch (e) { /* defaults */ }
+
+    function saveCal() {
+        try { localStorage.setItem(CAL_KEY, JSON.stringify(_cal)); } catch (e) { /* not fatal */ }
+    }
+
+    const calNum = (id, fallback) => {
+        const el = $(id);
+        if (!el) return fallback;
+        const v = parseFloat(el.value);
+        return Number.isFinite(v) ? v : fallback;
+    };
+
+    function readCalForm() {
+        _cal = {
+            edges: $('cal-edges') ? !!$('cal-edges').checked : _cal.edges,
+            zbuf: calNum('cal-zbuf', CAL_DEFAULTS.zbuf),
+            estep: calNum('cal-estep', CAL_DEFAULTS.estep),
+            erange: calNum('cal-erange', CAL_DEFAULTS.erange),
+            etol: calNum('cal-etol', CAL_DEFAULTS.etol),
+            inset: calNum('cal-inset', CAL_DEFAULTS.inset),
+            gtop: $('cal-gtop') && $('cal-gtop').value !== '' ? calNum('cal-gtop', null) : null,
+            gbot: $('cal-gbot') && $('cal-gbot').value !== '' ? calNum('cal-gbot', null) : null,
+        };
+        saveCal();
+        renderCalForm();
+    }
+
+    function renderCalForm() {
+        const set = (id, v) => { const el = $(id); if (el && el.value !== String(v)) el.value = v; };
+        if ($('cal-edges')) $('cal-edges').checked = !!_cal.edges;
+        set('cal-zbuf', _cal.zbuf); set('cal-estep', _cal.estep);
+        set('cal-erange', _cal.erange); set('cal-etol', _cal.etol); set('cal-inset', _cal.inset);
+        if ($('cal-gtop')) $('cal-gtop').value = _cal.gtop == null ? '' : _cal.gtop;
+        if ($('cal-gbot')) $('cal-gbot').value = _cal.gbot == null ? '' : _cal.gbot;
+        // Explicit bounds only mean anything when nothing is hunting for them.
+        const bounds = $('cal-adv-bounds');
+        if (bounds) bounds.hidden = !!_cal.edges;
+    }
+
+    // What the pane will actually send. Only what differs from the tool's own
+    // defaults travels, so the request says what the operator changed.
+    function calibrationSettings() {
+        const body = {};
+        if (!_cal.edges) {
+            body.skip_edge_detection = true;
+            if (_cal.gtop != null) body.galvo_top = _cal.gtop;
+            if (_cal.gbot != null) body.galvo_bottom = _cal.gbot;
+        }
+        const pairs = [
+            ['z_buffer_um', _cal.zbuf, CAL_DEFAULTS.zbuf],
+            ['edge_step', _cal.estep, CAL_DEFAULTS.estep],
+            ['edge_max_range', _cal.erange, CAL_DEFAULTS.erange],
+            ['edge_tolerance_deg', _cal.etol, CAL_DEFAULTS.etol],
+            ['inset_fraction', _cal.inset, CAL_DEFAULTS.inset],
+        ];
+        pairs.forEach(([key, val, def]) => { if (Number.isFinite(val) && val !== def) body[key] = val; });
+        return body;
+    }
+
+    function wireCalForm() {
+        ['cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
+            'cal-gtop', 'cal-gbot'].forEach(id => {
+            const el = $(id);
+            if (el) el.addEventListener('change', readCalForm);
+        });
+        const more = $('cal-more'), adv = $('cal-adv');
+        if (more && adv) {
+            more.addEventListener('click', () => {
+                const open = adv.hidden;
+                adv.hidden = !open;
+                more.setAttribute('aria-expanded', String(open));
+                more.textContent = open ? 'Less' : 'More…';
+            });
+        }
+        const reset = $('cal-reset');
+        if (reset) reset.addEventListener('click', () => {
+            _cal = Object.assign({}, CAL_DEFAULTS);
+            saveCal();
+            renderCalForm();
+            toast('Calibration settings back to defaults');
+        });
+        renderCalForm();
+    }
+
     async function calibrateSelected() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-calibrate'), out = $('op-cal-result');
@@ -1031,8 +1227,12 @@ const OperateManager = (function () {
         }, 1000);
         if (b) { b.disabled = true; b.textContent = 'Calibrating… 0s'; }
         if (out) out.textContent = 'sweeping…';
+        // The frames this run is about to take are already broadcast; the
+        // progress panel shows them as they land.
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(_selected);
         try {
-            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, {});
+            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`,
+                calibrationSettings());
             const cal = d.calibration || {};
             const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
             if (out) {
@@ -1040,32 +1240,223 @@ const OperateManager = (function () {
                     ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
                     : 'done';
             }
+            if (typeof CalProgressPanel !== 'undefined') {
+                CalProgressPanel.finish(true, out ? out.textContent : '');
+            }
         } catch (e) {
             if (out) out.textContent = 'failed';
+            // The frames stay up on a failure — they are the evidence of WHERE
+            // it went wrong, which is exactly what a bare 'failed' withholds.
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
             toastFail(`Calibrate failed (${why(e)})`);
         } finally {
             clearInterval(tick);
-            if (b) { b.disabled = false; b.textContent = 'Calibrate'; }
-            renderCalTarget();
+            if (b) b.disabled = false;
+            renderCalTarget();   // restores the verb: Calibrate / Recalibrate
         }
     }
 
     // The calibration pane names its subject and reports the fit it has, if any
     // — the same field the server-side gate checks, so the pane shows what a run
     // would refuse rather than leaving it to be discovered at Start.
+    const hasFit = emb => {
+        const slope = Number(((emb && emb.calibration) || {}).slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0;
+    };
+
     function renderCalTarget() {
         const t = $('op-cal-target');
         const emb = _embryos.find(e => e.id === _selected);
         if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        renderBorrow(emb);
+        renderCalibrateAll();
+        renderClearFit(emb);
+        // The verb says which of the two things it does. Running it again over
+        // a fit that already exists is a different decision from calibrating
+        // something that has none, and the button used to read the same.
+        const b = $('op-calibrate');
+        if (b && !b.disabled) b.textContent = hasFit(emb) ? 'Recalibrate' : 'Calibrate';
         const out = $('op-cal-result');
         if (!out || !emb) return;
-        const slope = Number(((emb.calibration || {}).slope_um_per_deg));
-        if (Number.isFinite(slope) && slope !== 0) {
+        if (hasFit(emb)) {
             const r2 = (emb.calibration || {}).r_squared;
-            out.textContent = `${slope.toFixed(1)} µm/deg`
+            out.textContent = `${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
                 + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
         } else {
             out.textContent = 'not calibrated';
+        }
+    }
+
+    // ── borrowing a fit ─────────────────────────────────────────────────────
+    // Named, not generic: an operator about to copy numbers onto a live embryo
+    // should see whose numbers and how good they are before pressing anything.
+    // The server's LOW_CONFIDENCE_R2 (gently/app/tools/calibration_tools.py):
+    // below this a focus sweep is reported as low confidence.
+    const LOW_CONFIDENCE_R2 = 0.5;
+
+    // Same metric as the server: the WORSE of the two ends decides, since an
+    // acquisition spans both galvo extremes and the weaker end dominates.
+    const fitScore = e => {
+        const c = (e || {}).calibration || {};
+        const ends = [c.r_squared_top, c.r_squared_bottom].filter(v => v != null);
+        return ends.length ? Math.min(...ends) : Number(c.r_squared || 0);
+    };
+
+    function bestSource(forEmbryo) {
+        const others = _embryos.filter(e => e.id !== (forEmbryo || {}).id
+            && !e.should_skip && hasFit(e));
+        if (!others.length) return null;
+        others.sort((a, b) => fitScore(b) - fitScore(a));
+        const best = { emb: others[0], score: fitScore(others[0]) };
+        // Only offer a fit that is actually BETTER than the one this embryo
+        // already has. Otherwise the pane offers a downgrade, or — once a fit
+        // has been borrowed — offers to borrow a copy of itself back, which is
+        // what the source embryo did after the first borrow.
+        if (hasFit(forEmbryo) && best.score <= fitScore(forEmbryo)) return null;
+        return best;
+    }
+
+    // ── clearing a fit ──────────────────────────────────────────────────────
+    // Two clicks, not a dialog. The fit being discarded cost sixty to eighty
+    // exposures on a live embryo and cannot be recovered except by spending
+    // them again, but a modal for every reset would be its own tax — so the
+    // button asks once, in place, and forgets after a few seconds.
+    let _clearArmed = false;
+    let _clearTimer = null;
+
+    function disarmClear() {
+        _clearArmed = false;
+        if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+        const b = $('op-cal-clear');
+        if (b) { b.textContent = 'Clear fit'; b.classList.remove('is-armed'); }
+    }
+
+    function renderClearFit(emb) {
+        const b = $('op-cal-clear');
+        if (!b) return;
+        const show = hasFit(emb);
+        if (b.hidden !== !show) disarmClear();
+        b.hidden = !show;
+    }
+
+    async function clearFit() {
+        if (!_selected) return;
+        const b = $('op-cal-clear');
+        if (!_clearArmed) {
+            _clearArmed = true;
+            if (b) { b.textContent = 'Clear it? click again'; b.classList.add('is-armed'); }
+            _clearTimer = setTimeout(disarmClear, 5000);
+            return;
+        }
+        disarmClear();
+        if (b) b.disabled = true;
+        try {
+            await deleteJSON(`/api/devices/embryos/${_selected}/calibration`);
+            const mine = _embryos.find(e => e.id === _selected);
+            if (mine) mine.calibration = {};
+            toast('Calibration cleared — this embryo now counts as uncalibrated');
+        } catch (e) {
+            toastFail(`Could not clear the fit (${why(e)})`);
+        } finally {
+            if (b) b.disabled = false;
+            renderCalTarget();
+        }
+    }
+
+    // Embryos that would be calibrated by "the rest": no fit, not skipped.
+    const uncalibrated = () => _embryos.filter(e => !e.should_skip && !hasFit(e));
+
+    function renderCalibrateAll() {
+        const btn = $('op-cal-all');
+        if (!btn) return;
+        const pending = uncalibrated();
+        // One embryo left is just the Calibrate button next to it; a batch
+        // verb for a batch of one is noise.
+        if (pending.length < 2) { btn.hidden = true; return; }
+        btn.hidden = false;
+        if (!btn.disabled) btn.textContent = `Calibrate ${pending.length} uncalibrated`;
+    }
+
+    async function calibrateAll() {
+        const pending = uncalibrated();
+        if (!pending.length) return;
+        const btn = $('op-cal-all'), out = $('op-cal-result');
+        const t0 = Date.now();
+        const tick = setInterval(() => {
+            if (btn) btn.textContent = `Calibrating ${pending.length}… `
+                + `${Math.round((Date.now() - t0) / 1000)}s`;
+        }, 1000);
+        if (btn) { btn.disabled = true; btn.textContent = `Calibrating ${pending.length}… 0s`; }
+        if (out) out.textContent = 'sweeping…';
+        // No embryo id: the run walks the slide, so the progress panel should
+        // take frames from whichever embryo is under the objective.
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(null);
+        try {
+            const d = await postJSON('/api/devices/calibrate/all',
+                Object.assign({ scope: 'uncalibrated' }, calibrationSettings()));
+            const ok = (d.calibrated || []).length, bad = (d.failed || []).length;
+            if (bad) toastFail(`${ok} calibrated, ${bad} failed: ${(d.failed || []).join(', ')}`);
+            else toast(`Calibrated ${ok} embryo${ok === 1 ? '' : 's'}`);
+            if (typeof CalProgressPanel !== 'undefined') {
+                CalProgressPanel.finish(!bad, bad ? `${bad} failed` : `${ok} calibrated`);
+            }
+        } catch (e) {
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
+            toastFail(`Calibrate all failed (${why(e)})`);
+        } finally {
+            clearInterval(tick);
+            if (btn) btn.disabled = false;
+            renderCalTarget();
+        }
+    }
+
+    function renderBorrow(emb) {
+        const btn = $('op-cal-borrow'), note = $('op-cal-borrow-note');
+        const best = emb ? bestSource(emb) : null;
+        // Nothing to lend, nothing to say, no room taken.
+        if (!btn || !note) return;
+        if (!best) { btn.hidden = true; note.hidden = true; return; }
+        btn.hidden = false;
+        note.hidden = false;
+        btn.textContent = `Borrow embryo ${labelFor(best.emb)}’s fit`;
+        // Calling a bad fit "the best on the slide" is true and misleading at
+        // once. Below the module's own low-confidence line the offer stays —
+        // an operator may know something the R² does not — but it says what it
+        // is rather than recommending it. This is not hypothetical: the rig's
+        // own embryo_1 carries R² 0.06.
+        note.textContent = best.score < LOW_CONFIDENCE_R2
+            ? `Embryo ${labelFor(best.emb)}'s fit is poor (R² ${best.score.toFixed(2)}) — `
+              + `below the low-confidence line. Calibrating this embryo is probably `
+              + `better than copying that.`
+            : `Copies the best fit on the slide (embryo ${labelFor(best.emb)}, `
+              + `R² ${best.score.toFixed(2)}) instead of spending ~60 exposures. `
+              + `Slope drifts across the field — verify with one acquisition `
+              + `before a timelapse.`;
+        note.classList.toggle('op-cap-warn', best.score < LOW_CONFIDENCE_R2);
+    }
+
+    async function borrowCalibration() {
+        if (!_selected) { toastFail('Select an embryo first'); return; }
+        const b = $('op-cal-borrow'), out = $('op-cal-result');
+        const label = b ? b.textContent : '';
+        if (b) { b.disabled = true; b.textContent = 'Copying…'; }
+        if (out) out.textContent = 'copying…';
+        try {
+            const d = await postJSON(
+                `/api/devices/embryos/${_selected}/calibration/borrow`, { source: 'auto' });
+            const cal = d.calibration || {};
+            toast(`Applied ${d.source_embryo_id}'s calibration`);
+            // Write it onto the local copy rather than waiting for the
+            // EMBRYOS_UPDATE broadcast: the render in `finally` would
+            // otherwise redraw "not calibrated" over an embryo the server has
+            // just confirmed calibrated, for as long as the round trip takes.
+            const mine = _embryos.find(e => e.id === _selected);
+            if (mine) mine.calibration = cal;
+        } catch (e) {
+            toastFail(`Could not borrow a fit (${why(e)})`);
+        } finally {
+            if (b) { b.disabled = false; b.textContent = label; }
+            renderCalTarget();
         }
     }
 
@@ -1518,7 +1909,15 @@ const OperateManager = (function () {
                 // showFit: the rail is beside every pane, so calibration state is
                 // visible wherever you are — including before you reach the run
                 // and discover the gate refusing it.
-                RosterPanel.mount('op-erail-list', { actions: ['remove'], showFit: true });
+                //
+                // centre: likewise. The rail is the embryo list on EVERY pane,
+                // and the SPIM head is where "go to that embryo" is actually
+                // wanted — it already says "stage is elsewhere" and blanks the
+                // frame, but the only ways to act on that were to leave for the
+                // bottom camera and click the dish, or for Acquisition and press
+                // Centre there. The pane that reports the gap can now close it.
+                RosterPanel.mount('op-erail-list',
+                    { actions: ['centre', 'remove'], showFit: true, compact: true });
             }
             if ($('op-roster')) {
                 RosterPanel.mount('op-roster',
@@ -1721,7 +2120,11 @@ const OperateManager = (function () {
         publishRoster();
         publishMarking();
         if (!_active) return;
-        publishRoster(); renderSpimTarget(); renderSingle();
+        // renderCalTarget was missing here: the Calibration pane kept whatever
+        // it last drew, so an embryo calibrated by the agent (or by the pane's
+        // own borrow) still read "not calibrated" until something else forced
+        // a redraw. Every pane that shows per-embryo state redraws here.
+        publishRoster(); renderSpimTarget(); renderSingle(); renderCalTarget();
     }
 
     function wire() {
@@ -1762,6 +2165,14 @@ const OperateManager = (function () {
         // back-off button. Restored, and pinned by a test that counts them.
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        const borrow = $('op-cal-borrow');
+        if (borrow) borrow.addEventListener('click', borrowCalibration);
+        const all = $('op-cal-all');
+        if (all) all.addEventListener('click', calibrateAll);
+        const clear = $('op-cal-clear');
+        if (clear) clear.addEventListener('click', clearFit);
+        wireCalForm();
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>
             b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b =>
@@ -1916,7 +2327,7 @@ const OperateManager = (function () {
             goTo: pane => showPane(pane),
         },
         marking: {
-            detect: () => runDetect(),
+            detect: opts => runDetect(opts),
             register: () => confirmMarks(),
             clear: () => clearMarks(),
             // Session verbs — only meaningful while the agent is waiting.

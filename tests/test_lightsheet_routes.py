@@ -99,7 +99,13 @@ def test_live_params_forwards():
         json={"galvo": 1.0, "piezo": 40.0, "exposure": 20.0},
     )
     assert r.status_code == 200
-    client.set_lightsheet_live_params.assert_awaited_once_with(galvo=1.0, piezo=40.0, exposure=20.0)
+    # side rides along as None when the body omits it — the route forwards all
+    # four. Pinning three of them let this assertion go stale and turned a
+    # whole route file red, which is how the exposure path came to look broken
+    # when it was not.
+    client.set_lightsheet_live_params.assert_awaited_once_with(
+        galvo=1.0, piezo=40.0, exposure=20.0, side=None
+    )
 
 
 def test_live_params_no_client_503():

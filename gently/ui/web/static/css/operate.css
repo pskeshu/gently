@@ -662,7 +662,21 @@
 /* ── narrow ─────────────────────────────────────────────────────────────── */
 @container operate (max-width: 900px) {
     .op-pane { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
-    .op-main, .op-inst { grid-column: 1; }
+    /* Both are grid-row:2 explicitly (see .op-main above, which needs it so a
+       hidden lock banner cannot pull the camera into row 1). Resetting only the
+       column stacked them INTO THE SAME CELL: .op-cam is position:relative and
+       its placeholder is inset:0, so the camera painted over the instrument
+       rail and swallowed its clicks — "Start camera" was unclickable by mouse
+       at any width below the breakpoint. The rail gets its own row. */
+    .op-main { grid-column: 1; grid-row: 2; }
+    .op-inst { grid-column: 1; grid-row: 3; }
+    /* min-height:0 is right in the two-column layout, where .op-main must be
+       allowed to shrink so the camera can take the leftover height. Stacked it
+       is wrong: the row squashed to 403px around a 708px square camera, which
+       then overflowed its own column and painted across the rail beneath —
+       swallowing every click on "Start camera". Content sets the height here
+       and .op-pane scrolls, which is what its overflow-y:auto is for. */
+    .op-main { min-height: auto; }
     .op-inst { overflow-y: visible; }
     .op-cam { flex: 0 0 auto; min-height: 260px; }
     /* Stacked/narrow: the box is width-limited, so width drives and height
@@ -864,12 +878,26 @@
 /* Marking sits under the frame as a full-width card, so it reads across rather
    than down: counts on the left, verbs on the right, note beneath. It uses the
    same .op-block card as the instrument rail — one panel look, not two. */
+/* Rows that wrap as wholes. This was a two-column grid built for the old
+   counts/actions pair; the detector's chain and settings fell into those
+   columns and, in the narrow layout, the auto column squeezed the chips into
+   two-line pills and the panel to 275px. */
 .op-block-marking .lp {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    gap: 4px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
+.mk-config,
+.mk-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 18px;
+}
+.mk-foot { justify-content: space-between; }
+.mk-config > .mk-pipe,
+.mk-config > .mk-opts { margin-bottom: 0; }
+.mk-foot .mk-state { margin: 0; }
 
 .op-block-marking .lp-head { grid-column: 1 / -1; }
 
@@ -900,10 +928,24 @@
     cursor: help;
 }
 
+/* The display range lives on one line: label, histogram, the two verbs. The
+   histogram keeps the full width it had — it is the part that must stay
+   readable — and gives back the two rows of chrome that surrounded it. */
+.iv-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 5px;   /* room for the handle grips, which hang below */
+}
+.iv-row .lp-title { flex: none; }
+.iv-row .iv-src { flex: none; margin-right: 2px; }
+.iv-row .iv-hist { flex: 1 1 auto; min-width: 120px; }
+.iv-row .iv-acts { flex: none; display: flex; gap: 4px; }
+
 .iv-hist {
     position: relative;
-    height: 60px;
-    margin-bottom: 10px;
+    height: 30px;
+    margin-bottom: 0;
     border-radius: 3px;
     /* Black-to-white behind the bars: the axis being windowed, made literal. */
     background: linear-gradient(90deg, #0b0f14, #2b3441);
@@ -1238,3 +1280,269 @@
     color: var(--text);
     box-shadow: inset 0 -2px 0 var(--accent);
 }
+
+/* A control carrying out a request is not a control you may not press. The
+   disabled look (40% opacity, not-allowed) says "forbidden"; a pending one
+   keeps its strength, names the verb in progress, and spins. */
+.op-btn.is-pending,
+.op-btn.is-pending:disabled {
+    opacity: 1;
+    cursor: progress;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--op-2);
+    color: var(--op-ink-dim);
+}
+.op-btn-spin {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+    border-top-color: currentColor;
+    animation: op-cam-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .op-btn-spin { animation-duration: 2.4s; }
+}
+
+/* ── Detect panel: the pipeline, as a chain you can switch stages out of ──
+   Blobs is fixed because it is what sets recall; the two optional stages are
+   pressed-state buttons, so their state is readable without hovering. */
+.mk-pipe {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: var(--op-2);
+}
+.mk-stage {
+    font-family: var(--op-ui);
+    font-size: 0.68rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--op-rule);
+    background: var(--bg-hover);
+    color: var(--op-ink-dim);
+    cursor: pointer;
+}
+.mk-stage.is-fixed { cursor: default; border-style: dashed; }
+.mk-stage[aria-pressed="true"] {
+    border-color: var(--accent, #3b82f6);
+    color: var(--accent, #3b82f6);
+    background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+}
+.mk-stage[aria-pressed="false"] { text-decoration: line-through; opacity: 0.75; }
+.mk-arrow { color: var(--op-ink-dim); font-size: 0.7rem; }
+/* Detect closes the chain it runs: the chips read left to right and the verb
+   sits at the end of them, not down among the verbs that act on marks. */
+/* Detect is the verb the whole panel exists for, so it is a filled button —
+   the one solid thing here. Outlining it in accent (as it was) gave it the
+   same language as a switched-on pipeline chip, and it read as a fourth stage
+   rather than the control that runs the other three.
+
+   Theme order follows main.css: dark is the default (:root) and light
+   overrides it, so the light rule must come second or `:root` wins at equal
+   specificity — which is exactly what happened the first time. At 0.72rem
+   this is small text, so both pairings clear 4.5:1 (dark ink on #60a5fa is
+   7.4, white on #2563eb is 5.2) where white on the plain accent sits at 3.7. */
+.mk-detect {
+    margin-left: 14px;
+    font-weight: 600;
+    background: var(--accent, #60a5fa);
+    border-color: var(--accent, #60a5fa);
+    color: #0d1117;
+}
+.mk-detect:hover:not(:disabled) {
+    background: var(--accent-hover, #93c5fd);
+    border-color: var(--accent-hover, #93c5fd);
+    color: #0d1117;
+}
+.mk-detect:disabled { opacity: 0.55; }
+
+[data-theme="light"] .mk-detect {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+[data-theme="light"] .mk-detect:hover:not(:disabled) {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #fff;
+}
+
+/* The chips are pills and the verb is a button, but side by side they still
+   read as one run of controls — a rule says where the chain ends. */
+.mk-detect::before {
+    content: '';
+    position: absolute;
+    margin-left: -8px;
+    width: 1px;
+    height: 16px;
+    background: var(--op-rule);
+}
+
+.mk-opts { display: flex; align-items: center; gap: var(--op-3); margin-bottom: var(--op-2); }
+.mk-opt { display: flex; align-items: center; gap: 5px; }
+.mk-opt-cap { font-size: 0.66rem; color: var(--op-ink-dim); }
+.mk-select {
+    font-family: var(--op-ui);
+    font-size: 0.68rem;
+    padding: 1px 4px;
+    border: 1px solid var(--op-rule);
+    border-radius: 5px;
+    background: var(--bg-card);
+    color: var(--op-ink);
+}
+.mk-opt-check input { accent-color: var(--accent, #3b82f6); }
+
+/* Where the operator stands, as a sentence rather than two bare numbers. */
+.mk-state {
+    margin: 0 0 var(--op-2);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--op-ink);
+}
+.mk-state b { font-variant-numeric: tabular-nums; }
+.mk-state .mk-dim { color: var(--op-ink-dim); }
+
+/* The verb that the marks are waiting for. */
+.lp-btn.mk-primary { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+
+/* A glyph verb in the narrow rail: square, quiet, and the same hit size as
+   the word it replaces — the row is 168px wide and the label must not wrap. */
+.rp-btn.is-compact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+.rp-btn.rp-centre.is-compact:hover { color: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); }
+
+/* ── Calibration settings ─────────────────────────────────────────────────
+   The two an operator changes between samples sit in the open; the numbers
+   that place the calibration points inside the detected range sit behind
+   "More…", because they are wrong to touch without a reason. */
+.op-row-wrap { flex-wrap: wrap; row-gap: var(--op-2); }
+.cal-opts { margin-top: var(--op-2); }
+.cal-opt { display: inline-flex; align-items: center; gap: 5px; }
+.cal-opt input[type="checkbox"] { accent-color: var(--accent, #3b82f6); }
+.cal-num {
+    width: 62px;
+    min-height: 24px;
+    padding: 1px 5px;
+    background: var(--bg-card);
+    border: 1px solid var(--op-rule);
+    border-radius: 5px;
+    color: var(--op-ink);
+    font-family: var(--op-mono);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+/* The unit beside a number is not a label: .op-label is uppercased, and µ
+   uppercases to Μ, which reads as M — 25 ΜM is a different quantity. */
+.op-unit {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: var(--op-ink-dim);
+}
+.cal-num:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+.cal-adv {
+    margin-top: var(--op-2);
+    padding: var(--op-2) var(--op-3);
+    border: 1px dashed var(--op-rule);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.cal-adv .op-cap { margin: 0; }
+.op-btn-quiet {
+    background: none;
+    border-color: transparent;
+    color: var(--op-ink-dim);
+    padding: 2px 6px;
+}
+.op-btn-quiet:hover { color: var(--op-ink); border-color: var(--op-rule); }
+
+/* ── calibration progress ───────────────────────────────────────────────────
+   The frames a calibration is judging, while it judges them. Dark first, light
+   override second — the file's order is the tie-break at equal specificity. */
+.cp {
+    margin-top: var(--op-2);
+    padding: var(--op-2) var(--op-3);
+    border: 1px solid var(--op-rule);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.cp-head {
+    display: flex;
+    align-items: center;
+    gap: var(--op-2);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.cp-phase { color: var(--op-ink); letter-spacing: 0.04em; }
+.cp-count { margin-left: auto; font-family: var(--op-mono); font-variant-numeric: tabular-nums; }
+/* A pulse while frames are still coming, gone the moment they stop. */
+.cp-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent, #3b82f6);
+    animation: cp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .cp-dot { animation: none; } }
+.cp-stage {
+    display: flex;
+    justify-content: center;
+    background: #000;
+    border-radius: 6px;
+    min-height: 90px;
+    overflow: hidden;
+}
+.cp-img { max-width: 100%; max-height: 260px; object-fit: contain; display: block; }
+.cp-cap {
+    font-family: var(--op-mono);
+    font-size: 0.7rem;
+    color: var(--op-ink-dim);
+    min-height: 1em;
+}
+.cp-strip {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+}
+.cp-thumb {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: #000;
+    cursor: pointer;
+    overflow: hidden;
+}
+.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-thumb.is-on { border-color: var(--accent, #3b82f6); }
+/* The conclusions — the fitted curves, the montage, the summary — are what you
+   scroll back for, so they are findable in a strip of near-identical frames. */
+.cp-thumb.is-key { border-color: var(--op-ink-dim); border-style: dashed; }
+.cp-thumb:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+[data-theme="light"] .cp { background: var(--op-panel, #fff); }
+/* A caption that is warning rather than explaining. */
+.op-cap-warn { color: var(--op-warn); }
+/* A destructive verb waiting for its second click. */
+.op-btn.is-armed { color: var(--op-warn); border-color: var(--op-warn); }
