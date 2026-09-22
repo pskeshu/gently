@@ -991,6 +991,19 @@
                              coverslip are outside the map region." The region is the
                              XY safety envelope; this is the only place it is edited. -->
                         <button class="devices-region-btn" id="devices-region-edit" type="button">Edit region</button>
+
+                        <!-- The joystick lock, where the stage is. It existed only
+                             in Settings, which is not where anyone is standing when
+                             they wonder why the physical controller does nothing —
+                             or when they want it to stop working while a run is on.
+                             The state shown is read back from the controller; the
+                             write is verified there too, so this cannot claim a lock
+                             the hardware refused. -->
+                        <div class="devices-js" id="devices-js">
+                            <button class="devices-js-btn" id="devices-js-toggle" type="button"
+                                    aria-pressed="false" disabled>Joystick —</button>
+                            <span class="devices-js-note" id="devices-js-note">reading…</span>
+                        </div>
                     </div>
                     <!-- A guided walk, not a form: start the bottom camera so the
                          operator can see where the stage is, then send them to each
