@@ -163,3 +163,8 @@ tools/ui_crawler/out*/
 # ruff 0.16 formats Python code blocks inside markdown, so committing verbatim
 # issue text means the formatter rewrites the snippets people quoted.
 notes/issues-cache/
+
+# Detection debug output. Two 12 MB PNGs of this got swept into the repo by a
+# `git add -A` (d215003) and merged. The run writes them beside the repo root,
+# so they are one careless add away from coming back.
+detection_results/
