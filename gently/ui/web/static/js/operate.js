@@ -2308,6 +2308,15 @@ const OperateManager = (function () {
         if (all) all.addEventListener('click', calibrateAll);
         const clear = $('op-cal-clear');
         if (clear) clear.addEventListener('click', clearFit);
+        const advMore = $('op-adv-more'), adv = $('op-adv');
+        if (advMore && adv) {
+            advMore.addEventListener('click', () => {
+                const open = adv.hidden;
+                adv.hidden = !open;
+                advMore.setAttribute('aria-expanded', String(open));
+                advMore.textContent = open ? 'Hide' : 'Show';
+            });
+        }
         const alignSet = $('op-align-set');
         if (alignSet) alignSet.addEventListener('click', setSpimCentre);
         const alignHist = $('op-align-history');

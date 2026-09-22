@@ -585,6 +585,36 @@
                       <div class="op-gauge-foot" id="op-bz-foot"></div>
                     </div>
 
+                    {# The SPIM centre governs what "centre on this embryo"
+                       means HERE, which is why it lives on this pane. Behind a
+                       disclosure because it is an instrument fact that changes
+                       when someone re-seats the head — rarely, and never by
+                       accident. The offset itself, when set, is always visible
+                       on the bar under the frame. #}
+                    <div class="op-block">
+                      <div class="op-row op-row-wrap">
+                        <span class="op-block-head">Advanced</span>
+                        <button class="op-btn op-btn-quiet" id="op-adv-more" type="button"
+                                aria-expanded="false" aria-controls="op-adv">Show</button>
+                      </div>
+                      <div class="op-adv" id="op-adv" hidden>
+                        <div class="op-block-head">SPIM centre</div>
+                        <p class="op-cap">
+                          Centring aims at this camera's centre pixel. If the SPIM
+                          head looks somewhere else, jog XY until the selected embryo
+                          sits where you want it under the head, then record the
+                          difference.
+                        </p>
+                        <div class="op-row"><span class="op-label">Offset</span>
+                          <span class="op-num" id="op-align-value">not measured</span></div>
+                        <div class="op-row op-row-wrap">
+                          <button class="op-btn" id="op-align-set" type="button">Set from stage now</button>
+                          <button class="op-btn op-btn-quiet" id="op-align-more" type="button">History</button>
+                        </div>
+                        <div class="al-history" id="op-align-history" hidden></div>
+                      </div>
+                    </div>
+
                   </aside>
                 </section>
 
@@ -618,27 +648,6 @@
                         <button class="op-btn op-btn-toggle" id="op-spim-toggle" type="button">Start view</button>
                       </div>
                       <div id="op-cam-panel-spim"></div>
-                    </div>
-
-                    {# Where the head actually looks. An embryo's position is
-                       the stage XY at which it sits at the BOTTOM CAMERA's
-                       centre; until this existed the code assumed the SPIM
-                       axis was the same point. Centre on an embryo, jog XY
-                       until it sits where you want it here, then set. #}
-                    <div class="op-block">
-                      <div class="op-block-head">SPIM centre</div>
-                      <p class="op-cap">
-                        Centring aims at the bottom camera's centre pixel. If the
-                        head looks somewhere else, jog XY until the selected embryo
-                        sits where you want it, then record the difference.
-                      </p>
-                      <div class="op-row"><span class="op-label">Offset</span>
-                        <span class="op-num" id="op-align-value">not measured</span></div>
-                      <div class="op-row op-row-wrap">
-                        <button class="op-btn" id="op-align-set" type="button">Set from stage now</button>
-                        <button class="op-btn op-btn-quiet" id="op-align-more" type="button">History</button>
-                      </div>
-                      <div class="al-history" id="op-align-history" hidden></div>
                     </div>
 
                     <!-- The shared Light panel (docs/architecture/PANELS.md).
