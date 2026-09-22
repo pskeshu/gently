@@ -83,6 +83,26 @@ def _post(dl, body):
     return resp.status, json.loads(resp.text)
 
 
+def _fence_error(status):
+    """The error a refused ``set()`` reports, whichever Status class is in play.
+
+    tests/test_dispim_device_safety.py installs MagicMock stand-ins for ophyd
+    in ``sys.modules``, so in a full run ``stage.Status`` is a mock and
+    ``status.exception()`` hands back another mock instead of the ValueError —
+    this assertion passed alone and failed in the suite (#143's order
+    dependence, in a new test). The fence itself is the same either way: the
+    stage constructs a Status and calls ``set_exception`` with the error, so
+    read it from the recorded call when the class is a mock.
+    """
+    exc = status.exception() if hasattr(status, "exception") else None
+    if isinstance(exc, BaseException):
+        return exc
+    for call in getattr(getattr(status, "set_exception", None), "call_args_list", []):
+        if call.args and isinstance(call.args[0], BaseException):
+            return call.args[0]
+    return None
+
+
 def test_envelope_starts_at_the_code_defaults():
     st = _stage(_Core())
     assert st.x_limits == (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
@@ -97,7 +117,7 @@ def test_software_fence_follows_a_verified_firmware_write(tmp_path):
     assert st.x_limits == (-500.0, 1500.0) and st.y_limits == (-400.0, 900.0)
     assert float(core.props["UpperLimX(mm)"]) == pytest.approx(1.5)
     # and set() now fences against the new box, not the constants
-    assert isinstance(st.set([1600.0, 0.0]).exception(), ValueError)
+    assert isinstance(_fence_error(st.set([1600.0, 0.0])), ValueError)
     sidecar = tmp_path / "config.local.yml"
     assert sidecar.exists() and "xy_envelope" in sidecar.read_text()
 

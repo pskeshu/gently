@@ -478,9 +478,24 @@ const OperateManager = (function () {
     async function haltMotion() {
         try {
             const r = await postJSON('/api/devices/motion/halt', {});
-            toast(`Halted: ${(r.halted || []).join(', ') || 'nothing moving'}`);
+            const stopped = (r.halted || []).join(', ');
+            // success with nothing halted means no positioner was registered to
+            // halt — not "everything is stopped". Say the difference.
+            if (stopped) toast(`Halted: ${stopped}`);
+            else toastFail('HALT reached no positioners — none are registered');
         } catch (e) {
-            toastFail(`HALT failed (${why(e)})`);
+            // A refusal carries its body: which axes stopped, which did not and
+            // why. Naming the ones still moving is the whole point of the
+            // control — "HALT failed" alone leaves the operator guessing.
+            const d = (e && e.data) || {};
+            const failed = Object.keys(d.errors || {});
+            const stopped = (d.halted || []).join(', ');
+            if (failed.length) {
+                toastFail(`HALT: ${failed.join(', ')} did NOT stop`
+                    + (stopped ? ` · stopped: ${stopped}` : ''));
+            } else {
+                toastFail(`HALT failed (${why(e)})`);
+            }
         } finally {
             fd.refresh(); bz.refresh();
         }

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from gently.harness import calibration_gate
 from gently.ui.web.auth import require_control
@@ -1571,10 +1572,24 @@ def create_router(server) -> APIRouter:
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            return await client.halt_motion()
+            result = await client.halt_motion()
         except Exception as exc:
             logger.exception("motion halt failed")
             raise HTTPException(status_code=502, detail=f"halt failed: {exc}") from exc
+        # The device layer already answers 502 with a per-axis `errors` map when
+        # a controller refuses, but DiSPIMMicroscope._api_post returns the body
+        # without looking at the status — so without this the browser saw 200
+        # and an operator saw a green "Halted: fdrive, xy_stage" while the third
+        # axis was still moving. Worse, when EVERY axis refused, `halted` was
+        # empty and the toast read "Halted: nothing moving".
+        #
+        # JSONResponse rather than HTTPException (the pattern the envelope route
+        # uses) because the body is the useful part here: the UI has to name
+        # which axes stopped and which did not.
+        if not result.get("success", True):
+            logger.error("motion halt refused: %s", result.get("errors"))
+            return JSONResponse(status_code=502, content=result)
+        return result
 
     @router.post("/api/devices/spim/fdrive/nudge", dependencies=[Depends(require_control)])
     async def nudge_fdrive(payload: dict = Body(...)):  # noqa: B008
