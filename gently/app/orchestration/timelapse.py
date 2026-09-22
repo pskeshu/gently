@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
-from gently.core import EventType, get_event_bus
+from gently.core import EventType, get_event_bus, spim_alignment
 from gently.core.imaging import (
     apply_crop_bounds,
     compute_crop_bounds,
@@ -777,7 +777,9 @@ class TimelapseOrchestrator:
             # Move to embryo position
             pos = embryo.stage_position
             if pos and pos.get("x") is not None:
-                await self.client.move_to_position(pos["x"], pos["y"])
+                # Through the SPIM alignment offset: an acquisition has to
+                # image the same point calibration measured.
+                await spim_alignment.move_to_embryo(self.client, pos)
 
             # Get calibration parameters
             cal = embryo.calibration or {}

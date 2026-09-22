@@ -800,11 +800,100 @@ const OperateManager = (function () {
         drawMarkers(); renderMarkCount();
     }
 
+    // ── SPIM alignment ──────────────────────────────────────────────────────
+    // An embryo's position is the stage XY at which it sits at the BOTTOM
+    // CAMERA's centre. The SPIM head need not look at that same point, and
+    // until this offset existed the code assumed it did — so centring could
+    // put an embryo outside the light sheet and the pre-calibration check
+    // would report "No object visible" with every instrument check passing.
+    let _align = null;   // null until fetched; {dx_um, dy_um, is_measured, ...}
+
+    async function loadAlignment() {
+        try {
+            const d = await getJSON('/api/devices/spim/alignment');
+            _align = d && d.current ? d.current : null;
+        } catch (e) { _align = null; }   // unmeasured: behave as before
+        renderAlignment();
+    }
+
+    function renderAlignment() {
+        const value = $('op-align-value');
+        if (value) {
+            value.textContent = _align && _align.is_measured
+                ? `${_align.dx_um.toFixed(1)}, ${_align.dy_um.toFixed(1)} µm`
+                : 'not measured';
+        }
+        const line = $('op-align-line');
+        if (!line) return;
+        if (!_align || !_align.is_measured) {
+            // Rule 6: an instrument nobody has aligned has nothing to report
+            // here, and a row saying "0, 0" would imply someone checked.
+            line.hidden = true;
+            return;
+        }
+        const when = (_align.set_at || '').replace('T', ' ').slice(0, 16);
+        const sess = _align.session_id ? `, session ${_align.session_id}` : '';
+        line.hidden = false;
+        line.textContent = `SPIM offset ${_align.dx_um.toFixed(1)}, `
+            + `${_align.dy_um.toFixed(1)} µm (set ${when}${sess})`;
+    }
+
     async function centerOnEmbryo(emb) {
         const xy = resolveXY(emb);
         if (!xy) { toastFail('That embryo has no recorded position'); return; }
         selectEmbryo(emb.id);
-        await moveStageTo(xy.x, xy.y, `Centred on embryo ${labelFor(emb)}`);
+        // Through the offset, so "centre" means "under the SPIM", not "at the
+        // bottom camera's centre pixel". Zero offset leaves it unchanged.
+        // Through `M`, the module's guarded alias: if operate-math.js failed to
+        // load, centring must fall back to the raw position rather than throw.
+        const [tx, ty] = M ? M.centreTarget(xy.x, xy.y, _align) : [xy.x, xy.y];
+        await moveStageTo(tx, ty, `Centred on embryo ${labelFor(emb)}`);
+    }
+
+    async function setSpimCentre() {
+        if (!_selected) { toastFail('Select the embryo you aligned on first'); return; }
+        const b = $('op-align-set');
+        if (b) b.disabled = true;
+        try {
+            const d = await postJSON('/api/devices/spim/alignment',
+                { embryo_id: _selected, note: '' });
+            _align = d && d.current ? d.current : null;
+            renderAlignment();
+            renderAlignHistory(d);
+            toast(`SPIM centre set — offset ${_align.dx_um.toFixed(1)}, ${_align.dy_um.toFixed(1)} µm`);
+        } catch (e) {
+            toastFail(`Could not set the SPIM centre (${why(e)})`);
+        } finally {
+            if (b) b.disabled = false;
+        }
+    }
+
+    function renderAlignHistory(d) {
+        const host = $('op-align-history');
+        if (!host) return;
+        const rows = (d && Array.isArray(d.history) ? d.history : []).slice().reverse();
+        if (!rows.length) { host.innerHTML = ''; host.hidden = true; return; }
+        host.hidden = false;
+        host.innerHTML = rows.map(h => {
+            const when = h.set_at ? h.set_at.replace('T', ' ').slice(0, 16) : 'never measured';
+            const val = `${(h.dx_um || 0).toFixed(1)}, ${(h.dy_um || 0).toFixed(1)} µm`;
+            return `<div class="al-row"><span class="al-when">${escapeHtml(when)}</span>`
+                + `<span class="al-val">${val}</span>`
+                + `<button class="op-btn op-btn-quiet al-restore" type="button"`
+                + ` data-at="${escapeHtml(h.set_at || '')}">Restore</button></div>`;
+        }).join('');
+    }
+
+    async function restoreAlignment(setAt) {
+        try {
+            const d = await postJSON('/api/devices/spim/alignment/restore', { set_at: setAt || null });
+            _align = d && d.current ? d.current : null;
+            renderAlignment();
+            renderAlignHistory(d);
+            toast('SPIM alignment restored');
+        } catch (e) {
+            toastFail(`Could not restore that alignment (${why(e)})`);
+        }
     }
 
     function renderMarkCount() {
@@ -2219,6 +2308,22 @@ const OperateManager = (function () {
         if (all) all.addEventListener('click', calibrateAll);
         const clear = $('op-cal-clear');
         if (clear) clear.addEventListener('click', clearFit);
+        const alignSet = $('op-align-set');
+        if (alignSet) alignSet.addEventListener('click', setSpimCentre);
+        const alignHist = $('op-align-history');
+        if (alignHist) alignHist.addEventListener('click', e => {
+            const b = e.target.closest('.al-restore');
+            if (b) restoreAlignment(b.dataset.at);
+        });
+        const alignMore = $('op-align-more');
+        if (alignMore) alignMore.addEventListener('click', async () => {
+            const host = $('op-align-history');
+            if (host && !host.hidden) { host.hidden = true; return; }
+            try { renderAlignHistory(await getJSON('/api/devices/spim/alignment')); }
+            catch (e) { toastFail(`Could not read the alignment history (${why(e)})`); }
+        });
+        loadAlignment();
+
         const anyway = $('op-cal-anyway');
         if (anyway) anyway.addEventListener('click', () => calibrateSelected({ anyway: true }));
         wireCalForm();

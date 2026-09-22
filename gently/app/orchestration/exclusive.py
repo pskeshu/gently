@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 
 from gently.app.temperature_sampler import temperature_stamp
+from gently.core import spim_alignment
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class BurstAcquisition(ExclusiveAcquisition):
         pos = embryo.stage_position or {}
         if pos.get("x") is not None and pos.get("y") is not None:
             try:
-                await orchestrator.client.move_to_position(pos["x"], pos["y"])
+                await spim_alignment.move_to_embryo(orchestrator.client, pos)
             except Exception as e:
                 logger.warning("Burst move-to failed for %s: %s", self.target_embryo_id, e)
 

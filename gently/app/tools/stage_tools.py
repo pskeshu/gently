@@ -4,6 +4,7 @@ Stage Movement Tools
 Tools for controlling microscope XY stage movement.
 """
 
+from gently.core import spim_alignment
 from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
@@ -40,7 +41,11 @@ async def move_to_embryo(embryo_id: str, context: dict) -> str:
     try:
         x = embryo.stage_position.get("x", 0)
         y = embryo.stage_position.get("y", 0)
-        await client.move_to_position(x, y)
+        # Through the SPIM alignment offset, like every other "go to this
+        # embryo" path: an embryo position is where it sits at the BOTTOM
+        # CAMERA's centre, and the head may look somewhere else.
+        await spim_alignment.move_to_embryo(client, {"x": x, "y": y})
+        x, y = spim_alignment.centre_target(x, y)
 
         return f"Moved to {embryo_id}\nPosition: ({x:.2f}, {y:.2f}) um"
 

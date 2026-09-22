@@ -542,6 +542,10 @@
                          instrument column, which is for the hardware axes. -->
                     <div class="op-bar">
                       <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
+                      {# A correction nobody can see is how people chase ghosts:
+                         once an offset is set, "centre" no longer means the
+                         frame's centre pixel, and this says so. #}
+                      <span class="op-cap op-align-line" id="op-align-line" hidden></span>
                     </div>
                     <!-- Display range, attached under the frame it applies to.
                          Nothing sits on the pixels. -->
@@ -614,6 +618,27 @@
                         <button class="op-btn op-btn-toggle" id="op-spim-toggle" type="button">Start view</button>
                       </div>
                       <div id="op-cam-panel-spim"></div>
+                    </div>
+
+                    {# Where the head actually looks. An embryo's position is
+                       the stage XY at which it sits at the BOTTOM CAMERA's
+                       centre; until this existed the code assumed the SPIM
+                       axis was the same point. Centre on an embryo, jog XY
+                       until it sits where you want it here, then set. #}
+                    <div class="op-block">
+                      <div class="op-block-head">SPIM centre</div>
+                      <p class="op-cap">
+                        Centring aims at the bottom camera's centre pixel. If the
+                        head looks somewhere else, jog XY until the selected embryo
+                        sits where you want it, then record the difference.
+                      </p>
+                      <div class="op-row"><span class="op-label">Offset</span>
+                        <span class="op-num" id="op-align-value">not measured</span></div>
+                      <div class="op-row op-row-wrap">
+                        <button class="op-btn" id="op-align-set" type="button">Set from stage now</button>
+                        <button class="op-btn op-btn-quiet" id="op-align-more" type="button">History</button>
+                      </div>
+                      <div class="al-history" id="op-align-history" hidden></div>
                     </div>
 
                     <!-- The shared Light panel (docs/architecture/PANELS.md).

@@ -1395,6 +1395,89 @@ def create_router(server) -> APIRouter:
         agent.experiment.notify_embryos_changed()
         return {"success": True, "message": message, "calibration": calibration}
 
+    @router.get("/api/devices/spim/alignment")
+    async def get_spim_alignment():
+        """Where the SPIM head looks, relative to the bottom camera's centre.
+
+        `is_measured` false means nobody has ever checked — the instrument is
+        running on the assumption that the two coincide, which is the state
+        this endpoint exists to make visible.
+        """
+        from gently.core import spim_alignment
+
+        return spim_alignment.load().to_dict()
+
+    @router.post("/api/devices/spim/alignment", dependencies=[Depends(require_control)])
+    async def set_spim_alignment(payload: dict = Body(...)):  # noqa: B008
+        """Record the current stage position as this embryo's SPIM centre.
+
+        Body: {"embryo_id": str, "note": str}.
+
+        The operator has centred on an embryo and then jogged XY until it sits
+        where they want it under the SPIM. The offset is that jog:
+        `live_stage - embryo_position`. Measured server-side from the live
+        readout rather than taken from the caller, so a stale number in a
+        browser tab cannot become the instrument's alignment.
+        """
+        from gently.core import spim_alignment
+
+        agent = _require_agent_with_experiment()
+        embryo_id = str(payload.get("embryo_id") or "")
+        emb = agent.experiment.embryos.get(embryo_id)
+        if emb is None:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+        pos = getattr(emb, "stage_position", None) or {}
+        if pos.get("x") is None or pos.get("y") is None:
+            raise HTTPException(
+                status_code=409, detail=f"{embryo_id} has no recorded position to measure against"
+            )
+
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            x, y = await client.get_stage_position()
+        except Exception as exc:
+            logger.exception("Could not read the stage position")
+            raise HTTPException(status_code=502, detail=f"stage read failed: {exc}") from exc
+
+        # The jog, relative to where centring had already put the stage — and
+        # centring already applies the current offset, so the correction
+        # accumulates rather than being redefined from zero each time.
+        current = spim_alignment.load().current
+        dx = float(x) - float(pos["x"]) + 0.0
+        dy = float(y) - float(pos["y"]) + 0.0
+        record = spim_alignment.set_offset(
+            dx,
+            dy,
+            session_id=getattr(agent, "session_id", None),
+            note=str(payload.get("note") or ""),
+        )
+        logger.warning(
+            "SPIM alignment set to (%.1f, %.1f) um, was (%.1f, %.1f)",
+            dx,
+            dy,
+            current.dx_um,
+            current.dy_um,
+        )
+        return record.to_dict()
+
+    @router.post("/api/devices/spim/alignment/restore", dependencies=[Depends(require_control)])
+    async def restore_spim_alignment(payload: dict = Body(...)):  # noqa: B008
+        """Bring a past alignment back. Body: {"set_at": str|null}.
+
+        Restoring appends like any other change, so it can itself be undone.
+        """
+        from gently.core import spim_alignment
+
+        agent = _require_agent_with_experiment()
+        record = spim_alignment.restore(
+            payload.get("set_at"), session_id=getattr(agent, "session_id", None)
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="no alignment with that timestamp")
+        return record.to_dict()
+
     @router.post("/api/devices/calibrate/all", dependencies=[Depends(require_control)])
     async def calibrate_all_route(payload: dict = Body(default={})):  # noqa: B008
         """Calibrate several embryos in one go. Body: {scope, ...cal settings}.
