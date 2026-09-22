@@ -1546,3 +1546,10 @@
 .op-cap-warn { color: var(--op-warn); }
 /* A destructive verb waiting for its second click. */
 .op-btn.is-armed { color: var(--op-warn); border-color: var(--op-warn); }
+
+/* ── SPIM alignment ─────────────────────────────────────────────────────── */
+.op-align-line { color: var(--op-warn); font-family: var(--op-mono); font-size: 0.68rem; }
+.al-history { display: flex; flex-direction: column; gap: 3px; margin-top: var(--op-2); }
+.al-row { display: flex; align-items: center; gap: var(--op-2); font-size: 0.7rem; }
+.al-when { color: var(--op-ink-dim); font-family: var(--op-mono); }
+.al-val { margin-left: auto; font-family: var(--op-mono); color: var(--op-ink); }

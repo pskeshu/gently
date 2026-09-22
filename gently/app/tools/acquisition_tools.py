@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from gently.core import spim_alignment
 from gently.harness import calibration_gate
 from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
@@ -132,7 +133,7 @@ async def acquire_volume(
         # Move to embryo position first
         pos = embryo.stage_position
         if pos and pos.get("x") is not None and pos.get("y") is not None:
-            await client.move_to_position(pos["x"], pos["y"])
+            await spim_alignment.move_to_embryo(client, pos)
 
         # Calibrated by the time we get here, unless the caller explicitly
         # accepted a guess. The literals below are that guess, and they are

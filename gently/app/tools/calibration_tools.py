@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from gently.core import spim_alignment
+
 logger = logging.getLogger(__name__)
 
 # Below this, a focus sweep's Gaussian fit is reported as low confidence. It is
@@ -1114,7 +1116,7 @@ async def calibrate_embryo(
         pos = embryo.stage_position
         if pos and pos.get("x") is not None and pos.get("y") is not None:
             logger.info("Moving to %s position...", embryo_id)
-            await client.move_to_position(pos["x"], pos["y"])
+            await spim_alignment.move_to_embryo(client, pos)
 
         # Initialize Claude client for vision
         claude_vision = AsyncClaudeClient()

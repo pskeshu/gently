@@ -41,6 +41,25 @@ const OperateMath = (function () {
         ];
     }
 
+    /**
+     * Where the stage goes to put an embryo under the SPIM axis.
+     *
+     * `frameToStage` above defines an embryo's position as the stage XY at
+     * which it sits at the BOTTOM CAMERA's centre pixel. The SPIM head does
+     * not necessarily look at that same point, and nothing measured the
+     * difference until it could be stored — so this adds it.
+     *
+     * A zero offset returns the coordinate untouched, which is the old
+     * assumption and the behaviour of an instrument nobody has aligned.
+     * Mirrors `spim_alignment.centre_target` on the server; the numbers must
+     * agree, because the pane and the agent drive the same stage.
+     */
+    function centreTarget(x, y, offset) {
+        const dx = offset && Number.isFinite(offset.dx_um) ? offset.dx_um : 0;
+        const dy = offset && Number.isFinite(offset.dy_um) ? offset.dy_um : 0;
+        return [x + dx, y + dy];
+    }
+
     // The F-drive travels from ~25000 µm down onto a sample sitting around 50-60.
     // Operators close that in bands: a big jump, then thousands, hundreds, tens.
     // Offering ±1 at 25000 µm is 2500 clicks; offering ±1000 at 200 µm is a crash.
@@ -176,7 +195,7 @@ const OperateMath = (function () {
     return {
         BASE_UM_PER_PX, ENGAGED_WITHIN_UM, AT_TOL_UM, FD_BANDS,
         umPerPx, frameToStage, stageToFrame, fdBand, stepAllowed, gaugeFraction, isEngaged,
-        atPosition,
+        atPosition, centreTarget,
     };
 })();
 
