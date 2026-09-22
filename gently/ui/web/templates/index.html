@@ -770,6 +770,13 @@
                       </div>
                       <p class="op-cap" id="op-cal-borrow-note" hidden></p>
 
+                      {# The pre-flight refusal, and the way past it. Appears
+                         only after a calibration has declined to start. #}
+                      <div class="op-row op-row-wrap cal-refused" id="op-cal-refused" hidden>
+                        <span class="op-cap op-cap-warn" id="op-cal-refused-why"></span>
+                        <button class="op-btn op-btn-warn" id="op-cal-anyway" type="button">Calibrate anyway</button>
+                      </div>
+
                       {# What the run is looking at, while it looks. Empty —
                          and takes no room — until frames arrive. #}
                       <div id="op-cal-progress"></div>

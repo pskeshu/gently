@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 # that the one on offer is a poor one, instead of calling it "the best".
 LOW_CONFIDENCE_R2 = 0.5
 
+# The pre-calibration check's refusal opens with this, so a route can map it to
+# a distinct status and a pane can offer the override rather than showing the
+# operator a generic failure.
+NO_OBJECT_PREFIX = "No object visible"
+
 import numpy as np  # noqa: E402
 
 from gently.analysis.core import AdaptiveSweepState, FitFunction, fit_focus_curve  # noqa: E402
@@ -976,10 +981,17 @@ async def calibrate_embryo(
     edge_tolerance_deg: float = 0.20,
     inset_fraction: float = 0.4,
     z_buffer_um: float = 25.0,
+    require_object: bool = True,
     use_v04_plan: bool = False,
     context: dict | None = None,
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection.
+
+    ``require_object`` (default True) takes ONE frame at the expected focus
+    first and asks Claude whether anything is there. On an empty field this
+    turns sixty to eighty exposures and a fit derived from noise into one
+    exposure and a refusal naming what to check. Pass False to calibrate
+    regardless — a dim embryo Claude misjudges must not be uncalibratable.
 
     Calibration path: this function mirrors the v0.4.0 `calibrate_embryo_piezo_galvo`
     Bluesky plan (in `gently/hardware/dispim/plans/calibration.py`). After edge
@@ -1013,11 +1025,8 @@ async def calibrate_embryo(
     not on the agent side. If you need it, wire it through the queue server
     plan-submission API. Until then, the surgical path IS the v0.4.0 path.
     """
-    import tempfile
-    from pathlib import Path
 
     import numpy as np
-    from PIL import Image
 
     from gently.analysis.core import calculate_focus_score
     from gently.hardware.dispim.claude_client import AsyncClaudeClient
@@ -1119,68 +1128,53 @@ async def calibrate_embryo(
             """Capture image, check embryo presence, and get feature richness score from Claude"""
             nonlocal total_exposures
             piezo_pos = HEURISTIC_SLOPE * galvo_pos + HEURISTIC_OFFSET  # Track light sheet
-            result = await client.capture_lightsheet_image(
-                piezo_position=float(piezo_pos), galvo_position=float(galvo_pos)
+            # One capture-and-ask implementation, shared with the
+            # pre-calibration check — see observe_at_galvo. This wrapper owns
+            # only the bookkeeping the sweep needs.
+            obs = await observe_at_galvo(
+                client,
+                claude_vision,
+                galvo=galvo_pos,
+                piezo=piezo_pos,
+                embryo_id=embryo_id,
+                agent=agent,
             )
-            if result.get("success"):
+            if obs["exposed"]:
                 total_exposures += 1
-            if not result.get("success") or result.get("image") is None:
+            if not obs["exposed"]:
                 return False
+            edge_detection_data.append(
+                {
+                    "galvo": obs["galvo"],
+                    "piezo": obs["piezo"],
+                    "visible": obs["visible"],
+                    "feature_score": obs["feature_score"],
+                }
+            )
+            return obs["visible"]
 
-            img = result["image"]
-            # Select best view from dual-view image
-            img_view = select_best_view(img)
-
-            # Save to temp file for Claude
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                temp_path = Path(f.name)
-                # Normalize and save
-                img_norm = (
-                    (img_view - img_view.min()) / (img_view.max() - img_view.min() + 1e-10) * 255
-                ).astype(np.uint8)
-                Image.fromarray(img_norm).save(temp_path)
-
-            try:
-                # Claude now returns (visible, feature_score, description)
-                visible, feature_score, description = await claude_vision.detect_embryo_presence(
-                    temp_path
+        # === PRE-FLIGHT: is there anything here at all? ===
+        # Before Phase 1, and before the skip_edge_detection path too — that
+        # one takes no frames at all, so an empty field there produced a fit
+        # from pure noise with nothing ever having looked.
+        if require_object:
+            found, seen = await probe_for_object(
+                client,
+                claude_vision,
+                embryo_id=embryo_id,
+                slope=HEURISTIC_SLOPE,
+                offset=HEURISTIC_OFFSET,
+                max_range=edge_max_range,
+                agent=agent,
+            )
+            total_exposures += sum(1 for o in seen if o["exposed"])
+            if not found:
+                logger.warning(
+                    "%s: nothing visible in %d probe frame(s) — refusing to calibrate",
+                    embryo_id,
+                    len(seen),
                 )
-                logger.debug(
-                    "galvo=%+.3f deg: %s (features=%s/10) - %s...",
-                    galvo_pos,
-                    "VISIBLE" if visible else "EMPTY",
-                    feature_score,
-                    description[:40],
-                )
-
-                # Record for optimal focus position selection
-                edge_detection_data.append(
-                    {
-                        "galvo": float(galvo_pos),
-                        "piezo": float(piezo_pos),
-                        "visible": visible,
-                        "feature_score": feature_score,
-                    }
-                )
-
-                # Push edge detection image to viz server
-                if agent.viz_server:
-                    agent.push_viz(
-                        array=img_norm,
-                        uid=f"edge_detect_{embryo_id}_{galvo_pos:.3f}",
-                        data_type="edge_detection",
-                        metadata={
-                            "embryo_id": embryo_id,
-                            "galvo": float(galvo_pos),
-                            "piezo": float(piezo_pos),
-                            "visible": visible,
-                            "feature_score": feature_score,
-                        },
-                    )
-
-                return visible
-            finally:
-                temp_path.unlink(missing_ok=True)
+                return no_object_refusal(embryo_id, seen)
 
         # === PHASE 1: EDGE DETECTION (unless skipped) ===
         if skip_edge_detection:
@@ -1447,6 +1441,7 @@ async def calibrate_all_embryos(
     edge_max_range: float = 0.5,
     edge_tolerance_deg: float = 0.20,
     inset_fraction: float = 0.4,
+    require_object: bool = True,
     context: dict | None = None,
 ) -> str:
     """Calibrate embryos sequentially with Claude vision.
@@ -1486,6 +1481,7 @@ async def calibrate_all_embryos(
             edge_max_range=edge_max_range,
             edge_tolerance_deg=edge_tolerance_deg,
             inset_fraction=inset_fraction,
+            require_object=require_object,
             context=context,
         )
         # Get first two lines of result
@@ -1513,6 +1509,159 @@ def _calibration_quality_score(cal: dict) -> float:
         return float(cal.get("r_squared", 0.0) or 0.0)
     vals = [v for v in (top, bot) if v is not None]
     return float(min(vals)) if vals else 0.0
+
+
+# Frames the pre-calibration check pushes. A distinct type from
+# "edge_detection" because the operator is being told a different thing: not
+# "here is the sweep", but "here is why I am about to refuse".
+PROBE_DATA_TYPE = "presence_check"
+
+
+async def observe_at_galvo(
+    client,
+    claude_vision,
+    *,
+    galvo: float,
+    piezo: float,
+    embryo_id: str = "",
+    agent=None,
+    data_type: str = "edge_detection",
+    uid: str | None = None,
+) -> dict:
+    """Capture one light-sheet frame at a galvo/piezo pair and ask Claude what is there.
+
+    The one place this happens. The edge sweep and the pre-calibration check
+    are the same question asked at different moments — "is there embryo
+    structure in this frame?" — and two copies of the capture-normalise-encode
+    dance would drift in exactly the way that makes a refusal disagree with
+    the sweep that follows it.
+
+    Returns a dict rather than a bool because the caller decides what to do
+    with the verdict: the sweep only needs `visible`, while a refusal has to
+    quote Claude's own `description` back to the operator.
+    """
+    # Imported here, like every other user of these in this module: the file
+    # defers heavy/optional imports to call time (see calibrate_embryo).
+    import tempfile
+    from pathlib import Path
+
+    from PIL import Image
+
+    result = await client.capture_lightsheet_image(
+        piezo_position=float(piezo), galvo_position=float(galvo)
+    )
+    out = {
+        "galvo": float(galvo),
+        "piezo": float(piezo),
+        "exposed": bool(result.get("success")),
+        "visible": False,
+        "feature_score": 0,
+        "description": "",
+    }
+    if not result.get("success") or result.get("image") is None:
+        out["description"] = str(result.get("error") or "capture failed")
+        return out
+
+    img_view = select_best_view(result["image"])
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        temp_path = Path(f.name)
+        img_norm = (
+            (img_view - img_view.min()) / (img_view.max() - img_view.min() + 1e-10) * 255
+        ).astype(np.uint8)
+        Image.fromarray(img_norm).save(temp_path)
+
+    try:
+        visible, feature_score, description = await claude_vision.detect_embryo_presence(temp_path)
+        out.update(
+            visible=bool(visible), feature_score=feature_score, description=description or ""
+        )
+        logger.debug(
+            "galvo=%+.3f deg: %s (features=%s/10) - %s...",
+            galvo,
+            "VISIBLE" if visible else "EMPTY",
+            feature_score,
+            (description or "")[:40],
+        )
+        if agent is not None and getattr(agent, "viz_server", None):
+            agent.push_viz(
+                array=img_norm,
+                uid=uid or f"edge_detect_{embryo_id}_{galvo:.3f}",
+                data_type=data_type,
+                metadata={
+                    "embryo_id": embryo_id,
+                    "galvo": float(galvo),
+                    "piezo": float(piezo),
+                    "visible": bool(visible),
+                    "feature_score": feature_score,
+                    "description": description or "",
+                },
+            )
+        return out
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+async def probe_for_object(
+    client,
+    claude_vision,
+    *,
+    embryo_id: str,
+    slope: float,
+    offset: float,
+    max_range: float = 0.5,
+    agent=None,
+) -> tuple[bool, list[dict]]:
+    """Is there anything here at all, before a calibration is spent on it?
+
+    Calibration costs sixty to eighty exposures of laser on a live sample and,
+    on an empty field, produces a fit rather than an error — five plausible
+    numbers derived from noise, which the calibration gate then accepts as a
+    licence to run a timelapse. One frame is enough to know better.
+
+    Three positions, cheapest-first: the expected focus, then half the search
+    range either side of it. The centre alone would be one exposure, but the
+    expected focus comes from a heuristic (the session prior, or a default
+    slope), so an embryo sitting off-centre in Z would be refused for being
+    somewhere the guess did not look. Present costs one frame; refusing costs
+    three.
+
+    Returns (found, observations) and short-circuits on the first sighting, so
+    the happy path is one exposure.
+    """
+    seen: list[dict] = []
+    for galvo in (0.0, max_range / 2.0, -max_range / 2.0):
+        obs = await observe_at_galvo(
+            client,
+            claude_vision,
+            galvo=galvo,
+            piezo=slope * galvo + offset,
+            embryo_id=embryo_id,
+            agent=agent,
+            data_type=PROBE_DATA_TYPE,
+            uid=f"presence_{embryo_id}_{galvo:+.3f}",
+        )
+        seen.append(obs)
+        if obs["visible"]:
+            return True, seen
+    return False, seen
+
+
+def no_object_refusal(embryo_id: str, seen: list[dict]) -> str:
+    """What the operator is told when the frames are empty.
+
+    Quotes Claude's own words per position, because "no object visible" alone
+    does not distinguish an empty field from an unfocused head from a laser
+    that never fired — and those have different fixes.
+    """
+    lines = [f"{NO_OBJECT_PREFIX} for {embryo_id} — not calibrating."]
+    for obs in seen:
+        what = obs["description"][:70] if obs["exposed"] else f"no frame ({obs['description']})"
+        lines.append(f"  galvo {obs['galvo']:+.3f}deg: {what}")
+    lines.append(
+        "Check the SPIM head is lowered and focused, the laser is on with the LED closed, "
+        "and the stage is at this embryo. Pass require_object=false to calibrate anyway."
+    )
+    return chr(10).join(lines)
 
 
 def persist_calibration(agent, embryo) -> bool:

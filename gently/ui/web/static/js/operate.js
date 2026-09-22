@@ -1216,8 +1216,9 @@ const OperateManager = (function () {
         renderCalForm();
     }
 
-    async function calibrateSelected() {
+    async function calibrateSelected(opts) {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        hideRefusal();
         const b = $('op-calibrate'), out = $('op-cal-result');
         // A routine that runs for tens of seconds behind a disabled button is
         // indistinguishable from one that has hung. Count out loud.
@@ -1231,9 +1232,18 @@ const OperateManager = (function () {
         // progress panel shows them as they land.
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(_selected);
         try {
-            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`,
-                calibrationSettings());
+            const body = calibrationSettings();
+            // Only ever false, and only when the operator has just been shown
+            // the refusal and the frames behind it. Absent means "check".
+            if (opts && opts.anyway) body.require_object = false;
+            const d = await postJSON(`/api/devices/embryos/${_selected}/calibrate`, body);
             const cal = d.calibration || {};
+            // Onto the local copy first: the render in `finally` recomputes
+            // from `_embryos`, so without this a calibration the server has
+            // just confirmed redraws as "not calibrated" until the
+            // EMBRYOS_UPDATE broadcast catches up.
+            const mine = _embryos.find(e => e.id === _selected);
+            if (mine && cal.slope_um_per_deg != null) mine.calibration = cal;
             const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
             if (out) {
                 out.textContent = (slope != null)
@@ -1244,11 +1254,23 @@ const OperateManager = (function () {
                 CalProgressPanel.finish(true, out ? out.textContent : '');
             }
         } catch (e) {
-            if (out) out.textContent = 'failed';
-            // The frames stay up on a failure — they are the evidence of WHERE
-            // it went wrong, which is exactly what a bare 'failed' withholds.
-            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
-            toastFail(`Calibrate failed (${why(e)})`);
+            // 409 is the pre-flight check declining, not a crash: nothing was
+            // spent past one frame and the operator can say "anyway". Anything
+            // else is a failure and reads as one.
+            if (e && e.status === 409) {
+                if (out) out.textContent = 'nothing there';
+                _refusedFor = _selected;
+                showRefusal(e);
+                if (typeof CalProgressPanel !== 'undefined') {
+                    CalProgressPanel.finish(false, 'nothing visible at the expected focus');
+                }
+            } else {
+                if (out) out.textContent = 'failed';
+                // The frames stay up on a failure — they are the evidence of WHERE
+                // it went wrong, which is exactly what a bare 'failed' withholds.
+                if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
+                toastFail(`Calibrate failed (${why(e)})`);
+            }
         } finally {
             clearInterval(tick);
             if (b) b.disabled = false;
@@ -1264,9 +1286,14 @@ const OperateManager = (function () {
         return Number.isFinite(slope) && slope !== 0;
     };
 
+    let _refusedFor = null;
+
     function renderCalTarget() {
         const t = $('op-cal-target');
         const emb = _embryos.find(e => e.id === _selected);
+        // A refusal is about ONE embryo. Carrying it to the next selection
+        // would offer "calibrate anyway" over an embryo nobody has checked.
+        if (_refusedFor && _refusedFor !== _selected) { _refusedFor = null; hideRefusal(); }
         if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
         renderBorrow(emb);
         renderCalibrateAll();
@@ -1314,6 +1341,27 @@ const OperateManager = (function () {
         // what the source embryo did after the first borrow.
         if (hasFit(forEmbryo) && best.score <= fitScore(forEmbryo)) return null;
         return best;
+    }
+
+    // ── the pre-flight refusal ──────────────────────────────────────────────
+    // A calibration that declines to start has to say why in the operator's
+    // terms. The detail carries Claude's own words per probe position, and the
+    // frames it judged are already in the progress panel above — so the
+    // override is offered next to the evidence for it, not instead of it.
+    function showRefusal(err) {
+        const row = $('op-cal-refused'), why_ = $('op-cal-refused-why');
+        if (!row || !why_) return;
+        const detail = (err && err.data && err.data.detail) || (err && err.message) || '';
+        // First line is the verdict; the rest is per-position detail the
+        // filmstrip already shows. Keep the line short and let them look.
+        why_.textContent = String(detail).split(String.fromCharCode(10))[0]
+            || 'Nothing visible at the expected focus.';
+        row.hidden = false;
+    }
+
+    function hideRefusal() {
+        const row = $('op-cal-refused');
+        if (row) row.hidden = true;
     }
 
     // ── clearing a fit ──────────────────────────────────────────────────────
@@ -2171,6 +2219,8 @@ const OperateManager = (function () {
         if (all) all.addEventListener('click', calibrateAll);
         const clear = $('op-cal-clear');
         if (clear) clear.addEventListener('click', clearFit);
+        const anyway = $('op-cal-anyway');
+        if (anyway) anyway.addEventListener('click', () => calibrateSelected({ anyway: true }));
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
         document.querySelectorAll('[data-gv]').forEach(b =>

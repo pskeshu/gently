@@ -1362,9 +1362,15 @@ def create_router(server) -> APIRouter:
         # same way the agent invokes it. Calling the @tool wrapper directly would
         # drop the positional embryo_id.
         import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
+        from gently.app.tools.calibration_tools import NO_OBJECT_PREFIX
         from gently.harness.tools.registry import get_tool_registry
 
         args: dict = {"embryo_id": embryo_id, **_calibration_args(payload)}
+        # Pre-flight object check, on unless the operator says otherwise. The
+        # pane sends require_object=false only after seeing the refusal and the
+        # frames behind it.
+        if payload.get("require_object") is not None:
+            args["require_object"] = bool(payload["require_object"])
 
         registry = get_tool_registry()
         try:
@@ -1378,6 +1384,11 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
         if isinstance(message, str) and message.startswith("Error"):
             raise HTTPException(status_code=502, detail=message)
+        # "Nothing is there" is a refusal, not a failure: the run was declined
+        # after one frame, nothing is broken, and the operator can override it.
+        # 409 so the pane can tell those apart — a 502 would read as a crash.
+        if isinstance(message, str) and message.startswith(NO_OBJECT_PREFIX):
+            raise HTTPException(status_code=409, detail=message)
 
         emb = agent.experiment.embryos.get(embryo_id)
         calibration = dict(getattr(emb, "calibration", {}) or {}) if emb else {}
