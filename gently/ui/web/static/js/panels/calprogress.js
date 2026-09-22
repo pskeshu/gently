@@ -42,6 +42,7 @@ const CalProgressPanel = (() => {
     const IDLE_MS = 20000;
 
     const TYPES = new Set([
+        'presence_check',
         'edge_detection', 'focus_sweep', 'focus_plot', 'focus_montage', 'calibration_summary',
     ]);
 
@@ -67,6 +68,7 @@ const CalProgressPanel = (() => {
     function phaseOf(img) {
         const m = img.metadata || {};
         switch (img.data_type) {
+            case 'presence_check': return 'Checking there is something there';
             case 'edge_detection': return 'Finding the embryo edges';
             case 'focus_sweep': {
                 const side = m.galvo_name ? `${m.galvo_name} ` : '';
@@ -84,6 +86,15 @@ const CalProgressPanel = (() => {
         const m = img.metadata || {};
         const bits = [];
         switch (img.data_type) {
+            // The probe frame carries Claude's own words, which are the whole
+            // point of it: "empty field" and "out of focus" get different fixes.
+            case 'presence_check': {
+                const g = num(m.galvo, 3);
+                if (g !== null) bits.push(`galvo ${g}°`);
+                bits.push(m.visible ? 'something here' : 'nothing here');
+                if (m.description) bits.push(String(m.description).slice(0, 80));
+                break;
+            }
             case 'edge_detection': {
                 const g = num(m.galvo, 3);
                 if (g !== null) bits.push(`galvo ${g}°`);

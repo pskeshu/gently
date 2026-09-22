@@ -29,9 +29,25 @@ INDEX_HTML = ROOT / "gently" / "ui" / "web" / "templates" / "index.html"
 
 
 def _pushed_types() -> set[str]:
-    """Every data_type calibration pushes to the viz server."""
+    """Every data_type calibration pushes to the viz server.
+
+    Literals in the source, plus types passed as module constants: the shared
+    observer takes `data_type` as an argument, so the pre-calibration probe's
+    type exists only as `PROBE_DATA_TYPE` and a regex over the file cannot
+    see it.
+    """
+    import inspect
+
+    from gently.app.tools import calibration_tools
+
     src = CAL_TOOLS.read_text(encoding="utf-8")
-    return set(re.findall(r'data_type="([a-z_]+)"', src))
+    found = set(re.findall(r'data_type="([a-z_]+)"', src))
+    # The probe's type is a module constant, and the sweep's is the shared
+    # observer's DEFAULT argument — neither is a literal in this file any
+    # more, so both are read from the code rather than grepped for.
+    found.add(calibration_tools.PROBE_DATA_TYPE)
+    found.add(inspect.signature(calibration_tools.observe_at_galvo).parameters["data_type"].default)
+    return found
 
 
 def _panel_types() -> set[str]:
@@ -62,7 +78,8 @@ def test_the_panel_does_not_claim_frames_that_are_not_calibration() -> None:
 
 def test_the_run_opens_and_closes_the_panel() -> None:
     js = OPERATE_JS.read_text(encoding="utf-8")
-    run = re.search(r"async function calibrateSelected\(\) \{(.*?)\n    \}", js, re.S)
+    # Takes an options bag now (the "calibrate anyway" override).
+    run = re.search(r"async function calibrateSelected\(\w*\) \{(.*?)\n    \}", js, re.S)
     assert run, "calibrateSelected is gone"
     body = run.group(1)
     assert "CalProgressPanel.begin(" in body, (

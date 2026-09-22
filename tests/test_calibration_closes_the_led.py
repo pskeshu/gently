@@ -22,6 +22,12 @@ This path does no brightfield work of its own: every frame comes from
 `capture_lightsheet_image`, and there is no head-focus phase (`spim_head_focus`
 is the plan that legitimately wants the LED open, and it is not on this path).
 So the close is unconditional.
+
+The capture moved once since: `observe_at_galvo` is now the single
+capture-and-ask, used by the edge sweep and by the pre-calibration object
+check. The check takes the first frame of a run, so it is the one the close
+has to precede — which is why the ordering assertion below looks for every
+call that can produce a frame, not one function name.
 """
 
 from __future__ import annotations
@@ -45,8 +51,25 @@ def test_the_led_is_closed_before_the_first_frame() -> None:
         "calibration no longer closes the LED — edge detection will run on "
         "brightfield if the operator used it to find the embryos (#106)"
     )
-    # Before any capture, or the first frames are the ruined ones.
-    assert body.index("set_led") < body.index("capture_lightsheet_image"), (
+    # Before any frame, or the first ones are the ruined ones.
+    #
+    # The capture call itself now lives in `observe_at_galvo`, shared by the
+    # edge sweep and the pre-calibration object check, so this function no
+    # longer names `capture_lightsheet_image`. What it does name is every way
+    # it can reach a frame — and the close has to precede all of them,
+    # including the pre-flight probe, which is the FIRST frame of a run now.
+    frame_calls = [
+        m.start()
+        for m in re.finditer(
+            r"(observe_at_galvo|probe_for_object|capture_lightsheet_image)\(", body
+        )
+    ]
+    assert frame_calls, (
+        "calibrate_embryo no longer takes frames by any route this test knows; "
+        "if the capture moved again, teach this test the new name rather than "
+        "deleting the ordering check"
+    )
+    assert body.index("set_led") < min(frame_calls), (
         "the LED is closed after frames have already been captured"
     )
 
