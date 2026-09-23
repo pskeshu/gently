@@ -10,6 +10,9 @@
  */
 const BootBanner = (function () {
     const STAGE_TOTAL = 5;
+    // How long the "warming up" notice stays before retiring itself. Long
+    // enough to read from across the room, short enough not to become furniture.
+    const BOOT_NOTICE_MS = 6000;
 
     let _el, _text, _details, _retry, _close, _notNow;
     // Whether the operator asked for the microscope at the launch gate. A
@@ -20,6 +23,8 @@ const BootBanner = (function () {
     let _readyTimer = null;   // auto-dismiss timer for the "Microscope ready" flash
     let _pollMs = 0;
     let _lastState = null;
+    let _lastStep = null;     // so a step change re-publishes, not just a state change
+    let _bootFlash = null;    // auto-retire timer for the "warming up" notice
     let _dom = false;
 
     function cacheDom() {
@@ -94,25 +99,46 @@ const BootBanner = (function () {
         if (state !== _lastState) _ackedState = null; // new state → new banner
 
         // Publish a readiness signal for hardware-only controls to gate on.
+        // Progress rides along, and the event fires when the STEP moves as well
+        // as when the state does: the header shows "Warming up 2/5", which is
+        // only useful if it counts.
         const ready = state === 'ready' || state === 'external';
         window.gentlyDeviceReady = ready;
-        if (state !== _lastState && typeof ClientEventBus !== 'undefined') {
-            ClientEventBus.emit('DEVICE_LAYER_STATE', { state, ready });
+        const progress = d.progress || {};
+        const step = `${progress.i || ''}/${progress.n || ''}`;
+        if ((state !== _lastState || step !== _lastStep)
+            && typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.emit('DEVICE_LAYER_STATE', {
+                state,
+                ready,
+                progress: { i: progress.i, n: progress.n || STAGE_TOTAL, label: progress.label },
+            });
         }
+        _lastStep = step;
 
         if (state === 'starting' || state === 'initializing') {
             setPoll(1000);
             // Dismissed by the operator? Keep it hidden. The progress label keeps
             // changing while state stays 'initializing', so without this ack an ×
             // wouldn't stick and the banner would re-show every second.
+            // A notification, not a bar to dismiss. It says the microscope has
+            // started coming up, then retires on its own; the header chip
+            // carries the state for as long as it lasts — including a boot that
+            // is stuck, which shows there as a step that stops counting.
+            //
+            // Shown once per state (starting → initializing), never once per
+            // step: five reappearances of the same news is nagging.
             if (_ackedState === state) { _lastState = state; return; }
+            _ackedState = state;
             show('booting');
             const p = d.progress || {};
-            const step = p.i ? `step ${p.i}/${p.n || STAGE_TOTAL} · ` : '';
-            _text.textContent = `Microscope warming up — ${step}${p.label || 'starting…'}`;
-            // Closable — a long or stuck boot must always be dismissible, not just
-            // via Details (which yanks you to the Devices tab).
-            btns({ details: true, retry: false, close: true });
+            const stepTxt = p.i ? `step ${p.i}/${p.n || STAGE_TOTAL} · ` : '';
+            _text.textContent = `Microscope warming up — ${stepTxt}${p.label || 'starting…'}`;
+            // No ×: nothing that leaves by itself needs dismissing. Details
+            // stays, because "what is it doing?" is a real question.
+            btns({ details: true, retry: false, close: false });
+            if (_bootFlash) clearTimeout(_bootFlash);
+            _bootFlash = setTimeout(() => { _bootFlash = null; hide(); }, BOOT_NOTICE_MS);
         } else if (state === 'ready') {
             setPoll(6000);
             if (_ackedState === state) { _lastState = state; return; }
