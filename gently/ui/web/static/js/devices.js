@@ -2451,87 +2451,6 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
-    // Joystick lock — on the map, because that is where the stage is
-    // =====================================================================
-    // The control existed only in Settings, which is not where anyone is
-    // standing when they wonder why the physical controller does nothing, or
-    // when they want it to stop working while a run is on.
-    //
-    // Rule 3 (docs/architecture/PANELS.md): what is shown is READ BACK from
-    // the controller, never the command that was sent. The write is verified
-    // at the device layer too — `enable_joystick` re-reads the Tiger property
-    // and raises on a mismatch — so this cannot report a lock the hardware
-    // refused. The choice survives a device-layer restart: Tiger keeps
-    // JoystickEnabled in non-volatile card settings, and boot re-applies the
-    // operator's stored preference rather than forcing the joystick on.
-    function setupJoystickLock() {
-        const btn = document.getElementById('devices-js-toggle');
-        const note = document.getElementById('devices-js-note');
-        if (!btn || !note) return;
-
-        const show = enabled => {
-            btn.disabled = false;
-            btn.setAttribute('aria-pressed', enabled ? 'false' : 'true');
-            btn.textContent = enabled ? 'Joystick enabled' : 'Joystick LOCKED';
-            note.textContent = enabled
-                ? 'The physical XY joystick can move the stage. Click to lock it.'
-                : 'Only Gently can move the stage. Click to unlock.';
-        };
-        const unavailable = msg => {
-            btn.disabled = true;
-            btn.textContent = 'Joystick —';
-            btn.setAttribute('aria-pressed', 'false');
-            note.textContent = msg;
-        };
-
-        async function read() {
-            try {
-                const r = await fetch('/api/devices/stage/joystick');
-                const d = await r.json().catch(() => ({}));
-                if (r.ok && d && d.success !== false) show(!!d.enabled);
-                else unavailable('Microscope not connected');
-            } catch (e) { unavailable('Microscope not connected'); }
-        }
-
-        btn.addEventListener('click', async () => {
-            // aria-pressed is "is it locked", so the target is the opposite.
-            const enabled = btn.getAttribute('aria-pressed') === 'true';
-            btn.disabled = true;
-            note.textContent = 'Writing to the controller…';
-            try {
-                const r = await fetch('/api/devices/stage/joystick', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled }),
-                });
-                const d = await r.json().catch(() => ({}));
-                if (r.ok) {
-                    show(!!d.enabled);
-                } else if (r.status === 403) {
-                    unavailable('Sign in to change the joystick');
-                    read();
-                } else {
-                    // The write failed; re-read rather than assume either state.
-                    note.textContent = d.detail || `Failed (${r.status})`;
-                    read();
-                }
-            } catch (e) {
-                note.textContent = `Failed: ${e.message}`;
-                read();
-            }
-        });
-
-        read();
-        // The device layer coming or going changes the answer.
-        if (typeof ClientEventBus !== 'undefined') {
-            ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', d => {
-                if (d && d.available === false) unavailable('Device layer stopped');
-                else read();
-            });
-        }
-    }
-
-    // =====================================================================
     // XY limits — the controller's fence, not ours
     // =====================================================================
     // `set_firmware_limits` writes into the ASI Tiger, which enforces against
@@ -2750,7 +2669,6 @@ const DevicesManager = (function () {
         cacheDom();
         setupViewSwitcher();
         setupRegionEditor();
-        setupJoystickLock();
         setupLimitsSwitch();
         setupCameraWiring();
         setupManualWiring();

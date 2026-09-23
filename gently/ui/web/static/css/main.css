@@ -11168,3 +11168,28 @@ body.modal-open {
 @keyframes rig-booting { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .status-dot.booting { animation: none; } }
 .status-dot.down { background: var(--accent-red, #dc2626); opacity: 1; }
+
+/* XY limits switch on the Devices map. Here rather than in a devices.css,
+   because that file was created alongside the reverted joystick control and
+   was never linked from any template — the styles it held never applied. */
+.devices-limits { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.devices-limits[hidden] { display: none; }
+.devices-limits-btn {
+    font: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #d4d4d8);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.devices-limits-btn:disabled { opacity: 0.5; cursor: default; }
+/* Limits OFF is worth seeing across the room: nothing is fencing the stage,
+   for anyone on this controller. */
+.devices-limits-btn[aria-pressed="true"] {
+    border-color: var(--accent-amber, #d97706);
+    color: var(--accent-amber, #d97706);
+}
+.devices-limits-note { font-size: 0.66rem; opacity: 0.75; }
