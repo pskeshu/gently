@@ -2910,7 +2910,9 @@ class DeviceLayerServer(Service):
     def _envelope_payload(self, xy_stage) -> dict:
         (x_lo, x_hi), (y_lo, y_hi) = xy_stage.x_limits, xy_stage.y_limits
         box = {"x_min": x_lo, "x_max": x_hi, "y_min": y_lo, "y_max": y_hi}
-        saved = (self.config or {}).get("xy_envelope") or {}
+        # getattr: the envelope is readable before `initialize` has loaded the
+        # config — and a payload that raises is worse than one without a region.
+        saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
         keys = ("x_min", "x_max", "y_min", "y_max")
         out: dict = {
             "success": True,
@@ -3010,7 +3012,7 @@ class DeviceLayerServer(Service):
                 {"success": False, "error": "boolean 'enforced' required"}, status=400
             )
 
-        saved = (self.config or {}).get("xy_envelope") or {}
+        saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
         keys = ("x_min", "x_max", "y_min", "y_max")
         if enforced:
             if not all(k in saved for k in keys):
