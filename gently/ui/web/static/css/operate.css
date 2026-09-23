@@ -1561,3 +1561,13 @@
     padding-top: var(--op-2);
     border-top: 1px dashed var(--op-rule);
 }
+
+/* See rig-menu.css: a class-level `display` beats the UA `[hidden]` rule at
+   equal specificity, so every element this file hides through the property
+   needs its own guard. Without these the calibration progress panel, the
+   settings disclosures and the alignment history are permanently on screen. */
+.cp[hidden] { display: none; }
+.cp-strip[hidden] { display: none; }
+.cal-adv[hidden] { display: none; }
+.op-adv[hidden] { display: none; }
+.al-history[hidden] { display: none; }
