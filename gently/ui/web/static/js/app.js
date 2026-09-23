@@ -575,6 +575,33 @@ function updateGentlyStatus(connected) {
 // Single renderer for the header connection UI, driven by a ConnectionStatus
 // snapshot. Subscribed once at startup, so the pill, both popover badges, and
 // the dot always reflect the same shared state.
+// The device layer's own state, kept beside the connection snapshot because
+// the header chip has to render both and they arrive from different places.
+// A boot is the answer to "why does it say the scope is offline?" — it is
+// coming up — so while one is running the chip says so and counts the steps.
+// Nothing to dismiss, and it costs no space: the chip is always there.
+let _rigState = null;
+
+function rigChipOverride() {
+    if (!_rigState) return null;
+    const { state, progress } = _rigState;
+    if (state === 'starting' || state === 'initializing') {
+        const p = progress || {};
+        const step = p.i ? ` ${p.i}/${p.n || 5}` : '';
+        return { cls: 'booting', text: `Warming up${step}`, title: p.label || 'Microscope starting' };
+    }
+    if (state === 'failed' || state === 'crashed') {
+        return {
+            cls: 'down',
+            text: 'Rig down',
+            title: state === 'crashed'
+                ? 'The device layer stopped unexpectedly'
+                : "The microscope didn't start",
+        };
+    }
+    return null;
+}
+
 function renderConnectionUI(s) {
     _setBadge('status-gently-badge', s.gentlyConnected, 'Online', 'Offline');
     _setBadge('status-microscope-badge', s.microscopeConnected, 'Online', 'Offline');
@@ -582,7 +609,19 @@ function renderConnectionUI(s) {
     const text = document.getElementById('status-text');
     if (!dot || !text) return;
 
-    dot.classList.remove('connected', 'partial');
+    dot.classList.remove('connected', 'partial', 'booting', 'down');
+    // A rig that is coming up or down outranks "scope offline", which is true
+    // but says nothing about what is happening or whether to wait.
+    const rig = rigChipOverride();
+    if (rig) {
+        dot.classList.add(rig.cls);
+        text.textContent = rig.text;
+        const chip = document.getElementById('status-button');
+        if (chip) chip.title = rig.title;
+        return;
+    }
+    const chip = document.getElementById('status-button');
+    if (chip) chip.removeAttribute('title');
     if (s.gentlyConnected && s.microscopeConnected) {
         dot.classList.add('connected');
         text.textContent = 'Connected';
@@ -603,6 +642,17 @@ function updateTopLevelDot() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // The rig's own state reaches the chip here. boot-banner.js owns the poll
+    // and publishes on every state OR step change; the chip is one subscriber,
+    // which is why the boot notice can retire itself without the operator
+    // losing track of what the microscope is doing.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('DEVICE_LAYER_STATE', d => {
+            _rigState = d || null;
+            renderConnectionUI(ConnectionStatus.get());
+        });
+    }
+
     // Initialize presence manager (before WebSocket so ID is ready)
     PresenceManager.init();
 

@@ -11156,3 +11156,15 @@ body.modal-open {
 .devices-region-result { min-height: 1em; }
 .devices-region-result[data-ok="0"] { color: #ef4444; }
 .devices-region-preview { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 6; stroke-dasharray: 24 12; vector-effect: non-scaling-stroke; pointer-events: none; }
+
+/* The rig coming up, or down, on the header chip. "Scope offline" is true
+   during a boot but says nothing about whether to wait — these two states do,
+   and they cost no space because the chip is always there. */
+.status-dot.booting {
+    background: var(--accent-amber, #d97706);
+    opacity: 1;
+    animation: rig-booting 1.4s ease-in-out infinite;
+}
+@keyframes rig-booting { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .status-dot.booting { animation: none; } }
+.status-dot.down { background: var(--accent-red, #dc2626); opacity: 1; }
