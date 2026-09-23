@@ -999,6 +999,17 @@
                              The state shown is read back from the controller; the
                              write is verified there too, so this cannot claim a lock
                              the hardware refused. -->
+                        <!-- The Tiger enforces its soft limits against EVERY
+                             motion source, so the region below is not Gently's
+                             fence — it is the controller's, and it binds anyone
+                             driving this stage from Micro-Manager too. This is
+                             the switch that gives them the stage back. -->
+                        <div class="devices-js" id="devices-limits">
+                            <button class="devices-js-btn" id="devices-limits-toggle" type="button"
+                                    aria-pressed="false" disabled>XY limits —</button>
+                            <span class="devices-js-note" id="devices-limits-note">reading…</span>
+                        </div>
+
                         <div class="devices-js" id="devices-js">
                             <button class="devices-js-btn" id="devices-js-toggle" type="button"
                                     aria-pressed="false" disabled>Joystick —</button>
@@ -1625,6 +1636,7 @@
     <script src="/static/js/boot-banner.js"></script>
     <!-- Rig menu: the header chip + the microscope controls behind it. Loads
          after boot-banner.js, whose global device-layer poll it rides. -->
+    <script src="/static/js/xy-limits-state.js"></script>
     <script src="/static/js/rig-menu.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>

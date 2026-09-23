@@ -2532,6 +2532,44 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
+    // XY limits — the controller's fence, not ours
+    // =====================================================================
+    // `set_firmware_limits` writes into the ASI Tiger, which enforces against
+    // EVERY motion source — so the region drawn on this map also stops the
+    // stage for someone driving it from Micro-Manager, with nothing on their
+    // screen to explain it. This switch hands the stage back.
+    function setupLimitsSwitch() {
+        const btn = document.getElementById('devices-limits-toggle');
+        const note = document.getElementById('devices-limits-note');
+        if (!btn || !note || typeof XYLimitsState === 'undefined') return;
+
+        XYLimitsState.subscribe(s => {
+            if (s.enforced === null) {
+                btn.disabled = true;
+                btn.textContent = 'XY limits —';
+                btn.setAttribute('aria-pressed', 'false');
+                note.textContent = s.reason || 'reading…';
+                return;
+            }
+            // Pressed means "off", the state worth seeing across the room.
+            btn.disabled = !!s.busy;
+            btn.setAttribute('aria-pressed', s.enforced ? 'false' : 'true');
+            btn.textContent = s.enforced ? 'XY limits enforced' : 'XY limits OFF';
+            note.textContent = s.busy
+                ? 'Writing to the controller…'
+                : (s.reason || (s.enforced
+                    ? 'The controller stops the stage at this region — for every client, Micro-Manager included.'
+                    : 'Full travel. Nothing is fencing the stage, in Gently or anywhere else.'));
+        });
+
+        btn.addEventListener('click', () => {
+            XYLimitsState.write(btn.getAttribute('aria-pressed') === 'true');
+        });
+
+        XYLimitsState.read();
+    }
+
+    // =====================================================================
     // Edit region (#107) — a guided walk to the two corners of the safe area
     // =====================================================================
     // The box the map draws IS the fence the controller enforces, so this
@@ -2713,6 +2751,7 @@ const DevicesManager = (function () {
         setupViewSwitcher();
         setupRegionEditor();
         setupJoystickLock();
+        setupLimitsSwitch();
         setupCameraWiring();
         setupManualWiring();
         setupRoomLight();

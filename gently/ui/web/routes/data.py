@@ -1890,6 +1890,26 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=409, detail=res.get("error", "refused"))
         return res
 
+    @router.post("/api/devices/stage/envelope/enforced", dependencies=[Depends(require_control)])
+    async def stage_envelope_enforced(payload: dict = Body(...)):  # noqa: B008
+        """Turn the controller's XY soft limits on or off. Body: {enforced: bool}.
+
+        Not a Gently-only setting: the Tiger enforces its limits against every
+        motion source, so this is what gives the stage back to someone driving
+        it from Micro-Manager.
+        """
+        enforced = payload.get("enforced")
+        if not isinstance(enforced, bool):
+            raise HTTPException(status_code=400, detail="boolean 'enforced' required")
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_envelope_enforced(enforced)
+        except Exception as exc:
+            logger.exception("Envelope enforcement change failed")
+            raise HTTPException(status_code=502, detail=f"limits change failed: {exc}") from exc
+
     @router.get("/api/devices/stage/joystick")
     async def stage_joystick_get():
         """Physical XY joystick state, read from the controller."""
