@@ -1,0 +1,22 @@
+
+/* ── joystick lock, on the map ──────────────────────────────────────────── */
+.devices-js { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.devices-js-btn {
+    font: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #d4d4d8);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.devices-js-btn:disabled { opacity: 0.5; cursor: default; }
+/* Locked is a state worth seeing across the room: nothing but Gently moves
+   the stage, which is the answer to "why is the joystick dead?". */
+.devices-js-btn[aria-pressed="true"] {
+    border-color: var(--op-warn, #d97706);
+    color: var(--op-warn, #d97706);
+}
+.devices-js-note { font-size: 0.66rem; opacity: 0.75; }
