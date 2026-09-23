@@ -258,3 +258,10 @@
 
 /* The fold's heading carries the same judgement as the chart's end marker. */
 .devices-tempwrap-now.is-drifting { color: #d97706; }
+
+/* `hidden` must actually hide. The UA rule is `[hidden] { display: none }` at
+   specificity 0,1,0 — exactly the same as a class — so a later `.rig-progress
+   { display: flex }` silently wins and the row stays on screen with whatever
+   it last said. That is how a ready device layer kept reporting
+   "2/5 · Initializing Micro-Manager core". */
+.rig-progress[hidden] { display: none; }
