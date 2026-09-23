@@ -275,6 +275,24 @@ const RigMenu = (function () {
         });
         _el.lightToggle.addEventListener('click', toggleLight);
 
+        // XY limits, from the same store the Devices map renders, so the two
+        // cannot disagree about whether this controller is fencing anyone.
+        const limSec = document.getElementById('rig-limits-sec');
+        const limState = document.getElementById('rig-limits-state');
+        const limToggle = document.getElementById('rig-limits-toggle');
+        if (limSec && limState && limToggle && typeof XYLimitsState !== 'undefined') {
+            XYLimitsState.subscribe(s => {
+                // Rule 6: nothing to say about a controller nobody can reach.
+                limSec.hidden = s.enforced === null;
+                limState.textContent = s.busy ? 'writing…' : (s.enforced ? 'enforced' : 'OFF');
+                limToggle.setAttribute('aria-checked', s.enforced ? 'true' : 'false');
+                limToggle.disabled = !!s.busy;
+            });
+            limToggle.addEventListener('click', () => {
+                XYLimitsState.write(limToggle.getAttribute('aria-checked') !== 'true');
+            });
+        }
+
         // boot-banner.js owns the global device-layer poll; ride its signal.
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_LAYER_STATE', (s) => renderDeviceLayer(s));

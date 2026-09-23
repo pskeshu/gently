@@ -1138,6 +1138,15 @@ class DiSPIMMicroscope(Microscope):
             },
         )
 
+    async def set_envelope_enforced(self, enforced: bool) -> dict:
+        """Turn the Tiger's XY soft limits on or off.
+
+        Off writes the stage's full travel, because the controller always
+        holds some box. It fences every client of this controller, so turning
+        it off is how a Micro-Manager user gets the stage back.
+        """
+        return await self._api_post("/api/stage/envelope/enforced", {"enforced": bool(enforced)})
+
     async def get_joystick(self) -> dict:
         """Is the physical XY joystick enabled (controller read-back)."""
         return await self._api_get("/api/stage/joystick")

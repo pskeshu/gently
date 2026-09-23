@@ -370,12 +370,22 @@ class DeviceLayerServer(Service):
             # The operator-set region (Map → Edit region, #107) wins over the
             # code defaults when one has been saved.
             env = (self.config or {}).get("xy_envelope") or {}
-            box = {
-                "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
-                "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
-                "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
-                "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
-            }
+            # An operator who turned the limits OFF meant it, and meant it for
+            # whoever uses this controller next. Re-applying the region here
+            # would re-fence a Micro-Manager user days later, with nothing on
+            # their screen to connect it to.
+            if env.get("enforced") is False:
+                box = self._full_travel()
+                logger.warning(
+                    "XY firmware limits are OFF by operator choice — writing full travel"
+                )
+            else:
+                box = {
+                    "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
+                    "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
+                    "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
+                    "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
+                }
             try:
                 xy_stage.set_firmware_limits(
                     x_min_mm=box["x_min"] / 1000.0,
@@ -2870,14 +2880,52 @@ class DeviceLayerServer(Service):
             }
         )
 
+    # The stage's whole physical travel. Writing this IS "limits off": the
+    # Tiger always holds some box, so the only way to stop fencing people is to
+    # hand it back the full range.
+    def _full_travel(self) -> dict:
+        """The stage's physical travel, imported the way this file imports it.
+
+        The constants live behind a deferred import inside `initialize`, so
+        this cannot be a class attribute without dragging the devices package
+        into module import.
+        """
+        from .devices.stage import (
+            XY_STAGE_X_MAX_UM,
+            XY_STAGE_X_MIN_UM,
+            XY_STAGE_Y_MAX_UM,
+            XY_STAGE_Y_MIN_UM,
+        )
+
+        return {
+            "x_min": XY_STAGE_X_MIN_UM,
+            "x_max": XY_STAGE_X_MAX_UM,
+            "y_min": XY_STAGE_Y_MIN_UM,
+            "y_max": XY_STAGE_Y_MAX_UM,
+        }
+
+    def _is_full_travel(self, box: dict, tol_um: float = 1.0) -> bool:
+        return all(abs(float(box[k]) - float(v)) <= tol_um for k, v in self._full_travel().items())
+
     def _envelope_payload(self, xy_stage) -> dict:
         (x_lo, x_hi), (y_lo, y_hi) = xy_stage.x_limits, xy_stage.y_limits
+        box = {"x_min": x_lo, "x_max": x_hi, "y_min": y_lo, "y_max": y_hi}
+        saved = (self.config or {}).get("xy_envelope") or {}
+        keys = ("x_min", "x_max", "y_min", "y_max")
         out: dict = {
             "success": True,
             "x_min": x_lo,
             "x_max": x_hi,
             "y_min": y_lo,
             "y_max": y_hi,
+            # Read back, not remembered: "enforced" is whether the controller is
+            # currently holding anything narrower than the stage's full travel.
+            # A flag in a config file would say what we meant, not what is.
+            "enforced": not self._is_full_travel(box),
+            "full_travel": self._full_travel(),
+            # The box to restore when limits go back on. Kept while they are
+            # off, so nobody has to walk the corners again.
+            "region": ({k: saved[k] for k in keys} if all(k in saved for k in keys) else None),
             "position": None,
         }
         try:
@@ -2927,8 +2975,78 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.exception("Envelope write failed")
             return web.json_response({"success": False, "error": str(exc)}, status=502)
-        self._write_sidecar("xy_envelope", box)
+        # Defining a region is switching enforcement on: nobody walks the
+        # corners of a fence they want removed.
+        self._write_sidecar("xy_envelope", {**box, "enforced": True})
         logger.warning("XY envelope set by operator: %s", box)
+        return web.json_response(self._envelope_payload(xy_stage))
+
+    async def handle_set_envelope_enforced(self, request):
+        """POST /api/stage/envelope/enforced — {"enforced": bool}.
+
+        The Tiger enforces its soft limits against EVERY motion source, not
+        just Gently: someone driving this stage from Micro-Manager is fenced by
+        whatever we last wrote, with nothing on their screen to explain why it
+        stops short. This is the switch that gives them the stage back.
+
+        Off writes the full physical travel — the controller always holds some
+        box, so that is what "no limits" means here. The region is kept, so
+        switching back on restores it without walking the corners again.
+
+        Persisted, including the OFF state. A boot that silently re-applied the
+        region would re-fence the Micro-Manager user days later, which is the
+        version of this bug nobody would connect to Gently.
+        """
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        enforced = body.get("enforced") if isinstance(body, dict) else None
+        if not isinstance(enforced, bool):  # a string must not unfence a stage
+            return web.json_response(
+                {"success": False, "error": "boolean 'enforced' required"}, status=400
+            )
+
+        saved = (self.config or {}).get("xy_envelope") or {}
+        keys = ("x_min", "x_max", "y_min", "y_max")
+        if enforced:
+            if not all(k in saved for k in keys):
+                return web.json_response(
+                    {
+                        "success": False,
+                        "error": "No saved region to enforce — set one with Edit region first",
+                    },
+                    status=409,
+                )
+            box = {k: float(saved[k]) for k in keys}
+        else:
+            box = self._full_travel()
+
+        try:
+            async with self.pause_state_updates():
+                await asyncio.to_thread(
+                    xy_stage.set_firmware_limits,
+                    box["x_min"] / 1000.0,
+                    box["x_max"] / 1000.0,
+                    box["y_min"] / 1000.0,
+                    box["y_max"] / 1000.0,
+                )
+        except ValueError as exc:  # stage outside the box it is being given
+            return web.json_response({"success": False, "error": str(exc)}, status=409)
+        except Exception as exc:
+            logger.exception("Envelope enforcement write failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=502)
+
+        # Keep the region, record only the switch.
+        self._write_sidecar("xy_envelope", {**saved, "enforced": enforced})
+        logger.warning(
+            "XY firmware limits %s by operator — this controller fences every "
+            "client, Micro-Manager included",
+            "ENFORCED" if enforced else "REMOVED (full travel)",
+        )
         return web.json_response(self._envelope_payload(xy_stage))
 
     async def handle_get_joystick(self, request):
@@ -4076,6 +4194,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
         self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
         self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)
+        self._app.router.add_post("/api/stage/envelope/enforced", self.handle_set_envelope_enforced)
         self._app.router.add_get("/api/stage/joystick", self.handle_get_joystick)
         self._app.router.add_post("/api/stage/joystick", self.handle_set_joystick)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)

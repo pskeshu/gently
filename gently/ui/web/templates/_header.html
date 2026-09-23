@@ -122,6 +122,20 @@
                     </div>
                 </div>
 
+                {# Limits removed is a rig-wide fact — it is how the stage is
+                   handed to a Micro-Manager user — so it belongs where the rig
+                   is, not only on the Devices map. #}
+                <div class="rig-sec" id="rig-limits-sec" hidden>
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">XY limits</span>
+                        <span class="rig-sec-meta" id="rig-limits-state">—</span>
+                        <button type="button" class="rig-switch" id="rig-limits-toggle"
+                                role="switch" aria-checked="false" aria-label="XY firmware limits">
+                            <span class="rig-switch-knob"></span>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="rig-sec rig-sec-quiet">
                     <div class="rig-sec-head">
                         <span class="rig-sec-label">Gently</span>
