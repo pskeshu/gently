@@ -1,10 +1,24 @@
-"""The XY safety envelope is operator-set, firmware-first, and persisted (#107).
+"""The XY safety envelope is operator-set, persisted, and now TWO fences (#107).
 
 Ryan: "we did notice that sometimes the embryos that we put on the coverslip
 are outside the map region." The envelope used to be four module constants
-that nothing above the device could change. Now the Map's Edit region wizard
-sets it — but the controller is written and read back BEFORE the software
-fence moves, and a stage sitting outside the new box is refused.
+that nothing above the device could change. The Map's region editor sets it.
+
+The single envelope has since come apart into two, because they protect
+against different things:
+
+* the SOFTWARE fence bounds every move Gently commands — checked in `set()`
+  before anything reaches the hardware, costs nothing, affects nobody else;
+* the FIRMWARE fence is the same numbers written into the Tiger, whose only
+  advantage is stopping a hand on the joystick — and whose cost is binding
+  every other client of that controller, Micro-Manager included.
+
+On a rig run by trained operators the second is opt-in, so applying a region
+moves the software fence and leaves the controller alone unless enforcement
+is switched on. What still holds either way: when the controller IS written
+it is read back before the software fence follows, the software fence is
+never wider than the firmware one, and an envelope that excludes where the
+stage is standing is refused.
 """
 
 from __future__ import annotations
@@ -108,18 +122,47 @@ def test_envelope_starts_at_the_code_defaults():
     assert st.x_limits == (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
 
 
-def test_software_fence_follows_a_verified_firmware_write(tmp_path):
+def test_a_region_binds_gently_without_touching_the_controller(tmp_path):
+    """The default: the region is Gently's fence, and nobody else's."""
     core = _Core(xy_um=(100.0, 100.0))
     st = _stage(core)
     dl = _dl(st, tmp_path)
-    status, body = _post(dl, {"x_min": -500, "x_max": 1500, "y_min": -400, "y_max": 900})
+    status, body = _post(dl, {"x_min": -500, "x_max": 900, "y_min": -400, "y_max": 500})
     assert status == 200 and body["success"]
-    assert st.x_limits == (-500.0, 1500.0) and st.y_limits == (-400.0, 900.0)
-    assert float(core.props["UpperLimX(mm)"]) == pytest.approx(1.5)
-    # and set() now fences against the new box, not the constants
-    assert isinstance(_fence_error(st.set([1600.0, 0.0])), ValueError)
+    assert st.x_limits == (-500.0, 900.0) and st.y_limits == (-400.0, 500.0)
+    # set() fences against the new box, not the constants
+    assert isinstance(_fence_error(st.set([950.0, 0.0])), ValueError)
+    # ...and the controller was left alone, so a Micro-Manager user on this
+    # Tiger still has the whole stage.
+    assert core.props == {}, f"the controller was written without being asked: {core.props}"
     sidecar = tmp_path / "config.local.yml"
     assert sidecar.exists() and "xy_envelope" in sidecar.read_text()
+
+
+def test_enforcing_writes_the_controller_first_then_the_software_fence(tmp_path):
+    """When it IS asked for, the old ordering still holds."""
+    core = _Core(xy_um=(100.0, 100.0))
+    st = _stage(core)
+    dl = _dl(st, tmp_path)
+    dl.config = {"xy_envelope": {"enforced": True}}
+    status, body = _post(dl, {"x_min": -500, "x_max": 900, "y_min": -400, "y_max": 500})
+    assert status == 200 and body["success"]
+    assert float(core.props["UpperLimX(mm)"]) == pytest.approx(0.9)
+    assert st.x_limits == (-500.0, 900.0) and st.y_limits == (-400.0, 500.0)
+
+
+def test_the_software_fence_is_never_wider_than_the_firmware_one(tmp_path):
+    """Wider would command moves the controller then refuses.
+
+    That reads as a mysterious hardware error rather than a limit, which is
+    why the ordering in `initialize` is firmware first, region second.
+    """
+    core = _Core(xy_um=(100.0, 100.0))
+    st = _stage(core)
+    status, _ = _post(_dl(st, tmp_path), {"x_min": -500, "x_max": 900, "y_min": -400, "y_max": 500})
+    assert status == 200
+    sx_lo, sx_hi = st.x_limits
+    assert sx_lo >= XY_STAGE_X_MIN_UM and sx_hi <= XY_STAGE_X_MAX_UM
 
 
 def test_stage_outside_the_new_box_is_refused_and_nothing_moves(tmp_path):

@@ -347,6 +347,100 @@ class DiSPIMXYStage:
         self._x_limits = (x_min_mm * 1000.0, x_max_mm * 1000.0)
         self._y_limits = (y_min_mm * 1000.0, y_max_mm * 1000.0)
 
+    def set_software_limits(
+        self,
+        x_min_um: float,
+        x_max_um: float,
+        y_min_um: float,
+        y_max_um: float,
+        *,
+        require_inside: bool = True,
+    ) -> None:
+        """Bound what THIS process will command, without touching the controller.
+
+        The two fences used to be one. `set_firmware_limits` wrote the Tiger
+        and then set this envelope from the same numbers, so the software
+        bound was always whatever the controller held.
+
+        They have to come apart, because they protect against different
+        things. The software bound catches every move Gently makes — it is
+        checked in `set()` before anything reaches the hardware, costs
+        nothing, and affects nobody else. The firmware bound exists only to
+        stop a hand on the joystick, and it binds every other client of the
+        controller, Micro-Manager included.
+
+        On a rig driven by trained operators the second is a choice, not a
+        default. So the working region lives here, always, and reaches the
+        controller only when someone asks for it.
+
+        Narrower than the firmware bound is fine and is the normal case.
+        Wider is not: `set()` would command a move the controller then
+        refuses, which reads as a mysterious hardware error rather than a
+        limit. The caller is responsible for that ordering — see
+        `initialize`, which writes the firmware bound first and this one
+        after.
+        """
+        if x_min_um >= x_max_um or y_min_um >= y_max_um:
+            raise ValueError(
+                f"Degenerate software envelope: x [{x_min_um}, {x_max_um}], "
+                f"y [{y_min_um}, {y_max_um}]"
+            )
+        # Inside what the stage can actually reach. The firmware write used to
+        # catch this for free — the controller rejected or clamped the value
+        # and the read-back check raised — so a software-only region needs its
+        # own guard, or Gently would command moves the hardware refuses and
+        # report them as mysterious errors rather than limits.
+        if (
+            x_min_um < XY_STAGE_X_MIN_UM
+            or x_max_um > XY_STAGE_X_MAX_UM
+            or y_min_um < XY_STAGE_Y_MIN_UM
+            or y_max_um > XY_STAGE_Y_MAX_UM
+        ):
+            raise ValueError(
+                f"Region x=[{x_min_um:.1f}, {x_max_um:.1f}] y=[{y_min_um:.1f}, "
+                f"{y_max_um:.1f}] µm is outside the stage's travel "
+                f"x=[{XY_STAGE_X_MIN_UM}, {XY_STAGE_X_MAX_UM}] "
+                f"y=[{XY_STAGE_Y_MIN_UM}, {XY_STAGE_Y_MAX_UM}] µm."
+            )
+        # The same refusal the firmware path makes (#107), for the same
+        # operator-facing reason: an envelope that excludes where the stage is
+        # standing is almost always a mis-measurement. The firmware docstring
+        # justifies it by undefined controller behaviour, which does not apply
+        # here — but dropping the check on this path would quietly weaken a
+        # rule operators already rely on.
+        #
+        # `require_inside=False` is for boot, where a stage parked outside a
+        # saved region must not stop the device layer from starting. The
+        # region still binds every move after that.
+        if require_inside:
+            POS_SLOP_UM = 1.0
+            try:
+                cur = self.read()[self.name]["value"]
+                cur_x, cur_y = float(cur[0]), float(cur[1])
+            except Exception as exc:
+                raise HardwareError(
+                    f"Could not read current XY to validate the software envelope: {exc}"
+                ) from exc
+            if not (
+                x_min_um - POS_SLOP_UM <= cur_x <= x_max_um + POS_SLOP_UM
+                and y_min_um - POS_SLOP_UM <= cur_y <= y_max_um + POS_SLOP_UM
+            ):
+                raise ValueError(
+                    f"Current stage position ({cur_x:.2f}, {cur_y:.2f}) µm is outside "
+                    f"the requested region x=[{x_min_um:.2f}, {x_max_um:.2f}] "
+                    f"y=[{y_min_um:.2f}, {y_max_um:.2f}] µm — drive the stage into "
+                    f"bounds before applying it."
+                )
+        self._x_limits = (float(x_min_um), float(x_max_um))
+        self._y_limits = (float(y_min_um), float(y_max_um))
+        logger.info(
+            "Software envelope: x [%.1f, %.1f] y [%.1f, %.1f] um",
+            x_min_um,
+            x_max_um,
+            y_min_um,
+            y_max_um,
+        )
+
     def joystick_enabled(self) -> bool:
         """Read the ASI 'JoystickEnabled' flag from the controller."""
         return str(self.core.getProperty(self.name, "JoystickEnabled")).strip() == "Yes"
