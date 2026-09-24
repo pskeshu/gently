@@ -580,8 +580,9 @@ const DevicesManager = (function () {
         // The editor stamps the LIVE position, so it takes the same telemetry
         // the map draws from rather than reading the stage itself.
         if (typeof RegionEditor === 'undefined' || !_lastXY) return;
+        // setPosition fires onChange when it moves, which redraws the strip
+        // and the box — so there is nothing to do here but hand it over.
         RegionEditor.setPosition(_lastXY.X, _lastXY.Y);
-        if (RegionEditor.isOpen()) renderStrip();
     }
 
     function renderMap() {
@@ -2559,8 +2560,7 @@ const DevicesManager = (function () {
             if (wrap) wrap.classList.toggle('is-editing', on);
             // Opening and closing both change what the sheet has to frame, and
             // the next telemetry tick may be a second away. renderMap() draws
-            // from _viewBox rather than recomputing it, so the extent is
-            // refreshed first.
+            // from _viewBox rather than recomputing it, so refresh that first.
             computeViewBox();
             renderMap();
             renderEditLayer();
@@ -2575,14 +2575,21 @@ const DevicesManager = (function () {
             renderStrip();
         });
 
+        el('region-capture').addEventListener('click', async () => {
+            // One button, whose job changes with the step — so there is never
+            // a choice to make about which control the walk wants next.
+            if (RegionEditor.step() === 'review') {
+                if (await RegionEditor.apply({ stopCamera: stopRegionCam })) showEditing(false);
+                return;
+            }
+            RegionEditor.capture();
+        });
+
+        el('region-back').addEventListener('click', () => RegionEditor.back());
+
         el('region-cancel').addEventListener('click', async () => {
             await RegionEditor.cancel({ stopCamera: stopRegionCam });
             showEditing(false);
-        });
-
-        el('region-apply').addEventListener('click', async () => {
-            const ok = await RegionEditor.apply({ stopCamera: stopRegionCam });
-            if (ok) showEditing(false);
         });
 
         el('region-history-btn').addEventListener('click', () => {
@@ -2596,10 +2603,14 @@ const DevicesManager = (function () {
             if (row) await RegionEditor.restore(row.dataset.at);
         });
 
-        // Typing a bound is the same edit as stamping one.
+        // Typing a bound, and snapping one to the stage, are the same edit.
         el('region-bounds').addEventListener('change', e => {
             const inp = e.target.closest('input[data-bound]');
             if (inp) RegionEditor.setBound(inp.dataset.bound, parseFloat(inp.value));
+        });
+        el('region-bounds').addEventListener('click', e => {
+            const snap = e.target.closest('button[data-bound]');
+            if (snap) RegionEditor.useStage(snap.dataset.bound);
         });
 
         if (typeof ClientEventBus !== 'undefined') {
@@ -2626,27 +2637,84 @@ const DevicesManager = (function () {
     }
 
     const BOUND_LABEL = { x_min: '−X', x_max: '+X', y_min: '−Y', y_max: '+Y' };
+    const STEP_TITLE = { a: 'Step 1 of 2', b: 'Step 2 of 2', review: 'Your region' };
 
     function renderStrip() {
+        if (!RegionEditor.isOpen()) return;
+        const step = RegionEditor.step();
+        const review = step === 'review';
         const box = RegionEditor.box();
-        const host = document.getElementById('region-bounds');
-        const live = document.getElementById('region-live');
-        if (!host) return;
         const p = RegionEditor.position();
-        if (live) {
-            live.textContent = p
-                ? `stage ${p.x.toFixed(1)}, ${p.y.toFixed(1)} µm`
-                : 'stage — (no position yet)';
+
+        const title = document.getElementById('region-step');
+        if (title) title.textContent = STEP_TITLE[step];
+
+        const say = document.getElementById('region-say');
+        if (say) {
+            say.textContent = RegionEditor.prompt();
+            say.dataset.bad = RegionEditor.isBad() ? '1' : '0';
         }
-        if (!box) { host.innerHTML = ''; return; }
+
+        // The live position is the number about to be captured, so it reads as
+        // an instrument value rather than as prose. In review it gives way to
+        // the size, which is what you check a region by.
+        const live = document.getElementById('region-live');
+        if (live) {
+            if (review && box) {
+                live.textContent = `${Math.round(box.x_max - box.x_min)} × `
+                    + `${Math.round(box.y_max - box.y_min)} µm`;
+            } else {
+                live.textContent = p
+                    ? `stage ${p.x.toFixed(1)}, ${p.y.toFixed(1)} µm`
+                    : 'stage — (no position yet)';
+            }
+        }
+
+        const go = document.getElementById('region-capture');
+        if (go) {
+            go.textContent = review ? 'Apply' : 'Capture';
+            go.disabled = !p && !review;
+        }
+        const back = document.getElementById('region-back');
+        if (back) back.hidden = step === 'a';
+
+        renderSchematic(step);
+
+        // The four numbers only exist once there is a box to correct.
+        const host = document.getElementById('region-bounds');
+        if (!host) return;
+        if (!review || !box) { host.innerHTML = ''; return; }
         const applied = RegionEditor.applied() || {};
         host.innerHTML = ['x_min', 'x_max', 'y_min', 'y_max'].map(b => {
             const changed = Math.abs((box[b] ?? 0) - (applied[b] ?? 0)) > 0.05;
             return `<label class="region-bound${changed ? ' is-changed' : ''}">
                 <span>${BOUND_LABEL[b]}</span>
                 <input type="number" step="1" data-bound="${b}" value="${box[b].toFixed(1)}">
+                <button type="button" class="region-snap" data-bound="${b}"
+                        title="Move this edge to where the stage is now">⌖</button>
             </label>`;
         }).join('');
+    }
+
+    /**
+     * The corner being asked for, drawn and pulsing.
+     *
+     * The sentence says what to do; this shows where, which is the part that
+     * reads from across the bench with a joystick in hand. In review it stops
+     * asking for anything and is just the box.
+     */
+    function renderSchematic(step) {
+        const svg = document.getElementById('region-schem');
+        if (!svg) return;
+        const corner = step === 'a' ? [12, 52] : step === 'b' ? [72, 12] : null;
+        const rect = '<rect x="12" y="12" width="60" height="40" class="rs-box"/>';
+        if (!corner) {
+            svg.innerHTML = rect + '<path class="rs-tick" d="M32 32 l7 8 l14 -17"/>';
+            return;
+        }
+        svg.innerHTML = rect
+            + `<circle cx="${corner[0]}" cy="${corner[1]}" r="6" class="rs-target"/>`
+            + `<circle cx="${corner[0]}" cy="${corner[1]}" r="2.6" class="rs-dot"/>`;
     }
 
     function renderHistory() {
@@ -2668,77 +2736,43 @@ const DevicesManager = (function () {
     }
 
     /**
-     * The editable edges, drawn on the sheet.
+     * The region taking shape on the sheet.
      *
-     * Each edge is a fat invisible hit-line over a visible hairline, so the
-     * target is clickable at a joystick-holding operator's accuracy rather
-     * than requiring a 1px hit.
+     * The first corner is a mark; the second is wherever the stage is, so the
+     * box follows the joystick until it is captured. Watching it grow is what
+     * makes "bottom-left, then top-right" mean something.
      */
     function renderEditLayer() {
         const layer = document.getElementById('devices-map-edit');
         if (!layer) return;
         layer.innerHTML = '';
-        const box = RegionEditor.isOpen() ? RegionEditor.box() : null;
-        if (!box || !_viewBox) return;
+        if (!RegionEditor.isOpen() || !_viewBox) return;
 
         const span = Math.max(_viewBox.xMax - _viewBox.xMin, 1);
-        const slop = (EDGE_HIT / 560) * span;   // px of slop in stage units
+        const r = span * 0.012;
+        const { a, b } = RegionEditor.corners();
+        const box = RegionEditor.box();
 
-        const face = document.createElementNS(SVG_NS, 'rect');
-        face.setAttribute('x', box.x_min);
-        face.setAttribute('y', svgY(box.y_max));
-        face.setAttribute('width', Math.max(box.x_max - box.x_min, 0));
-        face.setAttribute('height', Math.max(box.y_max - box.y_min, 0));
-        face.setAttribute('class', 'region-face');
-        layer.appendChild(face);
-
-        const line = (x1, y1, x2, y2, target, label) => {
-            const g = document.createElementNS(SVG_NS, 'g');
-            g.setAttribute('class', 'region-edge');
-            g.setAttribute('data-target', target);
-            const vis = document.createElementNS(SVG_NS, 'line');
-            vis.setAttribute('x1', x1); vis.setAttribute('y1', svgY(y1));
-            vis.setAttribute('x2', x2); vis.setAttribute('y2', svgY(y2));
-            vis.setAttribute('class', 'region-edge-line');
-            const hit = document.createElementNS(SVG_NS, 'line');
-            hit.setAttribute('x1', x1); hit.setAttribute('y1', svgY(y1));
-            hit.setAttribute('x2', x2); hit.setAttribute('y2', svgY(y2));
-            hit.setAttribute('class', 'region-edge-hit');
-            hit.setAttribute('stroke-width', slop);
-            const t = document.createElementNS(SVG_NS, 'title');
-            t.textContent = label;
-            g.appendChild(vis); g.appendChild(hit); g.appendChild(t);
-            layer.appendChild(g);
-        };
-
-        line(box.x_min, box.y_min, box.x_min, box.y_max, 'x-min', 'Set −X to the stage');
-        line(box.x_max, box.y_min, box.x_max, box.y_max, 'x-max', 'Set +X to the stage');
-        line(box.x_min, box.y_min, box.x_max, box.y_min, 'y-min', 'Set −Y to the stage');
-        line(box.x_min, box.y_max, box.x_max, box.y_max, 'y-max', 'Set +Y to the stage');
-
-        [['min-min', box.x_min, box.y_min], ['max-min', box.x_max, box.y_min],
-         ['min-max', box.x_min, box.y_max], ['max-max', box.x_max, box.y_max]].forEach(
-            ([target, x, y]) => {
-                const g = document.createElementNS(SVG_NS, 'g');
-                g.setAttribute('class', 'region-corner');
-                g.setAttribute('data-target', target);
-                const c = document.createElementNS(SVG_NS, 'circle');
-                c.setAttribute('cx', x); c.setAttribute('cy', svgY(y));
-                c.setAttribute('r', slop * 0.6);
-                c.setAttribute('class', 'region-corner-dot');
-                const t = document.createElementNS(SVG_NS, 'title');
-                t.textContent = 'Set both edges of this corner to the stage';
-                g.appendChild(c); g.appendChild(t);
-                layer.appendChild(g);
-            });
-
-        if (!layer.dataset.wired) {
-            layer.dataset.wired = '1';
-            layer.addEventListener('click', e => {
-                const hit = e.target.closest('[data-target]');
-                if (hit) RegionEditor.stamp(hit.dataset.target);
-            });
+        if (box) {
+            const face = document.createElementNS(SVG_NS, 'rect');
+            face.setAttribute('x', box.x_min);
+            face.setAttribute('y', svgY(box.y_max));
+            face.setAttribute('width', Math.max(box.x_max - box.x_min, 0));
+            face.setAttribute('height', Math.max(box.y_max - box.y_min, 0));
+            face.setAttribute('class', 'region-face'
+                + (RegionEditor.step() === 'b' ? ' is-live' : ''));
+            layer.appendChild(face);
         }
+
+        [a, b].forEach(c => {
+            if (!c) return;
+            const dot = document.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', c.x);
+            dot.setAttribute('cy', svgY(c.y));
+            dot.setAttribute('r', r);
+            dot.setAttribute('class', 'region-corner-dot');
+            layer.appendChild(dot);
+        });
     }
 
     function init() {

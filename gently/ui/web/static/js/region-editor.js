@@ -1,33 +1,38 @@
 /**
- * Region editor — the map is the form.
+ * Region editor — the stage is the pointer.
  *
- * WHAT WAS WRONG WITH THE OLD ONE
+ * WHAT THIS IS
  *
- * A four-step wizard in a 300px column floating over the map: Start, capture
- * the bottom-left corner, capture the top-right, Apply. It opened 477px tall
- * inside a card 594px tall that ends 44px above the window bottom, so the
- * instruction was cut mid-sentence and the Start button sat off-screen. The
- * button that opened it hid itself on click, so the whole visible effect of
- * pressing "Edit region" was a button disappearing — which is exactly how it
- * was reported: "the edit region button click does nothing".
+ * Two corners, walked. Drive to the bottom-left of your working area and
+ * press Capture; drive to the top-right and press Capture again. While you
+ * drive to the second corner the box follows the stage, so the region is
+ * drawn by the very thing it is about to bound.
  *
- * The deeper problem was the wizard itself. Setting four numbers is not a
- * sequence, and pretending it is costs you the common case: "the fence is
- * 200 µm too tight on +X" should be one gesture, not a re-walk of both
- * corners.
+ * WHY THIS, AGAIN
  *
- * WHAT THIS IS INSTEAD
+ * This is what the first editor did, and replacing the model was a mistake.
+ * What was broken was the packaging: it opened 477px tall inside a card that
+ * ends above the window, so its own Start button sat off-screen, and the
+ * button that opened it could not receive a click at all — it lived inside a
+ * `pointer-events: none` overlay, so every press went through it to the map.
+ * Nothing about "drive there and capture" was wrong; it never ran.
  *
- * The region is an object on the sheet. Drive the stage wherever you like,
- * then click the edge you are standing on — it takes the live coordinate.
- * Click a corner to set both of its edges at once. Any edge, any order, as
- * many times as you like; an overshoot is just "drive back and click again",
- * which is why the old inset field (a µm fudge for joystick overshoot, with a
- * thirty-word explanation) is gone.
+ * The version in between made the map the form: click the edge you are
+ * standing on. Fewer steps, but it asks you to aim at a dashed line with one
+ * hand on a joystick, and — the part that actually sank it — nothing on
+ * screen said what it wanted. Reported as "not clear, what it is asking".
+ * A walk says what to do next; the stage says where.
  *
- * Nothing reaches the controller until Apply, so Cancel is always safe and
- * always available — including the crash case, which is just a Cancel nobody
- * pressed.
+ * ORDER DOES NOT MATTER
+ *
+ * The prompts name bottom-left then top-right because a sequence needs an
+ * order, but the box is built from min and max, so two opposite corners in
+ * any order give the same region. Getting it "wrong" costs nothing.
+ *
+ * NOTHING REACHES THE CONTROLLER UNTIL APPLY
+ *
+ * So Cancel is always safe and always available, including the crash case,
+ * which is just a Cancel nobody pressed.
  */
 const RegionEditor = (() => {
     'use strict';
@@ -37,29 +42,44 @@ const RegionEditor = (() => {
     const RESTORE = '/api/devices/stage/region/restore';
     const ENFORCE = '/api/devices/stage/envelope/enforced';
 
-    // Which edges a target sets. Corners set two; edges set one.
-    const TARGETS = {
-        'x-min': ['x_min'], 'x-max': ['x_max'],
-        'y-min': ['y_min'], 'y-max': ['y_max'],
-        'min-min': ['x_min', 'y_min'], 'max-min': ['x_max', 'y_min'],
-        'min-max': ['x_min', 'y_max'], 'max-max': ['x_max', 'y_max'],
-    };
+    const BOUNDS = ['x_min', 'x_max', 'y_min', 'y_max'];
+    // Two corners this close together are a double-press, not a region.
+    const MIN_SPAN_UM = 10;
+
+    // Where the walk is. 'a' and 'b' are the two corners; 'review' is the box.
+    const STEPS = ['a', 'b', 'review'];
 
     let _open = false;
-    let _box = null;          // the region being edited
-    let _applied = null;      // what it was when editing started
-    let _wasEnforced = null;  // so Cancel restores the fence as it was
+    let _step = 'a';
+    let _a = null;            // first captured corner {x, y}
+    let _b = null;            // second captured corner
+    let _edited = null;       // bounds typed or snapped after the walk
+    let _applied = null;      // the region as it stands on the controller
+    let _travel = null;       // everything the stage can reach
+    let _wasEnforced = null;  // so Cancel puts the fence back as it was
     let _startedCam = false;
     let _pos = null;          // live stage position
     let _history = [];
-    let _travel = null;       // everything the stage can reach
+    let _say = '';
+    let _bad = false;
     let _onChange = () => {};
 
-    const $ = id => document.getElementById(id);
     const fmt = v => (Number.isFinite(v) ? v.toFixed(1) : '—');
-
+    const complete = b => !!b && BOUNDS.every(k => Number.isFinite(b[k]));
     const isOpen = () => _open;
-    const box = () => (_box ? Object.assign({}, _box) : null);
+    const step = () => _step;
+    const isBad = () => _bad;
+
+    /** The box as it stands: from the walk, then from any later edits. */
+    function box() {
+        if (_edited) return Object.assign({}, _edited);
+        const second = _step === 'b' ? _pos : _b;      // rubber-band while driving
+        if (!_a || !second) return null;
+        return {
+            x_min: Math.min(_a.x, second.x), x_max: Math.max(_a.x, second.x),
+            y_min: Math.min(_a.y, second.y), y_max: Math.max(_a.y, second.y),
+        };
+    }
 
     async function getJSON(url) {
         const r = await fetch(url);
@@ -85,21 +105,30 @@ const RegionEditor = (() => {
     }
 
     function say(msg, bad) {
-        const el = $('region-say');
-        if (!el) return;
-        el.textContent = msg || '';
-        el.dataset.bad = bad ? '1' : '0';
+        _say = msg || '';
+        _bad = !!bad;
     }
 
-    const BOUNDS = ['x_min', 'x_max', 'y_min', 'y_max'];
-    const complete = b => !!b && BOUNDS.every(k => Number.isFinite(b[k]));
+    /**
+     * What to do right now, in one sentence.
+     *
+     * The old wizard's failure was not only that its buttons were off-screen,
+     * and the one after it did not fail for want of features: neither ever
+     * said what the operator was meant to do with the joystick in their hand.
+     */
+    function prompt() {
+        if (_say) return _say;
+        if (_step === 'a') return 'Drive to the bottom-left of your working area, then press Capture.';
+        if (_step === 'b') return 'Now drive to the top-right. The box follows the stage as you go.';
+        return 'This is your working region. Apply it, or nudge an edge below.';
+    }
 
     /**
-     * Open the editor: camera on, fence down, region on the sheet.
+     * Open the walk: camera on, fence down, first corner asked for.
      *
-     * Returns false when the stage cannot be read. There is nothing to edit
-     * then — the fence lives in the controller, and an editor opened on four
-     * undefined numbers would offer to write them.
+     * Returns false when the stage cannot be read — there is nothing to edit
+     * then, and an editor opened on four undefined numbers would offer to
+     * write them.
      */
     async function open(opts) {
         if (_open) return false;
@@ -118,10 +147,12 @@ const RegionEditor = (() => {
             fail('The stage did not report a region. Nothing to edit until it does.');
             return false;
         }
-        _wasEnforced = d.enforced === true;
         _travel = complete(d.full_travel) ? Object.assign({}, d.full_travel) : null;
-        _box = Object.assign({}, _applied);
+        _wasEnforced = d.enforced === true;
         _history = Array.isArray(d.history) ? d.history : [];
+        _step = 'a';
+        _a = _b = _edited = null;
+        say('');
         _open = true;
 
         // The fence has to come down or you cannot drive to where a wider
@@ -136,7 +167,7 @@ const RegionEditor = (() => {
             }
         }
 
-        // Seeing where you are is the whole basis for judging a boundary.
+        // Seeing where you are is the whole basis for judging a corner.
         if (opts && opts.startCamera) {
             try { await opts.startCamera(); _startedCam = true; } catch (e) { /* not fatal */ }
         }
@@ -148,7 +179,8 @@ const RegionEditor = (() => {
     async function cancel(opts) {
         if (!_open) return;
         _open = false;
-        _box = null;
+        _step = 'a';
+        _a = _b = _edited = null;
         if (_wasEnforced) {
             try { await postJSON(ENFORCE, { enforced: true }); } catch (e) { /* reported below */ }
         }
@@ -163,55 +195,101 @@ const RegionEditor = (() => {
     }
 
     /**
-     * Stamp the live stage position into one or two bounds.
+     * Take the corner the stage is standing on.
      *
-     * The bounds stay ordered: stamping +X below the current −X would make a
-     * box with no inside, so the opposite edge moves out of the way rather
-     * than the click being refused. Refusing here would mean explaining
-     * geometry to someone holding a joystick.
+     * Refuses a second corner on top of the first: two presses without moving
+     * would make a region with no inside, and the honest reading of that is a
+     * double-press, not an instruction.
      */
-    function stamp(target) {
-        if (!_open || !_box || !_pos) return false;
-        const which = TARGETS[target];
-        if (!which) return false;
-        which.forEach(bound => {
-            const v = bound.startsWith('x') ? _pos.x : _pos.y;
-            _box[bound] = v;
-            if (bound === 'x_min' && _box.x_max <= v) _box.x_max = v + 1;
-            if (bound === 'x_max' && _box.x_min >= v) _box.x_min = v - 1;
-            if (bound === 'y_min' && _box.y_max <= v) _box.y_max = v + 1;
-            if (bound === 'y_max' && _box.y_min >= v) _box.y_min = v - 1;
-        });
-        say(`${which.join(' and ')} set to where the stage is.`);
+    function capture() {
+        if (!_open || !_pos) return false;
+        if (_step === 'a') {
+            _a = { x: _pos.x, y: _pos.y };
+            _step = 'b';
+            say('');
+            _onChange();
+            return true;
+        }
+        if (_step === 'b') {
+            if (Math.abs(_pos.x - _a.x) < MIN_SPAN_UM || Math.abs(_pos.y - _a.y) < MIN_SPAN_UM) {
+                say('That is the corner you already took. Drive to the opposite one.', true);
+                _onChange();
+                return false;
+            }
+            _b = { x: _pos.x, y: _pos.y };
+            _step = 'review';
+            say('');
+            _onChange();
+            return true;
+        }
+        return false;
+    }
+
+    /** Undo the last step of the walk. */
+    function back() {
+        if (!_open) return false;
+        if (_step === 'review') { _b = null; _edited = null; _step = 'b'; }
+        else if (_step === 'b') { _a = null; _step = 'a'; }
+        else return false;
+        say('');
         _onChange();
         return true;
     }
 
-    /** Type a bound directly — the same edit, for people who know the number. */
-    function setBound(bound, value) {
-        if (!_open || !_box || !Number.isFinite(value)) return;
-        _box[bound] = value;
+    /** Start the walk again from the first corner. */
+    function redo() {
+        if (!_open) return false;
+        _a = _b = _edited = null;
+        _step = 'a';
+        say('');
         _onChange();
+        return true;
+    }
+
+    /** Type a bound directly — for people who know the number. */
+    function setBound(bound, value) {
+        if (!_open || _step !== 'review' || !Number.isFinite(value)) return false;
+        const current = box();
+        if (!current) return false;
+        _edited = Object.assign({}, current, { [bound]: value });
+        say('');
+        _onChange();
+        return true;
+    }
+
+    /**
+     * Move one edge to where the stage is now.
+     *
+     * The common case after a walk is one edge being slightly wrong, and
+     * re-walking both corners to fix it is a poor trade. Same gesture as a
+     * capture, aimed at a single bound.
+     */
+    function useStage(bound) {
+        if (!_pos) return false;
+        return setBound(bound, bound.startsWith('x') ? _pos.x : _pos.y);
     }
 
     /** What changed, in the operator's terms, for the confirmation. */
     function diff() {
-        if (!_box || !_applied) return [];
-        return ['x_min', 'x_max', 'y_min', 'y_max']
-            .filter(k => Math.abs((_box[k] ?? 0) - (_applied[k] ?? 0)) > 0.05)
-            .map(k => `${k.replace('_', ' ')}: ${fmt(_applied[k])} → ${fmt(_box[k])}`);
+        const b = box();
+        if (!b || !_applied) return [];
+        return BOUNDS
+            .filter(k => Math.abs((b[k] ?? 0) - (_applied[k] ?? 0)) > 0.05)
+            .map(k => `${k.replace('_', ' ')}: ${fmt(_applied[k])} → ${fmt(b[k])}`);
     }
 
     async function apply(opts) {
-        if (!_open || !_box) return false;
+        const b = box();
+        if (!_open || !b) return false;
         try {
-            await postJSON(APPLY, _box);
+            await postJSON(APPLY, b);
             const changes = diff();
             await cancel(opts);   // restores the fence and the camera
             say(changes.length ? `Applied · ${changes.join(' · ')}` : 'Applied · unchanged');
             return true;
         } catch (e) {
             say(`Could not apply (${e.message})`, true);
+            _onChange();
             return false;
         }
     }
@@ -220,29 +298,48 @@ const RegionEditor = (() => {
         try {
             const d = await postJSON(RESTORE, { applied_at: appliedAt });
             _applied = d.region || null;
-            if (_open && _applied) _box = Object.assign({}, _applied);
             _history = Array.isArray(d.history) ? d.history : _history;
             say('Region restored.');
             _onChange();
             return true;
         } catch (e) {
             say(`Could not restore (${e.message})`, true);
+            _onChange();
             return false;
         }
     }
 
+    /**
+     * Where the stage is now.
+     *
+     * This drives more than a readout: at the second corner the proposed box
+     * IS the stage position, and whether Capture can be pressed at all
+     * depends on having one. So a new position is a change, and says so,
+     * rather than waiting for whatever else happens to redraw next.
+     */
     function setPosition(x, y) {
-        _pos = Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+        const next = Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+        const moved = !!next !== !!_pos
+            || (next && _pos && (Math.abs(next.x - _pos.x) > 0.01
+                                 || Math.abs(next.y - _pos.y) > 0.01));
+        _pos = next;
+        if (moved && _open) _onChange();
     }
 
     return {
-        isOpen, box, open, cancel, apply, stamp, setBound, restore, diff, setPosition,
+        isOpen, step, box, open, cancel, apply, capture, back, redo,
+        setBound, useStage, restore, diff, setPosition, prompt, isBad,
+        corners: () => ({
+            a: _a ? Object.assign({}, _a) : null,
+            b: _b ? Object.assign({}, _b) : null,
+        }),
         history: () => _history.slice(),
-        travel: () => (_travel ? Object.assign({}, _travel) : null),
         applied: () => (_applied ? Object.assign({}, _applied) : null),
+        travel: () => (_travel ? Object.assign({}, _travel) : null),
         position: () => (_pos ? Object.assign({}, _pos) : null),
         onChange: fn => { _onChange = typeof fn === 'function' ? fn : () => {}; },
-        TARGETS,
+        STEPS,
+        MIN_SPAN_UM,
     };
 })();
 

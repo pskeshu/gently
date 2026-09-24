@@ -98,6 +98,50 @@ def test_the_editor_refuses_a_stage_it_cannot_read():
     assert "if (!await RegionEditor.open(" in DEVICES
 
 
+def test_every_step_of_the_walk_says_what_it_wants():
+    """The complaint that produced this design was not a missing feature.
+
+    "i mean the software at the moment, it is not clear, what it is asking."
+    Two editors in a row left the operator holding a joystick with nothing on
+    screen telling them what to do with it. Each step now has a sentence, and
+    one button whose label is the action.
+    """
+    prompts = re.search(r"function prompt\(\) \{(.*?)\n\}", EDITOR, re.S)
+    assert prompts, "nothing decides what the panel is asking"
+    body = prompts.group(1)
+    assert "bottom-left" in body and "top-right" in body
+    assert "Capture" in body, "the prompt never names the button it wants pressed"
+
+    # and the button's label is the step's verb, not a fixed word
+    assert "review ? 'Apply' : 'Capture'" in DEVICES
+
+
+def test_the_box_follows_the_stage_to_the_second_corner():
+    """The animated part: between the two presses the region IS the stage.
+
+    Without it, "point at the bottom left, then the top right" is two numbers
+    typed by a joystick; with it, you watch the region you are drawing.
+    """
+    box = re.search(r"function box\(\) \{(.*?)\n\}", EDITOR, re.S)
+    assert box and "_step === 'b' ? _pos : _b" in box.group(1), (
+        "the second corner is not the live position while it is being driven to"
+    )
+    assert "is-live" in DEVICES, "nothing marks the box as still following the stage"
+    assert re.search(r"\.region-face\.is-live", CSS)
+
+
+def test_a_double_press_is_not_a_region():
+    """Two captures in the same spot would make a box with no inside."""
+    cap = re.search(r"function capture\(\) \{(.*?)\n\}", EDITOR, re.S)
+    assert cap and "MIN_SPAN_UM" in cap.group(1)
+
+
+def test_the_walk_can_always_be_stepped_back():
+    for name in ("function back(", "function redo("):
+        assert name in EDITOR, f"{name} is gone; a walk you cannot undo is a trap"
+    assert "region-back" in HTML
+
+
 def test_the_sheet_frames_the_travel_while_editing():
     """An edge you cannot see is an edge you cannot click.
 
