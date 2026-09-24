@@ -121,3 +121,21 @@ def test_a_history_entry_missing_a_bound_is_dropped_not_fatal():
     record = xy_region.load()
     assert record.current.box == WIDER
     assert [h.box for h in record.history] == [BOX], "the good row survives"
+
+
+def test_the_suite_cannot_reach_the_real_storage_root():
+    """The guard in conftest is the reason this file is safe to run.
+
+    Without it, three tests in test_xy_envelope.py wrote a fixture's box into
+    the microscope's own `D:\Gently3` — eighteen entries, and the last would
+    have become the software fence at the next boot. They had redirected the
+    handler's config sidecar to tmp_path and had no idea the route also
+    persisted a region somewhere else entirely.
+    """
+    from gently.settings import settings
+
+    # Two views of the root: the one conftest redirected for the whole suite,
+    # and this file's own per-test one. Neither may be the rig's.
+    for root in (str(settings.storage.base_path), str(xy_region.region_path())):
+        assert "Gently3" not in root, f"a test is pointed at the real storage: {root}"
+    assert str(xy_region.region_path()).startswith(str(xy_region.settings.storage.base_path))
