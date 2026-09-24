@@ -261,3 +261,28 @@ def test_it_does_not_contradict_the_readout_beside_it() -> None:
     assert "rigReady()" in m.group(1), (
         "the message does not depend on whether the rig is actually down"
     )
+
+
+def test_the_map_draws_the_region_it_edits() -> None:
+    """ "OPTIMAL" has to mean the box the region editor edits.
+
+    It used to be read off the controller's own `LowerLimX(mm)` properties,
+    which was the same box while writing a region always wrote the firmware.
+    Since the firmware fence became opt-in it is not: with it off those
+    properties report the stage's whole travel, and the map shaded the entire
+    sheet green while the editor worked on a different box entirely.
+    """
+    assert "extractOptimalBox" not in DEVICES_JS, (
+        "the map is reading the zone off the controller's limit properties again"
+    )
+    assert "XYLimitsState.subscribe(applyWorkingRegion)" in DEVICES_JS, (
+        "the map and the limits switch no longer share one answer"
+    )
+    assert "function workingBox()" in STORE
+
+
+def test_full_travel_is_not_a_region() -> None:
+    """The absence of a fence should not be drawn as an optimal one."""
+    m = re.search(r"function workingBox\(\) \{(.*?)\n    \}", STORE, re.S)
+    assert m, "the store no longer decides which box is the working one"
+    assert "'none'" in m.group(1), "there is no way to say 'no region is set'"

@@ -31,7 +31,9 @@ const XYLimitsState = (() => {
     // How long to wait before asking again after an answer we could not get.
     const RETRY_MS = 4000;
 
-    let _state = { enforced: null, region: null, box: null, reason: '', busy: false };
+    let _state = {
+        enforced: null, region: null, box: null, travel: null, reason: '', busy: false,
+    };
     const _subs = new Set();
     let _retry = null;
 
@@ -59,7 +61,10 @@ const XYLimitsState = (() => {
         rigReady() ? 'Limits unavailable — asking again…' : 'Microscope not connected';
 
     function unknown(reason) {
-        _state = { enforced: null, region: null, box: null, reason: reason || '', busy: false };
+        _state = {
+            enforced: null, region: null, box: null, travel: null,
+            reason: reason || '', busy: false,
+        };
         notify();
     }
 
@@ -85,6 +90,7 @@ const XYLimitsState = (() => {
                 x_min: d.x_min, x_max: d.x_max,
                 y_min: d.y_min, y_max: d.y_max,
             },
+            travel: d.full_travel || null,
             reason: '',
             busy: false,
         };
@@ -165,7 +171,36 @@ const XYLimitsState = (() => {
     // boot-banner leaves behind is the same news, still readable afterwards.
     if (rigReady()) read();
 
-    return { read, write, subscribe, snapshot };
+    const BOUNDS = ['x_min', 'x_max', 'y_min', 'y_max'];
+    const same = (a, b) =>
+        !!a && !!b && BOUNDS.every(k => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < 1);
+
+    /**
+     * The box the operator is working inside — what the map should call
+     * "optimal", and what the region editor edits.
+     *
+     * The map used to draw this from the controller's own limits, read off
+     * `LowerLimX(mm)` and friends. That was the same box back when writing a
+     * region always wrote the firmware. It is not any more: the firmware fence
+     * is opt-in now, so with it off those properties report the stage's whole
+     * travel — and the map cheerfully shaded the entire sheet "OPTIMAL".
+     *
+     * So the working region is the answer when there is one. A rig that
+     * predates the region record has no such entry, and there the controller's
+     * box is still real evidence someone fenced this stage — but only if it is
+     * narrower than the travel, because full travel is not a region, it is the
+     * absence of one.
+     */
+    function workingBox() {
+        const s = _state;
+        if (s.region) return { box: s.region, source: 'region' };
+        if (s.box && s.travel && !same(s.box, s.travel)) {
+            return { box: s.box, source: 'controller' };
+        }
+        return { box: null, source: 'none' };
+    }
+
+    return { read, write, subscribe, snapshot, workingBox };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = XYLimitsState;
