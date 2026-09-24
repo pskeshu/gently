@@ -227,3 +227,37 @@ def test_the_note_says_who_it_affects() -> None:
         "the switch no longer says that it affects every client of this "
         "controller, which is the only reason it exists"
     )
+
+
+def test_the_store_does_not_depend_on_hearing_one_event() -> None:
+    """Reported from the rig: "Microscope not connected" under a live readout.
+
+    The route was fine — a GET returned 200 with `enforced: false` while X/Y
+    streamed. The store had asked once, early, been told no, and had no way to
+    ask again: it re-read on DEVICE_LAYER_STATE, which fires ONCE per state
+    change and is emitted by boot-banner.js, loaded BEFORE this file. A rig
+    already up when the page loads announces itself into an empty room.
+    """
+    index = (ROOT / "ui" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert index.index("boot-banner.js") < index.index("xy-limits-state.js"), (
+        "if this order ever flips the race below is gone, but so is the "
+        "reason this test reads the way it does"
+    )
+    assert "gentlyDeviceReady" in STORE, (
+        "the store has no way to learn the rig is up except an event it can "
+        "be loaded too late to hear"
+    )
+    assert "scheduleRetry" in STORE, "an unanswered question is kept as an answer"
+
+
+def test_it_does_not_contradict_the_readout_beside_it() -> None:
+    """ "Microscope not connected" is a claim about hardware, not about us.
+
+    Printed under a live X/Y the operator can watch moving, it sends them to
+    check a cable. When the rig is up, an unreadable fence is our problem.
+    """
+    m = re.search(r"const offlineReason = \(\) =>\n?\s*(.*?);", STORE, re.S)
+    assert m, "the store has only one reason for not knowing"
+    assert "rigReady()" in m.group(1), (
+        "the message does not depend on whether the rig is actually down"
+    )
