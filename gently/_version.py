@@ -59,3 +59,44 @@ def build_id() -> str:
         return __version__
 
     return f"{__version__}+g{commit}{dirty}"
+
+
+def build_date() -> str | None:
+    """When the commit in the build id was made — ISO 8601, with its offset.
+
+    The build id names a tree exactly; it says nothing about how old that tree
+    is, and on a microscope the question behind "which version is this?" is
+    usually "is this from before the change". The version literal cannot
+    answer that — `1.0.0.dev1` is the same string for every commit after the
+    tag — so the date belongs to the commit the id already names, and moves
+    with it.
+
+    The committer date, not the author date: a rebased or cherry-picked commit
+    keeps its original author date, which would describe when the code was
+    written rather than when this tree came to be.
+
+    Returns None outside a checkout — an absent date is rendered as nothing
+    rather than as a guess. Note that with a `-dirty` build id the tree has
+    edits newer than this date; the suffix is what says so.
+    """
+    import subprocess
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    if not (repo / ".git").exists():
+        return None
+
+    try:
+        head = subprocess.run(
+            ["git", "log", "-1", "--format=%cI", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if head.returncode != 0:
+        return None
+    return head.stdout.strip() or None

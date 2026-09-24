@@ -195,6 +195,10 @@ class VisualizationServer(Service):
         # A global rather than a key threaded through each route's context, so a
         # new template gets the version without anyone remembering to pass it.
         self.templates.env.globals["gently_version"] = gently.build_id()
+        # When the commit in that id was made. None outside a checkout, and
+        # the templates render nothing rather than a placeholder — an absent
+        # date is better than a made-up one.
+        self.templates.env.globals["gently_build_date"] = gently.build_date()
         self.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
         # Static assets are served live (CLAUDE.md: "refresh the window — served
