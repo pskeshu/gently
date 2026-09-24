@@ -373,12 +373,32 @@ class DeviceLayerServer(Service):
             # The operator's working region. Everything Gently commands stays
             # inside this, always — it is the software envelope, checked in
             # XYStage.set() before anything reaches the hardware.
-            region = {
-                "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
-                "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
-                "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
-                "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
-            }
+            #
+            # Read from the storage root, not from the sidecar beside
+            # config.yml: that path is relative to whatever directory this
+            # process was started in, so the region silently vanished when the
+            # device layer was launched from somewhere else. The sidecar is
+            # still read as a fallback so an existing rig keeps its region on
+            # the first boot after this change.
+            from gently.core import xy_region
+
+            stored = xy_region.load().current
+            if stored is not None:
+                region = stored.box
+            else:
+                region = {
+                    "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
+                    "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
+                    "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
+                    "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
+                }
+                if all(k in env for k in ("x_min", "x_max", "y_min", "y_max")):
+                    # Carry the legacy region across once, so its history
+                    # starts from what the rig was actually using.
+                    xy_region.apply(region, note="carried over from config.local.yml")
+                    logger.info(
+                        "XY region migrated from the sidecar to %s", xy_region.region_path()
+                    )
             # Whether that region is ALSO written into the Tiger. Opt-in, and
             # off unless someone said otherwise: the firmware bound's only job
             # over the software one is stopping a hand on the joystick, and it
@@ -2949,8 +2969,19 @@ class DeviceLayerServer(Service):
             # The box to restore when limits go back on. Kept while they are
             # off, so nobody has to walk the corners again.
             "region": ({k: saved[k] for k in keys} if all(k in saved for k in keys) else None),
+            "history": [],
             "position": None,
         }
+        try:
+            from gently.core import xy_region
+
+            record = xy_region.load()
+            out["history"] = [h.to_dict() for h in reversed(record.history)]
+            if record.current is not None:
+                out["region"] = record.current.box
+                out["applied_at"] = record.current.applied_at
+        except Exception:
+            logger.debug("region history unavailable", exc_info=True)
         try:
             cur = xy_stage.read()[xy_stage.name]["value"]
             out["position"] = {"x": float(cur[0]), "y": float(cur[1])}
@@ -3013,6 +3044,12 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.exception("Envelope write failed")
             return web.json_response({"success": False, "error": str(exc)}, status=502)
+        # The record with its history lives in the storage root; the sidecar
+        # keeps only the enforcement choice, which the device layer needs
+        # before anything else is loaded.
+        from gently.core import xy_region
+
+        xy_region.apply(box, session_id=body.get("session_id"), note=str(body.get("note") or ""))
         self._write_sidecar("xy_envelope", {**box, "enforced": enforced})
         logger.warning("XY region set by operator: %s (firmware: %s)", box, enforced)
         return web.json_response(self._envelope_payload(xy_stage))
@@ -3099,6 +3136,59 @@ class DeviceLayerServer(Service):
             "client, Micro-Manager included",
             "ENFORCED" if enforced else "REMOVED (full travel)",
         )
+        return web.json_response(self._envelope_payload(xy_stage))
+
+    async def handle_restore_region(self, request):
+        """POST /api/stage/region/restore — {"applied_at": str}.
+
+        Going back is an apply like any other: the region being replaced joins
+        the history, so you can go forward again. Nothing is ever lost, which
+        is the point of keeping the list at all.
+        """
+        from gently.core import xy_region
+
+        xy_stage = self.devices.get("xy_stage")
+        if xy_stage is None:
+            return web.json_response({"success": False, "error": "XY stage not found"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        applied_at = body.get("applied_at") if isinstance(body, dict) else None
+        if not applied_at:
+            return web.json_response({"success": False, "error": "applied_at required"}, status=400)
+        record = xy_region.restore(str(applied_at), session_id=body.get("session_id"))
+        if record is None or record.current is None:
+            return web.json_response(
+                {"success": False, "error": "no region with that timestamp"}, status=404
+            )
+        box = record.current.box
+        saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
+        enforced = saved.get("enforced") is True
+        try:
+            async with self.pause_state_updates():
+                if enforced:
+                    await asyncio.to_thread(
+                        xy_stage.set_firmware_limits,
+                        box["x_min"] / 1000.0,
+                        box["x_max"] / 1000.0,
+                        box["y_min"] / 1000.0,
+                        box["y_max"] / 1000.0,
+                    )
+                await asyncio.to_thread(
+                    xy_stage.set_software_limits,
+                    box["x_min"],
+                    box["x_max"],
+                    box["y_min"],
+                    box["y_max"],
+                )
+        except ValueError as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=409)
+        except Exception as exc:
+            logger.exception("Region restore failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=502)
+        self._write_sidecar("xy_envelope", {**box, "enforced": enforced})
+        logger.warning("XY region restored to %s", box)
         return web.json_response(self._envelope_payload(xy_stage))
 
     async def handle_get_joystick(self, request):

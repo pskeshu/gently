@@ -18,7 +18,7 @@ screen. A test that reads the property can never catch this.
 So this scans instead: any class that a script hides through the property, and
 whose CSS sets `display`, must carry its own `[hidden]` guard. The pre-existing
 code already does this — `.boot-banner[hidden]`, `.op-lock[hidden]`,
-`.devices-region-wiz[hidden]` — it was the newer panels that missed it.
+`.region-strip[hidden]` — it was the newer panels that missed it.
 """
 
 from __future__ import annotations
@@ -39,8 +39,10 @@ TOGGLED_CLASSES = [
     "al-history",
     "boot-banner",
     "op-lock",
-    "devices-region-wiz",
     "devices-limits",
+    "region-strip",
+    "region-history",
+    "region-cam-ph",
 ]
 
 
