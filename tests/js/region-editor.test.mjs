@@ -212,3 +212,43 @@ test('every step says what it is asking for', async () => {
     });
     await R.cancel({});
 });
+
+test('taking the fence down does not take the instruction with it', async () => {
+    // The limits notice used to be written into the prompt slot, so step 1
+    // showed "XY limits are off" and never "drive to the bottom-left".
+    stubStage({ enforced: true });
+    await R.open({});
+    assert.match(R.prompt(), /bottom-left/i);
+    assert.match(R.prompt(), /capture/i);
+    assert.match(R.note(), /limits are off/i, 'the aside is still said, beside the prompt');
+    await R.cancel({});
+    assert.equal(R.note(), '', 'the aside leaves with the walk');
+});
+
+test('a refusal at the second corner clears once the stage moves', async () => {
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    assert.equal(captureAt(-800, -600), false);
+    assert.equal(R.isBad(), true);
+    R.setPosition(-500, -300);
+    assert.equal(R.isBad(), false, 'driving away answers "drive to the opposite one"');
+    assert.match(R.prompt(), /top-right/i);
+    await R.cancel({});
+});
+
+test('Apply says what it did, somewhere that is still on screen', async () => {
+    // apply() closes the walk, and the strip with it, so a message written to
+    // the strip afterwards was never seen.
+    const toasts = [];
+    globalThis.showGentlyToast = msg => toasts.push(msg);
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+    assert.equal(await R.apply({}), true);
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0], /applied/i);
+    assert.match(toasts[0], /-800/, 'it names the numbers that changed');
+    delete globalThis.showGentlyToast;
+});

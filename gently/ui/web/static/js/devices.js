@@ -356,7 +356,7 @@ const DevicesManager = (function () {
                         SharedState.set('stageXY', { x: entry.X, y: entry.Y });
                     }
                     if (computeViewBox()) renderMap();
-                    else updateMapMarker();
+                    else { updateMapMarker(); feedRegionEditor(); }
                     if (_mapReadoutX) _mapReadoutX.textContent = fmtNumber(entry.X, 1);
                     if (_mapReadoutY) _mapReadoutY.textContent = fmtNumber(entry.Y, 1);
                     break;
@@ -2558,6 +2558,9 @@ const DevicesManager = (function () {
             strip.hidden = !on;
             btn.hidden = on;
             if (wrap) wrap.classList.toggle('is-editing', on);
+            // Opening took the fence down and closing put it back or wrote a new
+            // region; the limits card and the OPTIMAL box read the same state.
+            if (typeof XYLimitsState !== 'undefined') XYLimitsState.read();
             // Opening and closing both change what the sheet has to frame, and
             // the next telemetry tick may be a second away. renderMap() draws
             // from _viewBox rather than recomputing it, so refresh that first.
@@ -2653,6 +2656,11 @@ const DevicesManager = (function () {
         if (say) {
             say.textContent = RegionEditor.prompt();
             say.dataset.bad = RegionEditor.isBad() ? '1' : '0';
+        }
+        const note = document.getElementById('region-note');
+        if (note) {
+            note.textContent = RegionEditor.note();
+            note.hidden = !note.textContent;
         }
 
         // The live position is the number about to be captured, so it reads as

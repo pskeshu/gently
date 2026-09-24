@@ -11260,6 +11260,9 @@ body.modal-open {
 }
 .region-say { margin: 0; font-size: 0.72rem; color: var(--map-ink-mute, #9aa0aa); }
 .region-say[data-bad="1"] { color: var(--op-warn, #d97706); }
+/* An aside that holds for the whole walk. It sits under the prompt and never
+   replaces it: the instruction is the one line that cannot be given up. */
+.region-note { font-size: 0.66rem; color: var(--map-ink-mute, #9aa0aa); opacity: 0.8; }
 
 /* Four bounds, one row, always. Wrapped onto two rows they stop reading as
    one object with four sides. */
@@ -11322,9 +11325,9 @@ body.modal-open {
 .region-go:disabled { opacity: 0.45; cursor: default; }
 .region-snap {
     font: inherit;
-    font-size: 0.72rem;
+    font-size: 0.95rem;
     line-height: 1;
-    padding: 3px 5px;
+    padding: 2px 6px;
     border-radius: 3px;
     cursor: pointer;
     border: 1px solid var(--map-rule, rgba(255, 255, 255, 0.18));

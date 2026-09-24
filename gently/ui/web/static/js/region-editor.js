@@ -62,6 +62,7 @@ const RegionEditor = (() => {
     let _history = [];
     let _say = '';
     let _bad = false;
+    let _note = '';           // a standing aside (limits are off); never displaces the prompt
     let _onChange = () => {};
 
     const fmt = v => (Number.isFinite(v) ? v.toFixed(1) : '—');
@@ -109,6 +110,12 @@ const RegionEditor = (() => {
         _bad = !!bad;
     }
 
+    /** Something that stuck: the walk closed and the strip with it, so it goes to the toast. */
+    function tell(msg) {
+        if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 5000, 'success');
+        else console.info(msg);
+    }
+
     /**
      * What to do right now, in one sentence.
      *
@@ -153,6 +160,7 @@ const RegionEditor = (() => {
         _step = 'a';
         _a = _b = _edited = null;
         say('');
+        _note = '';
         _open = true;
 
         // The fence has to come down or you cannot drive to where a wider
@@ -161,7 +169,7 @@ const RegionEditor = (() => {
         if (_wasEnforced) {
             try {
                 await postJSON(ENFORCE, { enforced: false });
-                say('XY limits are off while you edit. They go back on when you finish.');
+                _note = 'XY limits are off while you edit. They go back on when you finish.';
             } catch (e) {
                 say(`Could not release the limits (${e.message}) — you can only shrink the region.`, true);
             }
@@ -191,6 +199,7 @@ const RegionEditor = (() => {
         _startedCam = false;
         _wasEnforced = null;
         say('');
+        _note = '';
         _onChange();
     }
 
@@ -285,7 +294,7 @@ const RegionEditor = (() => {
             await postJSON(APPLY, b);
             const changes = diff();
             await cancel(opts);   // restores the fence and the camera
-            say(changes.length ? `Applied · ${changes.join(' · ')}` : 'Applied · unchanged');
+            tell(changes.length ? `Region applied · ${changes.join(' · ')}` : 'Region applied · unchanged');
             return true;
         } catch (e) {
             say(`Could not apply (${e.message})`, true);
@@ -323,12 +332,14 @@ const RegionEditor = (() => {
             || (next && _pos && (Math.abs(next.x - _pos.x) > 0.01
                                  || Math.abs(next.y - _pos.y) > 0.01));
         _pos = next;
+        if (moved && _open && _bad && _step === 'b') say('');
         if (moved && _open) _onChange();
     }
 
     return {
         isOpen, step, box, open, cancel, apply, capture, back, redo,
         setBound, useStage, restore, diff, setPosition, prompt, isBad,
+        note: () => _note,
         corners: () => ({
             a: _a ? Object.assign({}, _a) : null,
             b: _b ? Object.assign({}, _b) : null,

@@ -158,3 +158,26 @@ def test_the_old_wizard_is_gone_from_every_layer():
     for name, src in (("index.html", HTML), ("main.css", CSS), ("devices.js", DEVICES)):
         assert "devices-region-wiz" not in src, f"wizard remnants in {name}"
         assert "devices-region-schem" not in src, f"wizard remnants in {name}"
+
+
+def test_every_stage_position_reaches_the_editor():
+    """The box is the stage position between the two presses — so the editor
+    has to hear every position, not only the ones that reframed the sheet.
+
+    renderPositions() only redrew the map (which feeds the editor) when the
+    view box changed. While editing the sheet frames the whole travel, so a
+    joystick move almost never changes it, and the walk stamped the position
+    it opened at.
+    """
+    block = re.search(r"case 'xy_stage':(.*?)break;", DEVICES, re.S)
+    assert block, "no xy_stage telemetry handler"
+    assert "feedRegionEditor()" in block.group(1), (
+        "a stage move that does not reframe the map never reaches the editor"
+    )
+
+
+def test_the_prompt_is_never_displaced_by_the_limits_notice():
+    opened = EDITOR.split("async function open(", 1)[1].split("async function cancel(", 1)[0]
+    assert "_note = 'XY limits are off" in opened
+    assert "say('XY limits are off" not in opened, "the notice overwrites step 1's instruction"
+    assert 'id="region-note"' in HTML
