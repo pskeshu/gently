@@ -83,11 +83,12 @@ except ImportError:
 
 # Single source of truth — see gently/_version.py. pyproject.toml reads the
 # same literal, so the package and the UI cannot disagree.
-from gently._version import __version__, build_id
+from gently._version import __version__, build_date, build_id
 
 __all__ = [
     # Version — single-sourced from gently/_version.py
     "__version__",
+    "build_date",
     "build_id",
     # Main entry point
     "Gently",

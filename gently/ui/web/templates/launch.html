@@ -82,6 +82,9 @@
     cursor:pointer;border-bottom:1px dashed currentColor;transition:color .15s}
   .foot-version:hover,.foot-version:focus-visible{color:var(--g-muted)}
   .foot-version:focus-visible{outline:2px solid var(--g-accent);outline-offset:3px;border-radius:2px}
+  /* A second line under the build id, quieter than it: the id is the thing
+     you act on, the date is the thing you check. */
+  .foot-when{margin-top:4px;font-size:11px;opacity:.8}
   .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--g-muted)}
   .status.err{color:#f85149}
 </style>
@@ -118,6 +121,15 @@
     <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
       <button type="button" class="foot-version" id="foot-version"
               title="Copy this build id — paste it into bug reports">v{{ gently_version }}</button></div>
+    {% if gently_build_date %}
+    {# How old the tree in the build id is, on its own line. The id says WHICH
+       commit is running; the version literal cannot say how old it is, since
+       "v1.0.0.dev1" is the same string for every commit after the tag. It sits
+       outside the copy button on purpose — that button copies its own
+       textContent, and a bug report wants the id, not the date. #}
+    <div class="foot foot-when">built <time id="foot-when" datetime="{{ gently_build_date }}"
+        title="Date of the commit in the build id above">{{ gently_build_date }}</time></div>
+    {% endif %}
   </div>
 
 <script>
@@ -198,6 +210,23 @@ document.getElementById("go").addEventListener("click", async () => {
 // so the id itself never moves. Same secure-context fallback as the dashboard's
 // session-id copy (app.js): WebView2 on localhost is secure, a LAN http:// visit
 // is not, and there the hand-selection keeps Ctrl+C working.
+(function () {
+  // The tag's timestamp carries whoever cut it's UTC offset. Read from another
+  // timezone that is a puzzle, not a fact, so it is shown on the reader's own
+  // clock. The ISO string stays in `datetime`, and stays on screen if this
+  // never runs.
+  const when = document.getElementById("foot-when");
+  if (when) {
+    const t = new Date(when.getAttribute("datetime"));
+    if (!isNaN(t)) {
+      when.textContent = t.toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    }
+  }
+})();
+
 (function () {
   const btn = document.getElementById("foot-version");
   const note = document.getElementById("foot-note");
