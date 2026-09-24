@@ -28,8 +28,15 @@ const XYLimitsState = (() => {
     const READ_URL = '/api/devices/stage/envelope';
     const WRITE_URL = '/api/devices/stage/envelope/enforced';
 
+    // How long to wait before asking again after an answer we could not get.
+    const RETRY_MS = 4000;
+
     let _state = { enforced: null, region: null, box: null, reason: '', busy: false };
     const _subs = new Set();
+    let _retry = null;
+
+    /** Is the rig up, as far as the boot poll knows? */
+    const rigReady = () => typeof window !== 'undefined' && window.gentlyDeviceReady === true;
 
     const snapshot = () => Object.assign({}, _state);
 
@@ -40,12 +47,37 @@ const XYLimitsState = (() => {
         });
     }
 
+    /**
+     * Say which of the two it is.
+     *
+     * "Microscope not connected" printed under a live X/Y readout is the card
+     * contradicting itself — the operator can see the stage moving. When the
+     * rig is up, an unreadable fence is our problem, and saying so is the
+     * difference between a fault and a wait.
+     */
+    const offlineReason = () =>
+        rigReady() ? 'Limits unavailable — asking again…' : 'Microscope not connected';
+
     function unknown(reason) {
         _state = { enforced: null, region: null, box: null, reason: reason || '', busy: false };
         notify();
     }
 
+    /**
+     * Ask again, because an unanswered question is not an answer.
+     *
+     * The read can fail for a second at boot — the device layer is up but the
+     * stage is not connected yet — and there is exactly one DEVICE_LAYER_STATE
+     * event per state change to trigger a retry. Miss it and the card keeps
+     * the first answer forever.
+     */
+    function scheduleRetry() {
+        if (_retry !== null || _state.enforced !== null) return;
+        _retry = setTimeout(() => { _retry = null; read(); }, RETRY_MS);
+    }
+
     function adopt(d) {
+        if (_retry !== null) { clearTimeout(_retry); _retry = null; }
         _state = {
             enforced: !!d.enforced,
             region: d.region || null,
@@ -65,9 +97,11 @@ const XYLimitsState = (() => {
             const r = await fetch(READ_URL);
             const d = await r.json().catch(() => ({}));
             if (r.ok && d && d.success !== false && d.enforced !== undefined) adopt(d);
-            else unknown(r.status === 403 ? 'Sign in to see the limits' : 'Microscope not connected');
+            else if (r.status === 403) unknown('Sign in to see the limits');
+            else { unknown(offlineReason()); scheduleRetry(); }
         } catch (e) {
-            unknown('Microscope not connected');
+            unknown(offlineReason());
+            scheduleRetry();
         }
         return snapshot();
     }
@@ -123,6 +157,13 @@ const XYLimitsState = (() => {
             else unknown('Microscope not connected');
         });
     }
+
+    // That event fires once per state change, and this file is loaded AFTER
+    // boot-banner.js, which is what emits it. A rig that was already up when
+    // the page loaded can therefore announce itself before this store exists —
+    // and then never again, because 'ready' does not change twice. The flag
+    // boot-banner leaves behind is the same news, still readable afterwards.
+    if (rigReady()) read();
 
     return { read, write, subscribe, snapshot };
 })();
