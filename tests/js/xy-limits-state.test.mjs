@@ -141,3 +141,39 @@ test('403 is a sign-in problem, not a hardware one, and is not retried', async (
     await run();
     assert.equal(calls.length, 1, 'asking again will not sign anyone in');
 });
+
+test('the working box is the region, which is what the map calls optimal', async () => {
+    // The map used to draw "OPTIMAL" from the controller's own limits. That
+    // was the same box while writing a region always wrote the firmware; since
+    // the firmware fence became opt-in it is not, and with it off those
+    // properties report full travel — so the sheet was shaded entirely green.
+    immediateTimers();
+    const TRAVEL = { x_min: -2252.1, x_max: 983.0, y_min: -1677.0, y_max: 586.6 };
+    const REGION = { x_min: -900, x_max: 400, y_min: -800, y_max: 100 };
+    replies({ body: { ...TRAVEL, success: true, enforced: false, full_travel: TRAVEL, region: REGION } });
+    const S = loadThenRigUp();
+    await S.read();
+    assert.deepEqual(S.workingBox(), { box: REGION, source: 'region' });
+});
+
+test('full travel is not a region, it is the absence of one', async () => {
+    immediateTimers();
+    const TRAVEL = { x_min: -2252.1, x_max: 983.0, y_min: -1677.0, y_max: 586.6 };
+    replies({ body: { ...TRAVEL, success: true, enforced: false, full_travel: TRAVEL, region: null } });
+    const S = loadThenRigUp();
+    await S.read();
+    assert.deepEqual(S.workingBox(), { box: null, source: 'none' },
+        'the whole sheet is not the optimal zone');
+});
+
+test('a rig with a controller fence but no region record still shows it', async () => {
+    // Predates the region record. The controller holding something narrower
+    // than travel is real evidence someone fenced this stage.
+    immediateTimers();
+    const TRAVEL = { x_min: -2252.1, x_max: 983.0, y_min: -1677.0, y_max: 586.6 };
+    const FENCE = { x_min: -900, x_max: 400, y_min: -800, y_max: 100 };
+    replies({ body: { ...FENCE, success: true, enforced: true, full_travel: TRAVEL, region: null } });
+    const S = loadThenRigUp();
+    await S.read();
+    assert.deepEqual(S.workingBox(), { box: S.snapshot().box, source: 'controller' });
+});

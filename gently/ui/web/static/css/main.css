@@ -11319,6 +11319,18 @@ body.modal-open {
    someone with their other hand on a joystick. */
 /* The inside of the box is the part that matters — an outline alone leaves
    "allowed" to be inferred from which side of four lines you are on. */
+/* The controller's fence, when it is enforced and is not the region itself.
+   An outline, not a fill: it is a boundary someone else runs into, not an
+   area of the sheet that means something different. */
+.devices-zone-firmware {
+    fill: none;
+    stroke: var(--map-ink-mute, #9aa0aa);
+    stroke-width: 1.2;
+    stroke-dasharray: 2 5;
+    vector-effect: non-scaling-stroke;
+    opacity: 0.85;
+}
+
 .region-face {
     fill: var(--accent, #3b82f6);
     fill-opacity: 0.07;

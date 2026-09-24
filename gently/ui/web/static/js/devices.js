@@ -147,12 +147,17 @@ const DevicesManager = (function () {
     let _currentView = 'operate';
 
     // Map geometry
-    //   _optimalBox: { x: [min, max], y: [min, max] } in stage µm, derived
-    //   from the live XYStage firmware-fence properties. null until first
-    //   DEVICE_STATE_UPDATE delivers them.
+    //   _optimalBox: { x: [min, max], y: [min, max] } in stage µm — the
+    //   WORKING REGION: the box gently keeps inside, and the box the region
+    //   editor edits. null when no region has been set, which draws no zone
+    //   rather than shading the whole sheet green.
+    //   _firmwareBox: the controller's own fence, drawn only when it is being
+    //   enforced and differs from the region — it binds Micro-Manager too, so
+    //   it is a separate fact from the region.
     //   _coverslip: optional {center_um, size_mm} from GET /api/devices/coverslip
     //   _viewBox: { xMin, xMax, yMin, yMax } in stage µm
     let _optimalBox = null;
+    let _firmwareBox = null;
     let _coverslip = null;
     let _viewBox = null;
 
@@ -371,39 +376,34 @@ const DevicesManager = (function () {
     // ASI adapter). Single source of truth: these are what the controller
     // enforces against every motion source (joystick, MMCore, plans). When
     // their values change, the map redraws.
-    function extractOptimalBox(propsByDevice) {
-        if (!propsByDevice) return null;
-        for (const name of Object.keys(propsByDevice)) {
-            const p = propsByDevice[name] || {};
-            const xMinMm = parseFloat(p['LowerLimX(mm)']);
-            const xMaxMm = parseFloat(p['UpperLimX(mm)']);
-            const yMinMm = parseFloat(p['LowerLimY(mm)']);
-            const yMaxMm = parseFloat(p['UpperLimY(mm)']);
-            if (isFinite(xMinMm) && isFinite(xMaxMm) &&
-                isFinite(yMinMm) && isFinite(yMaxMm)) {
-                return {
-                    x: [xMinMm * 1000, xMaxMm * 1000],   // mm → µm
-                    y: [yMinMm * 1000, yMaxMm * 1000],
-                };
-            }
-        }
-        return null;
-    }
-
-    function applyOptimalBoxFromProperties(propsByDevice) {
-        const next = extractOptimalBox(propsByDevice);
-        if (!next) return;
-        // Treat differences below 1 µm as noise — don't churn redraws.
+    /**
+     * Adopt the working region as the zone the map calls optimal.
+     *
+     * This used to come from the controller's `LowerLimX(mm)` properties,
+     * which was the same box while writing a region always wrote the
+     * firmware. Since the firmware fence became opt-in it is not: with it off
+     * those properties report the stage's whole travel, and the map shaded
+     * the entire sheet "OPTIMAL" — so the region the operator edits and the
+     * region the map drew were two different boxes.
+     */
+    function applyWorkingRegion(s) {
+        const { box } = XYLimitsState.workingBox();
+        const next = box
+            ? { x: [box.x_min, box.x_max], y: [box.y_min, box.y_max] }
+            : null;
+        _firmwareBox = s && s.enforced && s.box
+            ? { x: [s.box.x_min, s.box.x_max], y: [s.box.y_min, s.box.y_max] }
+            : null;
         const prev = _optimalBox;
-        const changed = !prev
-            || Math.abs(prev.x[0] - next.x[0]) > 1
-            || Math.abs(prev.x[1] - next.x[1]) > 1
-            || Math.abs(prev.y[0] - next.y[0]) > 1
-            || Math.abs(prev.y[1] - next.y[1]) > 1;
-        if (!changed) return;
+        const changed = (!prev !== !next)
+            || (prev && next && (
+                Math.abs(prev.x[0] - next.x[0]) > 1 || Math.abs(prev.x[1] - next.x[1]) > 1
+                || Math.abs(prev.y[0] - next.y[0]) > 1 || Math.abs(prev.y[1] - next.y[1]) > 1));
         _optimalBox = next;
-        computeViewBox();
-        renderMap();
+        if (changed || _firmwareBox) {
+            computeViewBox();
+            renderMap();
+        }
     }
 
     // =====================================================================
@@ -724,6 +724,27 @@ const DevicesManager = (function () {
         rect.setAttribute('height', _optimalBox.y[1] - _optimalBox.y[0]);
         rect.setAttribute('class', 'devices-zone devices-zone-green');
         _mapZones.appendChild(rect);
+
+        // The controller's own fence, when it is being enforced and is not
+        // simply the region. It binds every client of this stage, including
+        // someone in Micro-Manager who can see none of this — so when the two
+        // differ, the map shows both rather than implying one box.
+        if (!_firmwareBox) return;
+        const near = (a, b) => Math.abs(a - b) < 1;
+        if (near(_firmwareBox.x[0], _optimalBox.x[0]) && near(_firmwareBox.x[1], _optimalBox.x[1])
+            && near(_firmwareBox.y[0], _optimalBox.y[0]) && near(_firmwareBox.y[1], _optimalBox.y[1])) {
+            return;
+        }
+        const fence = document.createElementNS(SVG_NS, 'rect');
+        fence.setAttribute('x', _firmwareBox.x[0]);
+        fence.setAttribute('y', svgY(_firmwareBox.y[1]));
+        fence.setAttribute('width',  _firmwareBox.x[1] - _firmwareBox.x[0]);
+        fence.setAttribute('height', _firmwareBox.y[1] - _firmwareBox.y[0]);
+        fence.setAttribute('class', 'devices-zone devices-zone-firmware');
+        const t = document.createElementNS(SVG_NS, 'title');
+        t.textContent = 'Controller limits — enforced against every client, Micro-Manager included';
+        fence.appendChild(t);
+        _mapZones.appendChild(fence);
     }
 
     function renderZoneLabels() {
@@ -2452,7 +2473,8 @@ const DevicesManager = (function () {
 
         renderPositions(payload.positions);
         if (payload.properties) {
-            applyOptimalBoxFromProperties(payload.properties);
+            // The controller's own limits are drawn separately; the working
+            // region comes from the shared store, not from these properties.
             renderPropertiesTable(payload.properties);
             _lastPropertyMap = payload.properties;
         }
@@ -2481,6 +2503,10 @@ const DevicesManager = (function () {
         const btn = document.getElementById('devices-limits-toggle');
         const note = document.getElementById('devices-limits-note');
         if (!btn || !note || typeof XYLimitsState === 'undefined') return;
+
+        // The map draws the same region this switch describes — one store,
+        // so the zone and the switch cannot disagree about where the fence is.
+        XYLimitsState.subscribe(applyWorkingRegion);
 
         XYLimitsState.subscribe(s => {
             if (s.enforced === null) {
