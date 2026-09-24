@@ -40,6 +40,7 @@ TOGGLED_CLASSES = [
     "boot-banner",
     "op-lock",
     "devices-region-wiz",
+    "devices-limits",
 ]
 
 

@@ -992,29 +992,17 @@
                              XY safety envelope; this is the only place it is edited. -->
                         <button class="devices-region-btn" id="devices-region-edit" type="button">Edit region</button>
 
-                        <!-- The joystick lock, where the stage is. It existed only
-                             in Settings, which is not where anyone is standing when
-                             they wonder why the physical controller does nothing —
-                             or when they want it to stop working while a run is on.
-                             The state shown is read back from the controller; the
-                             write is verified there too, so this cannot claim a lock
-                             the hardware refused. -->
                         <!-- The Tiger enforces its soft limits against EVERY
                              motion source, so the region below is not Gently's
                              fence — it is the controller's, and it binds anyone
                              driving this stage from Micro-Manager too. This is
                              the switch that gives them the stage back. -->
-                        <div class="devices-js" id="devices-limits">
-                            <button class="devices-js-btn" id="devices-limits-toggle" type="button"
+                        <div class="devices-limits" id="devices-limits">
+                            <button class="devices-limits-btn" id="devices-limits-toggle" type="button"
                                     aria-pressed="false" disabled>XY limits —</button>
-                            <span class="devices-js-note" id="devices-limits-note">reading…</span>
+                            <span class="devices-limits-note" id="devices-limits-note">reading…</span>
                         </div>
 
-                        <div class="devices-js" id="devices-js">
-                            <button class="devices-js-btn" id="devices-js-toggle" type="button"
-                                    aria-pressed="false" disabled>Joystick —</button>
-                            <span class="devices-js-note" id="devices-js-note">reading…</span>
-                        </div>
                     </div>
                     <!-- A guided walk, not a form: start the bottom camera so the
                          operator can see where the stage is, then send them to each
