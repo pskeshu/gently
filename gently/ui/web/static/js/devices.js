@@ -542,6 +542,17 @@ const DevicesManager = (function () {
                 yMin = Math.min(yMin, xy.y); yMax = Math.max(yMax, xy.y);
             });
         }
+        // While a region is being edited, frame everything the stage can reach.
+        // The view otherwise fits the region as applied, so the moment you push
+        // an edge outward it leaves the sheet — and an edge you cannot see is
+        // an edge you cannot click.
+        if (typeof RegionEditor !== 'undefined' && RegionEditor.isOpen()) {
+            [RegionEditor.travel(), RegionEditor.box()].forEach(b => {
+                if (!b) return;
+                xMin = Math.min(xMin, b.x_min); xMax = Math.max(xMax, b.x_max);
+                yMin = Math.min(yMin, b.y_min); yMax = Math.max(yMax, b.y_max);
+            });
+        }
         if (!isFinite(xMin) || !isFinite(yMin)) {
             xMin = -100; xMax = 100; yMin = -100; yMax = 100;
         }
@@ -565,7 +576,16 @@ const DevicesManager = (function () {
     // Stage Y is positive-up; SVG Y is positive-down. Convert by negation.
     function svgY(stageY) { return -stageY; }
 
+    function feedRegionEditor() {
+        // The editor stamps the LIVE position, so it takes the same telemetry
+        // the map draws from rather than reading the stage itself.
+        if (typeof RegionEditor === 'undefined' || !_lastXY) return;
+        RegionEditor.setPosition(_lastXY.X, _lastXY.Y);
+        if (RegionEditor.isOpen()) renderStrip();
+    }
+
     function renderMap() {
+        feedRegionEditor();
         if (!_mapSvg || !_viewBox) return;
         const { xMin, xMax, yMin, yMax } = _viewBox;
         const w = xMax - xMin, h = yMax - yMin;
@@ -2489,180 +2509,210 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
-    // Edit region (#107) — a guided walk to the two corners of the safe area
+    // Region editor — the map is the form
     // =====================================================================
-    // The box the map draws IS the fence the controller enforces, so this
-    // ends in a firmware write. The walk: start the bottom camera so the
-    // operator can see where they are, send them to the bottom-left corner
-    // with the joystick, capture, then the top-right, capture, review, apply.
-    // The schematic shows which corner is wanted and where the stage is now.
+    // The old wizard walked two corners in a 300px column floating over the
+    // map, and opened taller than the card it lived in, so its own Start
+    // button sat off the bottom of the window. RegionEditor owns the state;
+    // this owns the drawing and the clicks.
+    const EDGE_HIT = 14;   // px of slop around a line, at map scale
+
     function setupRegionEditor() {
-        const btn  = document.getElementById('devices-region-edit');
-        const wiz  = document.getElementById('devices-region-wiz');
-        if (!btn || !wiz) return;
+        const btn = document.getElementById('devices-region-edit');
+        const strip = document.getElementById('region-strip');
+        if (!btn || !strip || typeof RegionEditor === 'undefined') return;
+
         const el = id => document.getElementById(id);
-        const say = (msg, ok = true) => { el('devices-region-result').textContent = msg; el('devices-region-result').dataset.ok = ok ? '1' : '0'; };
+        const wrap = document.getElementById('devices-map-wrap');
 
-        const STEPS = [
-            { title: 'Mark the two far corners of the area you know is clear of the SPIM head, optics and holder. The camera comes on so you can see where you are.', next: 'Start' },
-            { title: 'Joystick to the BOTTOM-LEFT corner of the clear area (−X, −Y). Watch the camera; stop where you would still be happy to image.', next: 'Capture this corner', corner: 'A' },
-            { title: 'Now the TOP-RIGHT corner (+X, +Y).', next: 'Capture this corner', corner: 'B' },
-            { title: 'This is the new safe region. Apply writes it to the controller, which then enforces it against the joystick too.', next: 'Apply' },
-        ];
-        const st = { step: 0, A: null, B: null, timer: null, cam: false };
+        // One place decides what "editing" looks like, so the strip, the
+        // button and the overlays it displaces can never disagree.
+        const showEditing = on => {
+            strip.hidden = !on;
+            btn.hidden = on;
+            if (wrap) wrap.classList.toggle('is-editing', on);
+            // Opening and closing both change what the sheet has to frame, and
+            // the next telemetry tick may be a second away. renderMap() draws
+            // from _viewBox rather than recomputing it, so the extent is
+            // refreshed first.
+            computeViewBox();
+            renderMap();
+            renderEditLayer();
+        };
 
-        function box() {
-            if (!st.A || !st.B) return null;
-            const inset = Number(el('devices-region-inset').value) || 0;
-            const b = {
-                x_min: Math.min(st.A.X, st.B.X) + inset, x_max: Math.max(st.A.X, st.B.X) - inset,
-                y_min: Math.min(st.A.Y, st.B.Y) + inset, y_max: Math.max(st.A.Y, st.B.Y) - inset,
-            };
-            return b.x_min < b.x_max && b.y_min < b.y_max ? b : null;
-        }
+        RegionEditor.onChange(() => { renderStrip(); renderEditLayer(); });
 
-        // Reference frame for the schematic: the current envelope, padded, so a
-        // stage driven outside today's box still shows up (that is the point).
-        function ref() {
-            const cur = _optimalBox || { x: [-1000, 1000], y: [-1000, 1000] };
-            const px = (cur.x[1] - cur.x[0]) * 0.3, py = (cur.y[1] - cur.y[0]) * 0.3;
-            return { x0: cur.x[0] - px, x1: cur.x[1] + px, y0: cur.y[0] - py, y1: cur.y[1] + py };
-        }
-        function toSvg(X, Y) {
-            const r = ref();
-            const cl = v => Math.max(4, Math.min(156, v));
-            return { x: cl(8 + 144 * (X - r.x0) / (r.x1 - r.x0)), y: cl(92 - 84 * (Y - r.y0) / (r.y1 - r.y0)) };
-        }
-        function drawSchematic() {
-            const svg = el('devices-region-schem');
-            const r = ref();
-            const cur = _optimalBox;
-            const parts = [];
-            if (cur) {
-                const a = toSvg(cur.x[0], cur.y[0]), b = toSvg(cur.x[1], cur.y[1]);
-                parts.push(`<rect class="rs-now" x="${a.x}" y="${b.y}" width="${b.x - a.x}" height="${a.y - b.y}"/>`);
-            }
-            const pend = box();
-            if (pend) {
-                const a = toSvg(pend.x_min, pend.y_min), b = toSvg(pend.x_max, pend.y_max);
-                parts.push(`<rect class="rs-new" x="${a.x}" y="${b.y}" width="${b.x - a.x}" height="${a.y - b.y}"/>`);
-            }
-            // The two corners: where they are wanted (on today's box), captured, or pulsing as the target.
-            const want = { A: cur ? toSvg(cur.x[0], cur.y[0]) : { x: 20, y: 80 }, B: cur ? toSvg(cur.x[1], cur.y[1]) : { x: 140, y: 20 } };
-            for (const k of ['A', 'B']) {
-                const cap = st[k] ? toSvg(st[k].X, st[k].Y) : null;
-                const pt = cap || want[k];
-                const cls = cap ? 'rs-corner rs-got' : (STEPS[st.step].corner === k ? 'rs-corner rs-target' : 'rs-corner');
-                parts.push(`<circle class="${cls}" cx="${pt.x}" cy="${pt.y}" r="5"/><text class="rs-label" x="${pt.x + (k === 'A' ? -9 : 9)}" y="${pt.y + (k === 'A' ? 9 : -6)}">${k}</text>`);
-            }
-            if (_lastXY) {
-                const p = toSvg(_lastXY.X, _lastXY.Y);
-                parts.push(`<circle class="rs-stage" cx="${p.x}" cy="${p.y}" r="3.5"/>`);
-                const tgt = STEPS[st.step].corner;
-                if (tgt && !st[tgt]) parts.push(`<line class="rs-arrow" x1="${p.x}" y1="${p.y}" x2="${want[tgt].x}" y2="${want[tgt].y}"/>`);
-            }
-            svg.innerHTML = parts.join('') + `<text class="rs-axis" x="152" y="97">+X</text><text class="rs-axis" x="3" y="9">+Y</text>`;
-        }
-        function preview() {
-            if (!_mapRegionPreview) return;
-            _mapRegionPreview.innerHTML = '';
-            const b = wiz.hidden ? null : box();
-            if (!b) return;
-            const r = document.createElementNS(SVG_NS, 'rect');
-            r.setAttribute('x', b.x_min); r.setAttribute('y', svgY(b.y_max));
-            r.setAttribute('width', b.x_max - b.x_min); r.setAttribute('height', b.y_max - b.y_min);
-            r.setAttribute('class', 'devices-region-preview');
-            _mapRegionPreview.appendChild(r);
-        }
-        function tick() {
-            el('devices-region-x').textContent = _lastXY ? Math.round(_lastXY.X) : '—';
-            el('devices-region-y').textContent = _lastXY ? Math.round(_lastXY.Y) : '—';
-            drawSchematic();
-        }
-        function render() {
-            const s = STEPS[st.step];
-            el('devices-region-say').textContent = s.title;
-            el('devices-region-next').textContent = s.next;
-            el('devices-region-next').disabled = st.step === 3 && !box();
-            el('devices-region-back').hidden = st.step === 0;
-            el('devices-region-xy').hidden = st.step === 0;
-            el('devices-region-inset-row').hidden = st.step !== 3;
-            el('devices-region-camwrap').hidden = !st.cam;
-            el('devices-region-steps').innerHTML = STEPS.map((_, i) =>
-                `<i class="${i < st.step ? 'done' : i === st.step ? 'now' : ''}"></i>`).join('');
-            tick(); preview();
-        }
-        function onFrame(p) {
-            if (wiz.hidden || !p || !p.jpeg_b64) return;
-            const img = el('devices-region-cam');
-            img.src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
-            el('devices-region-cam-ph').hidden = true;
-        }
-        async function startCam() {
-            st.cam = true; el('devices-region-cam-ph').hidden = false; el('devices-region-cam-ph').textContent = 'Starting camera…';
-            try {
-                const r = await fetch('/api/devices/bottom_camera/stream/start', { method: 'POST' });
-                if (!r.ok) el('devices-region-cam-ph').textContent = r.status === 403 ? 'Sign in to start the camera' : 'Camera unavailable — use the map';
-            } catch (_) { el('devices-region-cam-ph').textContent = 'Camera unavailable — use the map'; }
-        }
-        function open() {
-            st.step = 0; st.A = st.B = null; st.cam = false;
-            el('devices-region-inset').value = 0;
-            el('devices-region-cam').removeAttribute('src');
-            say('');
-            wiz.hidden = false; btn.hidden = true;
-            st.timer = setInterval(tick, 250);
-            render();
-        }
-        function close() {
-            wiz.hidden = true; btn.hidden = false;
-            clearInterval(st.timer); st.timer = null;
-            // ponytail: stops the stream even if Operate had it on first; a shared
-            // owner count is the upgrade if that ever bites.
-            if (st.cam) fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {});
-            preview();
-        }
-        async function next() {
-            const s = STEPS[st.step];
-            if (s.corner) {
-                if (!_lastXY) { say('No stage position yet — is the device layer running?', false); return; }
-                st[s.corner] = { X: _lastXY.X, Y: _lastXY.Y };
-                if (s.corner === 'B' && !box()) { st.B = null; say('That is the same corner as A — drive diagonally away first', false); return; }
-                say('');
-            }
-            if (st.step === 0) startCam();
-            if (st.step < 3) { st.step += 1; render(); return; }
-            await apply();
-        }
-        async function apply() {
-            const b = box();
-            if (!b) { say('Two distinct corners are needed', false); return; }
-            const nb = el('devices-region-next'); nb.disabled = true;
-            say('Writing to the controller…');
-            try {
-                const r = await fetch('/api/devices/stage/envelope', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
-                });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok) { say(d.detail || d.error || `Failed (${r.status})`, false); return; }
-                _optimalBox = { x: [d.x_min, d.x_max], y: [d.y_min, d.y_max] };
-                computeViewBox(); renderMap();
-                close();
-            } catch (err) { say(`Failed: ${err.message}`, false); }
-            finally { nb.disabled = false; }
-        }
-
-        btn.addEventListener('click', open);
-        el('devices-region-cancel').addEventListener('click', close);
-        el('devices-region-back').addEventListener('click', () => {
-            if (st.step === 0) return;
-            st.step -= 1;
-            if (STEPS[st.step].corner) st[STEPS[st.step].corner] = null;
-            say(''); render();
+        btn.addEventListener('click', async () => {
+            // It says why it refused; the map stays as it was.
+            if (!await RegionEditor.open({ startCamera: startRegionCam })) return;
+            showEditing(true);
+            renderStrip();
         });
-        el('devices-region-next').addEventListener('click', next);
-        el('devices-region-inset').addEventListener('input', render);
-        if (typeof ClientEventBus !== 'undefined') ClientEventBus.on('BOTTOM_CAMERA_FRAME', onFrame);
+
+        el('region-cancel').addEventListener('click', async () => {
+            await RegionEditor.cancel({ stopCamera: stopRegionCam });
+            showEditing(false);
+        });
+
+        el('region-apply').addEventListener('click', async () => {
+            const ok = await RegionEditor.apply({ stopCamera: stopRegionCam });
+            if (ok) showEditing(false);
+        });
+
+        el('region-history-btn').addEventListener('click', () => {
+            const host = el('region-history');
+            host.hidden = !host.hidden;
+            if (!host.hidden) renderHistory();
+        });
+
+        el('region-history').addEventListener('click', async e => {
+            const row = e.target.closest('[data-at]');
+            if (row) await RegionEditor.restore(row.dataset.at);
+        });
+
+        // Typing a bound is the same edit as stamping one.
+        el('region-bounds').addEventListener('change', e => {
+            const inp = e.target.closest('input[data-bound]');
+            if (inp) RegionEditor.setBound(inp.dataset.bound, parseFloat(inp.value));
+        });
+
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('BOTTOM_CAMERA_FRAME', p => {
+                if (!RegionEditor.isOpen() || !p || !p.jpeg_b64) return;
+                const img = el('region-cam-img');
+                const ph = el('region-cam-ph');
+                img.src = `data:image/jpeg;base64,${p.jpeg_b64}`;
+                img.style.display = 'block';
+                if (ph) ph.hidden = true;
+            });
+        }
+    }
+
+    async function startRegionCam() {
+        await fetch('/api/devices/bottom_camera/stream/start', { method: 'POST' });
+    }
+    async function stopRegionCam() {
+        await fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' });
+        const img = document.getElementById('region-cam-img');
+        const ph = document.getElementById('region-cam-ph');
+        if (img) { img.removeAttribute('src'); img.style.display = 'none'; }
+        if (ph) ph.hidden = false;
+    }
+
+    const BOUND_LABEL = { x_min: '−X', x_max: '+X', y_min: '−Y', y_max: '+Y' };
+
+    function renderStrip() {
+        const box = RegionEditor.box();
+        const host = document.getElementById('region-bounds');
+        const live = document.getElementById('region-live');
+        if (!host) return;
+        const p = RegionEditor.position();
+        if (live) {
+            live.textContent = p
+                ? `stage ${p.x.toFixed(1)}, ${p.y.toFixed(1)} µm`
+                : 'stage — (no position yet)';
+        }
+        if (!box) { host.innerHTML = ''; return; }
+        const applied = RegionEditor.applied() || {};
+        host.innerHTML = ['x_min', 'x_max', 'y_min', 'y_max'].map(b => {
+            const changed = Math.abs((box[b] ?? 0) - (applied[b] ?? 0)) > 0.05;
+            return `<label class="region-bound${changed ? ' is-changed' : ''}">
+                <span>${BOUND_LABEL[b]}</span>
+                <input type="number" step="1" data-bound="${b}" value="${box[b].toFixed(1)}">
+            </label>`;
+        }).join('');
+    }
+
+    function renderHistory() {
+        const host = document.getElementById('region-history');
+        if (!host) return;
+        const rows = RegionEditor.history();
+        if (!rows.length) {
+            host.innerHTML = '<p class="region-empty">No earlier regions yet. The first Apply starts the list.</p>';
+            return;
+        }
+        host.innerHTML = rows.map(h => {
+            const when = (h.applied_at || '').replace('T', ' ').slice(0, 16);
+            const size = `${Math.round(h.x_max - h.x_min)} × ${Math.round(h.y_max - h.y_min)} µm`;
+            return `<button type="button" class="region-hrow" data-at="${h.applied_at}">
+                <span class="region-hwhen">${when}</span>
+                <span class="region-hsize">${size}</span>
+                <span class="region-hgo">Restore</span></button>`;
+        }).join('');
+    }
+
+    /**
+     * The editable edges, drawn on the sheet.
+     *
+     * Each edge is a fat invisible hit-line over a visible hairline, so the
+     * target is clickable at a joystick-holding operator's accuracy rather
+     * than requiring a 1px hit.
+     */
+    function renderEditLayer() {
+        const layer = document.getElementById('devices-map-edit');
+        if (!layer) return;
+        layer.innerHTML = '';
+        const box = RegionEditor.isOpen() ? RegionEditor.box() : null;
+        if (!box || !_viewBox) return;
+
+        const span = Math.max(_viewBox.xMax - _viewBox.xMin, 1);
+        const slop = (EDGE_HIT / 560) * span;   // px of slop in stage units
+
+        const face = document.createElementNS(SVG_NS, 'rect');
+        face.setAttribute('x', box.x_min);
+        face.setAttribute('y', svgY(box.y_max));
+        face.setAttribute('width', Math.max(box.x_max - box.x_min, 0));
+        face.setAttribute('height', Math.max(box.y_max - box.y_min, 0));
+        face.setAttribute('class', 'region-face');
+        layer.appendChild(face);
+
+        const line = (x1, y1, x2, y2, target, label) => {
+            const g = document.createElementNS(SVG_NS, 'g');
+            g.setAttribute('class', 'region-edge');
+            g.setAttribute('data-target', target);
+            const vis = document.createElementNS(SVG_NS, 'line');
+            vis.setAttribute('x1', x1); vis.setAttribute('y1', svgY(y1));
+            vis.setAttribute('x2', x2); vis.setAttribute('y2', svgY(y2));
+            vis.setAttribute('class', 'region-edge-line');
+            const hit = document.createElementNS(SVG_NS, 'line');
+            hit.setAttribute('x1', x1); hit.setAttribute('y1', svgY(y1));
+            hit.setAttribute('x2', x2); hit.setAttribute('y2', svgY(y2));
+            hit.setAttribute('class', 'region-edge-hit');
+            hit.setAttribute('stroke-width', slop);
+            const t = document.createElementNS(SVG_NS, 'title');
+            t.textContent = label;
+            g.appendChild(vis); g.appendChild(hit); g.appendChild(t);
+            layer.appendChild(g);
+        };
+
+        line(box.x_min, box.y_min, box.x_min, box.y_max, 'x-min', 'Set −X to the stage');
+        line(box.x_max, box.y_min, box.x_max, box.y_max, 'x-max', 'Set +X to the stage');
+        line(box.x_min, box.y_min, box.x_max, box.y_min, 'y-min', 'Set −Y to the stage');
+        line(box.x_min, box.y_max, box.x_max, box.y_max, 'y-max', 'Set +Y to the stage');
+
+        [['min-min', box.x_min, box.y_min], ['max-min', box.x_max, box.y_min],
+         ['min-max', box.x_min, box.y_max], ['max-max', box.x_max, box.y_max]].forEach(
+            ([target, x, y]) => {
+                const g = document.createElementNS(SVG_NS, 'g');
+                g.setAttribute('class', 'region-corner');
+                g.setAttribute('data-target', target);
+                const c = document.createElementNS(SVG_NS, 'circle');
+                c.setAttribute('cx', x); c.setAttribute('cy', svgY(y));
+                c.setAttribute('r', slop * 0.6);
+                c.setAttribute('class', 'region-corner-dot');
+                const t = document.createElementNS(SVG_NS, 'title');
+                t.textContent = 'Set both edges of this corner to the stage';
+                g.appendChild(c); g.appendChild(t);
+                layer.appendChild(g);
+            });
+
+        if (!layer.dataset.wired) {
+            layer.dataset.wired = '1';
+            layer.addEventListener('click', e => {
+                const hit = e.target.closest('[data-target]');
+                if (hit) RegionEditor.stamp(hit.dataset.target);
+            });
+        }
     }
 
     function init() {

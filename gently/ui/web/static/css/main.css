@@ -11098,9 +11098,18 @@ body.modal-open {
     transition: opacity 0.15s;
     margin-left: 0.2rem;
 }
-}
 
 /* ── Map: Edit region (#107) ─────────────────────────────────────────────── */
+/* The readout is a pass-through overlay (`pointer-events: none`) so the map
+   underneath stays draggable, and every descendant inherits that — including
+   the buttons put inside it later. A real mouse click on "Edit region" went
+   straight through to the sheet and nothing happened, which is exactly how it
+   was reported. Scripted clicks ignore pointer-events, so no amount of
+   clicking it from a test would have shown this. Controls opt back in. */
+.devices-map-readout button,
+.devices-map-readout input,
+.devices-map-readout select { pointer-events: auto; }
+
 .devices-region-btn {
     margin-top: 6px; width: 100%;
     font: inherit; font-size: 0.72rem; letter-spacing: 0.04em;
@@ -11108,53 +11117,6 @@ body.modal-open {
     background: transparent; color: inherit; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18));
 }
 .devices-region-btn:hover { border-color: var(--accent); color: var(--accent); }
-/* The rail and the legend are siblings at the same z-index, so the later legend
-   paints over an open wizard's buttons. Lift the rail only while the wizard is open. */
-.devices-map-rail:has(.devices-region-wiz:not([hidden])) { z-index: 5; }
-.devices-region-wiz {
-    position: relative;
-    display: grid; gap: 8px;
-    width: 300px; max-width: 100%;
-    padding: 10px; border-radius: 6px;
-    background: var(--map-paper-2, rgba(20,24,30,0.92));
-    border: 1px solid var(--accent);
-    font-size: 0.75rem;
-}
-.devices-region-wiz[hidden] { display: none; }
-.devices-region-steps { display: inline-flex; gap: 5px; align-items: center; }
-.devices-region-steps i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); display: inline-block; opacity: 0.45; }
-.devices-region-steps i.done { background: var(--accent); opacity: 0.7; }
-.devices-region-steps i.now  { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
-.devices-region-cam { position: relative; aspect-ratio: 4 / 3; background: #0b0f14; border-radius: 4px; overflow: hidden; display: grid; place-items: center; }
-.devices-region-cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.devices-region-cam img:not([src]) { display: none; }
-.devices-region-cam-ph { position: absolute; color: #8a94a3; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; }
-.devices-region-cam-ph[hidden] { display: none; }
-.devices-region-schem { width: 100%; height: auto; display: block; border-radius: 4px; background: color-mix(in srgb, currentColor 5%, transparent); }
-.devices-region-schem .rs-now   { fill: none; stroke: currentColor; stroke-opacity: 0.35; stroke-dasharray: 3 2; }
-.devices-region-schem .rs-new   { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: var(--accent); stroke-width: 1.2; }
-.devices-region-schem .rs-corner { fill: none; stroke: currentColor; stroke-opacity: 0.5; }
-.devices-region-schem .rs-got    { fill: var(--accent); stroke: var(--accent); }
-.devices-region-schem .rs-target { stroke: var(--accent); stroke-width: 2; animation: rs-pulse 1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-.devices-region-schem .rs-stage  { fill: #f5a524; }
-.devices-region-schem .rs-arrow  { stroke: #f5a524; stroke-width: 1; stroke-dasharray: 2 2; }
-.devices-region-schem .rs-label  { font-size: 8px; fill: currentColor; opacity: 0.8; text-anchor: middle; }
-.devices-region-schem .rs-axis   { font-size: 6px; fill: currentColor; opacity: 0.5; }
-@keyframes rs-pulse { 50% { transform: scale(1.6); stroke-opacity: 0.4; } }
-@media (prefers-reduced-motion: reduce) { .devices-region-schem .rs-target { animation: none; } }
-.devices-region-say { margin: 0; line-height: 1.4; }
-.devices-region-xy { display: flex; gap: 12px; align-items: baseline; font-variant-numeric: tabular-nums; }
-.devices-region-xy b { font-weight: 600; }
-.devices-region-xy i { font-style: normal; opacity: 0.6; }
-.devices-region-xy[hidden], .devices-region-inset[hidden], .devices-region-actions [hidden] { display: none; }
-.devices-region-inset small { display: block; opacity: 0.75; line-height: 1.35; }
-.devices-region-wiz input[type="number"] { width: 84px; font: inherit; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
-.devices-region-wiz button { font: inherit; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; border: 1px solid var(--map-overlay-edge, rgba(255,255,255,0.18)); background: transparent; color: inherit; }
-.devices-region-apply { background: var(--accent) !important; border-color: var(--accent) !important; color: #071018 !important; font-weight: 600; }
-.devices-region-apply:disabled { opacity: 0.5; cursor: default; }
-.devices-region-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.devices-region-result { min-height: 1em; }
-.devices-region-result[data-ok="0"] { color: #ef4444; }
 .devices-region-preview { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 6; stroke-dasharray: 24 12; vector-effect: non-scaling-stroke; pointer-events: none; }
 
 /* The rig coming up, or down, on the header chip. "Scope offline" is true
@@ -11193,3 +11155,190 @@ body.modal-open {
     color: var(--accent-amber, #d97706);
 }
 .devices-limits-note { font-size: 0.66rem; opacity: 0.75; }
+
+/* ── region editor ──────────────────────────────────────────────────────────
+   Docked across the foot of the map, never floating in a column: the version
+   this replaces opened 477px tall inside a 594px card whose bottom sits below
+   the window, so its own Apply button was off-screen and the whole thing read
+   as a dead button.
+
+   Three fixed zones — what you can see, what you are setting, what you can do
+   — so the strip never reflows as values change, and a capped height that
+   fits an 800px window with the map still legible above it. */
+.region-strip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: 148px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: stretch;
+    padding: 12px 14px;
+    max-height: 176px;
+    background: var(--map-paper-2, rgba(20, 20, 24, 0.92));
+    border-top: 1px solid var(--map-rule, rgba(255, 255, 255, 0.14));
+    backdrop-filter: blur(6px);
+    /* Above the compass, the readout rail and the zone key, all of which are
+       absolutely positioned siblings over the same sheet. */
+    z-index: 5;
+}
+.region-strip[hidden] { display: none; }
+
+/* The strip takes the foot of the map, which is where the scale bar and the
+   zone key live. Rather than have them peer out from under it, they stand
+   down while an edit is open: the key explains colours you are not reading
+   right now, and the scale is restated by the bounds themselves. */
+.devices-map-wrap.is-editing .devices-scalebar,
+.devices-map-wrap.is-editing .devices-map-legend { display: none; }
+
+.region-cam {
+    grid-row: 1 / span 2;
+    position: relative;
+    background: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.region-cam img { width: 100%; height: 100%; object-fit: cover; display: none; }
+.region-cam-ph {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 0 8px;
+    color: var(--map-ink-mute, #9aa0aa);
+}
+.region-cam-ph[hidden] { display: none; }
+
+.region-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.region-head { display: flex; align-items: baseline; gap: 10px; }
+.region-title {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--map-ink, #e6e8ec);
+}
+/* The live position is the number you are about to stamp, so it reads as an
+   instrument value, not as prose. */
+.region-live {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--map-ink-mute, #9aa0aa);
+}
+.region-say { margin: 0; font-size: 0.72rem; color: var(--map-ink-mute, #9aa0aa); }
+.region-say[data-bad="1"] { color: var(--op-warn, #d97706); }
+
+/* Four bounds, one row, always. Wrapped onto two rows they stop reading as
+   one object with four sides. */
+.region-bounds {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    align-items: center;
+}
+.region-bound { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.region-bound > span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--map-ink-mute, #9aa0aa);
+}
+.region-bound input {
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--map-rule, rgba(255, 255, 255, 0.18));
+    background: transparent;
+    color: inherit;
+}
+/* A bound you have moved but not yet applied. The sheet should say which
+   numbers are proposals. */
+.region-bound.is-changed input {
+    border-color: var(--accent, #3b82f6);
+    color: var(--accent, #3b82f6);
+}
+
+.region-actions { display: flex; flex-direction: column; gap: 6px; justify-content: flex-start; }
+.region-btn {
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--map-rule, rgba(255, 255, 255, 0.2));
+    background: transparent;
+    color: inherit;
+    white-space: nowrap;
+}
+.region-apply { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+.region-quiet { opacity: 0.75; }
+.region-btn:hover { filter: brightness(1.15); }
+
+.region-history {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 90px;
+    overflow-y: auto;
+}
+.region-history[hidden] { display: none; }
+.region-hrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    font: inherit;
+    font-size: 0.7rem;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+.region-hrow:hover { background: var(--map-rule, rgba(255, 255, 255, 0.08)); }
+.region-hwhen { font-family: 'JetBrains Mono', monospace; color: var(--map-ink-mute, #9aa0aa); }
+.region-hsize { font-family: 'JetBrains Mono', monospace; }
+.region-hgo { margin-left: auto; color: var(--accent, #3b82f6); }
+.region-empty { margin: 0; font-size: 0.7rem; color: var(--map-ink-mute, #9aa0aa); }
+
+/* The region drawn on the sheet, while editing: a drafting line you can
+   take hold of. The hit area is far wider than the mark — this is clicked by
+   someone with their other hand on a joystick. */
+/* The inside of the box is the part that matters — an outline alone leaves
+   "allowed" to be inferred from which side of four lines you are on. */
+.region-face {
+    fill: var(--accent, #3b82f6);
+    fill-opacity: 0.07;
+    stroke: none;
+    pointer-events: none;
+}
+.region-edge-line {
+    stroke: var(--accent, #3b82f6);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+    vector-effect: non-scaling-stroke;
+}
+.region-edge-hit { stroke: transparent; cursor: pointer; }
+.region-edge:hover .region-edge-line { stroke-dasharray: none; stroke-width: 2.5; }
+.region-corner-dot {
+    fill: var(--map-paper, #14141a);
+    stroke: var(--accent, #3b82f6);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+    cursor: pointer;
+}
+.region-corner:hover .region-corner-dot { fill: var(--accent, #3b82f6); }
+@media (prefers-reduced-motion: reduce) { .region-strip { backdrop-filter: none; } }

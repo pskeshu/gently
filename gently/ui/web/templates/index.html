@@ -944,6 +944,8 @@
                         <g id="devices-map-coverslip"></g>
                         <g id="devices-map-zones"></g>
                         <g id="devices-map-region-preview"></g>
+                        {# Clickable edges and corners, only while editing. #}
+                        <g id="devices-map-edit"></g>
                         <g id="devices-map-zone-labels"></g>
                         <g id="devices-map-origin"></g>
                         <g id="devices-map-axes"></g>
@@ -954,6 +956,40 @@
                             <circle id="devices-map-marker-dot"  class="devices-marker-dot"></circle>
                         </g>
                     </svg>
+                    {# The region editor. Docked across the foot of the map,
+                       not floating in the readout column: the old one opened
+                       477px tall inside a card that ends above the window, so
+                       its Start button sat off-screen and pressing "Edit
+                       region" looked like nothing happening.
+
+                       There are no steps. The map is the form — drive the
+                       stage, click the edge you are standing on. #}
+                    <div class="region-strip" id="region-strip" hidden>
+                      <div class="region-cam">
+                        <img id="region-cam-img" alt="Bottom camera, live">
+                        <span class="region-cam-ph" id="region-cam-ph">Starting camera…</span>
+                      </div>
+
+                      <div class="region-body">
+                        <div class="region-head">
+                          <span class="region-title">Region</span>
+                          <span class="region-live" id="region-live">stage —</span>
+                        </div>
+                        <p class="region-say" id="region-say">
+                          Drive the stage to a boundary, then click that edge or corner on the map.
+                        </p>
+                      </div>
+
+                      <div class="region-actions">
+                        <button type="button" class="region-btn region-apply" id="region-apply">Apply</button>
+                        <button type="button" class="region-btn" id="region-cancel">Cancel</button>
+                        <button type="button" class="region-btn region-quiet" id="region-history-btn">History</button>
+                      </div>
+
+                      <div class="region-bounds" id="region-bounds"></div>
+
+                      <div class="region-history" id="region-history" hidden></div>
+                    </div>
 
                     <!-- TOP LEFT: compass / axis indicator -->
                     <div class="devices-compass" aria-hidden="true">
@@ -1003,33 +1039,6 @@
                             <span class="devices-limits-note" id="devices-limits-note">reading…</span>
                         </div>
 
-                    </div>
-                    <!-- A guided walk, not a form: start the bottom camera so the
-                         operator can see where the stage is, then send them to each
-                         corner with the joystick and capture it there. -->
-                    <div class="devices-region-wiz" id="devices-region-wiz" hidden>
-                        <div class="devices-readout-head">
-                            <span class="devices-readout-title">Safe region</span>
-                            <span class="devices-region-steps" id="devices-region-steps" aria-label="progress"></span>
-                        </div>
-                        <div class="devices-region-cam" id="devices-region-camwrap" hidden>
-                            <img id="devices-region-cam" alt="Bottom camera, live">
-                            <span class="devices-region-cam-ph" id="devices-region-cam-ph">Starting camera…</span>
-                        </div>
-                        <svg class="devices-region-schem" id="devices-region-schem" viewBox="0 0 160 100" aria-hidden="true"></svg>
-                        <p class="devices-region-say" id="devices-region-say"></p>
-                        <div class="devices-region-xy" id="devices-region-xy" hidden>
-                            <span>X <b id="devices-region-x">—</b></span><span>Y <b id="devices-region-y">—</b></span><i>µm</i>
-                        </div>
-                        <label class="devices-region-inset" id="devices-region-inset-row" hidden>Inset <input type="number" step="any" id="devices-region-inset" value="0"> µm
-                            <small>If you drove to the outer corners the stage can physically reach, inset ~850 µm: a fast joystick overshoots by up to ~680 µm before it stops.</small>
-                        </label>
-                        <div class="devices-region-actions">
-                            <button type="button" id="devices-region-cancel">Cancel</button>
-                            <button type="button" id="devices-region-back" hidden>Back</button>
-                            <button type="button" id="devices-region-next" class="devices-region-apply">Start</button>
-                        </div>
-                        <div class="devices-region-result" id="devices-region-result"></div>
                     </div>
                     </div>
 
@@ -1612,6 +1621,7 @@
     <script src="/static/js/embryos.js"></script>
     <script src="/static/js/projection-viewer.js"></script>
     <script src="/static/js/temperature-graph.js"></script>
+    <script src="/static/js/region-editor.js"></script>
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate-math.js"></script>
     <script src="/static/js/panels/imageview.js"></script>
