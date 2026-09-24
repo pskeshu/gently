@@ -11171,7 +11171,7 @@ body.modal-open {
     right: 0;
     bottom: 0;
     display: grid;
-    grid-template-columns: 148px minmax(0, 1fr) auto;
+    grid-template-columns: 124px 76px minmax(0, 1fr) auto;
     gap: 14px;
     align-items: stretch;
     padding: 12px 14px;
@@ -11193,7 +11193,7 @@ body.modal-open {
 .devices-map-wrap.is-editing .devices-map-legend { display: none; }
 
 .region-cam {
-    grid-row: 1 / span 2;
+    grid-row: 1;
     position: relative;
     background: #000;
     border-radius: 4px;
@@ -11213,8 +11213,36 @@ body.modal-open {
 }
 .region-cam-ph[hidden] { display: none; }
 
+/* The corner the walk is asking for. A sentence tells you what to do; this
+   shows you where, which is what reads from across the bench. */
+.region-schem { grid-row: 1; width: 100%; height: auto; align-self: center; }
+.rs-box {
+    fill: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
+    stroke: var(--map-rule, rgba(255, 255, 255, 0.25));
+    stroke-width: 1;
+}
+.rs-dot { fill: var(--accent, #3b82f6); }
+.rs-target {
+    fill: none;
+    stroke: var(--accent, #3b82f6);
+    stroke-width: 1.5;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: rs-pulse 1.4s ease-in-out infinite;
+}
+.rs-tick { fill: none; stroke: var(--accent, #3b82f6); stroke-width: 3; stroke-linecap: round; }
+@keyframes rs-pulse {
+    50% { transform: scale(1.55); stroke-opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .rs-target { animation: none; stroke-width: 2.5; }
+}
+
 .region-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.region-head { display: flex; align-items: baseline; gap: 10px; }
+/* The step and the live coordinate each have to survive on one line: a step
+   counter that reads "Step 2 of / 2" is worse than no step counter. */
+.region-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: nowrap; }
+.region-title, .region-live { white-space: nowrap; }
 .region-title {
     font-family: 'Instrument Serif', Georgia, serif;
     font-style: italic;
@@ -11235,8 +11263,11 @@ body.modal-open {
 
 /* Four bounds, one row, always. Wrapped onto two rows they stop reading as
    one object with four sides. */
+/* The four numbers get the whole width of the strip. Squeezed into the text
+   column beside a camera and four buttons they were ten pixels wide, which is
+   not a coordinate, it is a hint that one exists. */
 .region-bounds {
-    grid-column: 2 / -1;
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
@@ -11280,7 +11311,27 @@ body.modal-open {
     color: inherit;
     white-space: nowrap;
 }
-.region-apply { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+/* Capture, then Apply: the same button, because at every step there is
+   exactly one thing to press next. */
+.region-go {
+    background: var(--accent, #3b82f6);
+    border-color: var(--accent, #3b82f6);
+    color: #fff;
+    font-weight: 600;
+}
+.region-go:disabled { opacity: 0.45; cursor: default; }
+.region-snap {
+    font: inherit;
+    font-size: 0.72rem;
+    line-height: 1;
+    padding: 3px 5px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid var(--map-rule, rgba(255, 255, 255, 0.18));
+    background: transparent;
+    color: var(--map-ink-mute, #9aa0aa);
+}
+.region-snap:hover { color: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); }
 .region-quiet { opacity: 0.75; }
 .region-btn:hover { filter: brightness(1.15); }
 
@@ -11334,8 +11385,18 @@ body.modal-open {
 .region-face {
     fill: var(--accent, #3b82f6);
     fill-opacity: 0.07;
-    stroke: none;
+    stroke: var(--accent, #3b82f6);
+    stroke-width: 1.2;
+    stroke-dasharray: 6 4;
+    vector-effect: non-scaling-stroke;
     pointer-events: none;
+}
+/* While the second corner is still being driven to, the box IS the stage
+   position — so it says so, rather than looking like a decision already made. */
+.region-face.is-live { fill-opacity: 0.12; animation: region-breathe 1.8s ease-in-out infinite; }
+@keyframes region-breathe { 50% { fill-opacity: 0.05; } }
+@media (prefers-reduced-motion: reduce) {
+    .region-face.is-live { animation: none; }
 }
 .region-edge-line {
     stroke: var(--accent, #3b82f6);

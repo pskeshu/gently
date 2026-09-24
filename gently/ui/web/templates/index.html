@@ -970,22 +970,31 @@
                         <span class="region-cam-ph" id="region-cam-ph">Starting camera…</span>
                       </div>
 
+                      {# The corner being asked for, drawn and pulsing. The
+                         sentence says it; this shows it, which is the part you
+                         can read from across the bench with a joystick in your
+                         hand. #}
+                      <svg class="region-schem" id="region-schem" viewBox="0 0 84 64" aria-hidden="true"></svg>
+
                       <div class="region-body">
                         <div class="region-head">
-                          <span class="region-title">Region</span>
+                          <span class="region-title" id="region-step">Step 1 of 2</span>
                           <span class="region-live" id="region-live">stage —</span>
                         </div>
                         <p class="region-say" id="region-say">
-                          Drive the stage to a boundary, then click that edge or corner on the map.
+                          Drive to the bottom-left of your working area, then press Capture.
                         </p>
                       </div>
 
                       <div class="region-actions">
-                        <button type="button" class="region-btn region-apply" id="region-apply">Apply</button>
+                        <button type="button" class="region-btn region-go" id="region-capture">Capture</button>
+                        <button type="button" class="region-btn" id="region-back" hidden>Back</button>
                         <button type="button" class="region-btn" id="region-cancel">Cancel</button>
                         <button type="button" class="region-btn region-quiet" id="region-history-btn">History</button>
                       </div>
 
+                      {# A grid item of the strip, not of the text column: it
+                         needs the full width, and only exists in review. #}
                       <div class="region-bounds" id="region-bounds"></div>
 
                       <div class="region-history" id="region-history" hidden></div>

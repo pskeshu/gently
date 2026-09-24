@@ -1,21 +1,21 @@
 /**
- * The region editor's state, without a browser.
+ * The region walk, without a browser.
  *
  *   node --test tests/js/region-editor.test.mjs
  *
  * (Pass the file, not the directory — see operate-math.test.mjs.)
  *
- * The editor's job is to hold a proposed fence while the operator drives the
- * stage around, and to leave the rig exactly as it found it if they change
- * their mind. Both of those are decisions made in this module, before anything
- * is drawn, so this is where they can be checked.
+ * Two corners, driven to and captured. The editor's job is to hold a proposed
+ * fence while the operator drives the stage around, to say at every moment
+ * what it is asking for, and to leave the rig exactly as it found it if they
+ * change their mind. All three are decided here, before anything is drawn.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-// The module reaches for the strip's message line when it has something to
-// say. Nothing here renders, so a stub that swallows it is enough.
+// The module reaches for the strip when it has something to say. Nothing here
+// renders, so a stub that swallows it is enough.
 globalThis.document = { getElementById: () => null };
 
 const require = createRequire(import.meta.url);
@@ -39,24 +39,122 @@ function stubStage({ enforced = false, region = REGION, fail = false } = {}) {
     return posts;
 }
 
+/** Drive somewhere and take the corner. */
+function captureAt(x, y) {
+    R.setPosition(x, y);
+    return R.capture();
+}
+
 test('a stage it cannot read is not a region it can edit', async () => {
     stubStage({ fail: true });
     assert.equal(await R.open({}), false);
     assert.equal(R.isOpen(), false);
-    assert.equal(R.box(), null);
 });
 
-test('opening takes the applied region, and the travel it may grow into', async () => {
+test('it opens by asking for the first corner, in words', async () => {
     stubStage();
     assert.equal(await R.open({}), true);
-    assert.deepEqual(R.box(), REGION);
-    assert.deepEqual(R.travel(), TRAVEL);
+    assert.equal(R.step(), 'a');
+    assert.match(R.prompt(), /bottom-left/i);
+    assert.match(R.prompt(), /capture/i, 'it names the button it wants pressed');
+    assert.equal(R.box(), null, 'nothing is proposed before the first corner');
     await R.cancel({});
 });
 
-test('the firmware fence comes down to edit, and goes back up on cancel', async () => {
-    // It has to: the Tiger stops the joystick at the current box, so you
-    // could never drive to where a WIDER boundary belongs.
+test('the box follows the stage while you drive to the second corner', async () => {
+    // This is the whole of "point to the bottom left, then the top right":
+    // between the two presses the region is wherever the joystick is.
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    assert.equal(R.step(), 'b');
+
+    R.setPosition(-400, -200);
+    assert.deepEqual(R.box(), { x_min: -800, x_max: -400, y_min: -600, y_max: -200 });
+
+    R.setPosition(0, 100);
+    assert.deepEqual(R.box(), { x_min: -800, x_max: 0, y_min: -600, y_max: 100 },
+        'it grew with the stage, without a second press');
+    await R.cancel({});
+});
+
+test('two opposite corners in any order give the same region', async () => {
+    // The prompts name an order because a sequence needs one. The box does not.
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+    const walked = R.box();
+    await R.cancel({});
+
+    await R.open({});
+    captureAt(-200, 100);
+    captureAt(-800, -600);
+    assert.deepEqual(R.box(), walked, 'top-right first is not a mistake');
+    await R.cancel({});
+});
+
+test('pressing Capture twice in the same place is a double-press, not a region', async () => {
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    assert.equal(captureAt(-800, -600), false);
+    assert.equal(R.step(), 'b', 'still asking for the opposite corner');
+    assert.equal(R.isBad(), true);
+    assert.match(R.prompt(), /already took/i);
+    await R.cancel({});
+});
+
+test('Back undoes one step of the walk, and Redo restarts it', async () => {
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+    assert.equal(R.step(), 'review');
+
+    R.back();
+    assert.equal(R.step(), 'b', 'the second corner is given back');
+    R.back();
+    assert.equal(R.step(), 'a');
+    assert.equal(R.box(), null);
+    assert.equal(R.back(), false, 'there is nothing before the first corner');
+
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+    R.redo();
+    assert.equal(R.step(), 'a');
+    await R.cancel({});
+});
+
+test('after the walk, one edge can be moved without walking again', async () => {
+    // The common case is a single edge being slightly wrong, and re-walking
+    // both corners to fix it is a poor trade.
+    stubStage();
+    await R.open({});
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+
+    R.setPosition(-250.5, 190);
+    assert.equal(R.useStage('x_max'), true);
+    assert.equal(R.box().x_max, -250.5);
+    assert.equal(R.box().x_min, -800, 'the other edges stay where they were walked');
+
+    R.setBound('y_min', -700);
+    assert.equal(R.box().y_min, -700);
+    await R.cancel({});
+});
+
+test('edges cannot be nudged mid-walk, only once there is a box', async () => {
+    stubStage();
+    await R.open({});
+    R.setPosition(-250, 0);
+    assert.equal(R.useStage('x_max'), false, 'there is no box to correct yet');
+    await R.cancel({});
+});
+
+test('the firmware fence comes down to walk, and goes back up on cancel', async () => {
+    // It has to: the Tiger stops the joystick at the current box, so you could
+    // never drive to where a WIDER boundary belongs.
     const posts = stubStage({ enforced: true });
     await R.open({});
     assert.deepEqual(posts.map(p => p.body.enforced), [false]);
@@ -71,70 +169,17 @@ test('a fence that was already off is left off', async () => {
     assert.deepEqual(posts, []);
 });
 
-test('stamping an edge writes the live stage position into that bound', async () => {
-    stubStage();
-    await R.open({});
-    R.setPosition(-250.5, 190.0);
-    assert.equal(R.stamp('x-max'), true);
-    assert.equal(R.box().x_max, -250.5);
-    assert.equal(R.box().x_min, REGION.x_min, 'the other bounds are untouched');
-    assert.deepEqual(R.diff(), ['x max: 400.0 → -250.5']);
-    await R.cancel({});
-});
-
-test('a corner sets both of its edges at once', async () => {
-    stubStage();
-    await R.open({});
-    R.setPosition(-1000, -900);
-    R.stamp('min-min');
-    assert.deepEqual(
-        [R.box().x_min, R.box().y_min], [-1000, -900],
-        'the corner you are standing on is two bounds, not one',
-    );
-    await R.cancel({});
-});
-
-test('stamping past the opposite edge pushes it out rather than refusing', async () => {
-    // Refusing would mean explaining geometry to someone holding a joystick.
-    stubStage();
-    await R.open({});
-    R.setPosition(-950, 0);          // below the current x_min of -900
-    R.stamp('x-max');
-    assert.equal(R.box().x_max, -950);
-    assert.ok(R.box().x_min < R.box().x_max, 'the box still has an inside');
-    await R.cancel({});
-});
-
-test('with no position there is nothing to stamp', async () => {
-    stubStage();
-    await R.open({});
-    R.setPosition(NaN, NaN);
-    assert.equal(R.stamp('x-max'), false);
-    assert.deepEqual(R.box(), REGION);
-    await R.cancel({});
-});
-
-test('every target names bounds that exist', () => {
-    const known = new Set(['x_min', 'x_max', 'y_min', 'y_max']);
-    for (const [target, bounds] of Object.entries(R.TARGETS)) {
-        assert.ok(bounds.length === 1 || bounds.length === 2, target);
-        bounds.forEach(b => assert.ok(known.has(b), `${target} -> ${b}`));
-    }
-    assert.equal(Object.keys(R.TARGETS).length, 8, 'four edges and four corners');
-});
-
 test('nothing reaches the controller until Apply', async () => {
     const posts = stubStage();
     await R.open({});
-    R.setPosition(-250.5, 190.0);
-    R.stamp('x-max');
-    R.setBound('y_min', -700);
-    assert.deepEqual(posts, [], 'driving and stamping write nothing');
+    captureAt(-800, -600);
+    captureAt(-200, 100);
+    assert.deepEqual(posts, [], 'driving and capturing write nothing');
+
     assert.equal(await R.apply({}), true);
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].body.x_max, -250.5);
-    assert.equal(posts[0].body.y_min, -700);
-    assert.equal(R.isOpen(), false, 'applying closes the editor');
+    assert.deepEqual(posts[0].body, { x_min: -800, x_max: -200, y_min: -600, y_max: 100 });
+    assert.equal(R.isOpen(), false, 'applying closes the walk');
 });
 
 test('cancel stops only a camera the editor started', async () => {
@@ -147,4 +192,23 @@ test('cancel stops only a camera the editor started', async () => {
     await R.open({ startCamera: async () => {} });
     await R.cancel({ stopCamera: async () => { stopped++; } });
     assert.equal(stopped, 1);
+});
+
+test('every step says what it is asking for', async () => {
+    // The complaint that produced this rewrite was not a missing feature:
+    // "it is not clear, what it is asking".
+    stubStage();
+    await R.open({});
+    const seen = [];
+    seen.push(R.prompt());
+    captureAt(-800, -600);
+    seen.push(R.prompt());
+    captureAt(-200, 100);
+    seen.push(R.prompt());
+    assert.equal(seen.length, R.STEPS.length);
+    seen.forEach(line => {
+        assert.ok(line && line.length > 20, `a step says nothing useful: ${line}`);
+        assert.match(line, /[.!]$/, 'prompts are sentences');
+    });
+    await R.cancel({});
 });
