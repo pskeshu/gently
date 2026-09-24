@@ -370,28 +370,49 @@ class DeviceLayerServer(Service):
             # The operator-set region (Map → Edit region, #107) wins over the
             # code defaults when one has been saved.
             env = (self.config or {}).get("xy_envelope") or {}
-            # An operator who turned the limits OFF meant it, and meant it for
-            # whoever uses this controller next. Re-applying the region here
-            # would re-fence a Micro-Manager user days later, with nothing on
-            # their screen to connect it to.
-            if env.get("enforced") is False:
-                box = self._full_travel()
-                logger.warning(
-                    "XY firmware limits are OFF by operator choice — writing full travel"
+            # The operator's working region. Everything Gently commands stays
+            # inside this, always — it is the software envelope, checked in
+            # XYStage.set() before anything reaches the hardware.
+            region = {
+                "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
+                "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
+                "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
+                "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
+            }
+            # Whether that region is ALSO written into the Tiger. Opt-in, and
+            # off unless someone said otherwise: the firmware bound's only job
+            # over the software one is stopping a hand on the joystick, and it
+            # binds every other client of this controller — a Micro-Manager
+            # user gets a stage that stops short with nothing to explain it.
+            # On a rig driven by trained operators that is a deliberate
+            # choice, not a default.
+            enforced = env.get("enforced") is True
+            box = region if enforced else self._full_travel()
+            if not enforced:
+                logger.info(
+                    "XY firmware limits: full travel (the region is enforced in "
+                    "software; switch it on to bind the controller too)"
                 )
-            else:
-                box = {
-                    "x_min": float(env.get("x_min", XY_STAGE_X_MIN_UM)),
-                    "x_max": float(env.get("x_max", XY_STAGE_X_MAX_UM)),
-                    "y_min": float(env.get("y_min", XY_STAGE_Y_MIN_UM)),
-                    "y_max": float(env.get("y_max", XY_STAGE_Y_MAX_UM)),
-                }
             try:
                 xy_stage.set_firmware_limits(
                     x_min_mm=box["x_min"] / 1000.0,
                     x_max_mm=box["x_max"] / 1000.0,
                     y_min_mm=box["y_min"] / 1000.0,
                     y_max_mm=box["y_max"] / 1000.0,
+                )
+                # AFTER the firmware write, which sets the envelope from its
+                # own numbers. The region is the narrower of the two whenever
+                # the controller is left at full travel, and it is what Gently
+                # is held to either way.
+                # require_inside=False: a stage parked outside a saved region
+                # must not stop the device layer from starting. The region
+                # still binds every move after this.
+                xy_stage.set_software_limits(
+                    region["x_min"],
+                    region["x_max"],
+                    region["y_min"],
+                    region["y_max"],
+                    require_inside=False,
                 )
                 logger.info(
                     "ASI Tiger firmware soft limits applied (%s): "
@@ -2963,24 +2984,37 @@ class DeviceLayerServer(Service):
                 {"success": False, "error": "x_min, x_max, y_min, y_max (µm) required"},
                 status=400,
             )
+        saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
+        enforced = saved.get("enforced") is True
         try:
             async with self.pause_state_updates():
+                # The controller only hears about the region when enforcement
+                # is on. Applying a region is not the same as asking to fence
+                # every other client of this controller — that is its own
+                # switch, and it stays where the operator left it.
+                if enforced:
+                    await asyncio.to_thread(
+                        xy_stage.set_firmware_limits,
+                        box["x_min"] / 1000.0,
+                        box["x_max"] / 1000.0,
+                        box["y_min"] / 1000.0,
+                        box["y_max"] / 1000.0,
+                    )
+                # Always: this is what Gently itself is held to.
                 await asyncio.to_thread(
-                    xy_stage.set_firmware_limits,
-                    box["x_min"] / 1000.0,
-                    box["x_max"] / 1000.0,
-                    box["y_min"] / 1000.0,
-                    box["y_max"] / 1000.0,
+                    xy_stage.set_software_limits,
+                    box["x_min"],
+                    box["x_max"],
+                    box["y_min"],
+                    box["y_max"],
                 )
         except ValueError as exc:  # degenerate box, or stage outside it
             return web.json_response({"success": False, "error": str(exc)}, status=409)
         except Exception as exc:
             logger.exception("Envelope write failed")
             return web.json_response({"success": False, "error": str(exc)}, status=502)
-        # Defining a region is switching enforcement on: nobody walks the
-        # corners of a fence they want removed.
-        self._write_sidecar("xy_envelope", {**box, "enforced": True})
-        logger.warning("XY envelope set by operator: %s", box)
+        self._write_sidecar("xy_envelope", {**box, "enforced": enforced})
+        logger.warning("XY region set by operator: %s (firmware: %s)", box, enforced)
         return web.json_response(self._envelope_payload(xy_stage))
 
     async def handle_set_envelope_enforced(self, request):
@@ -3027,6 +3061,15 @@ class DeviceLayerServer(Service):
         else:
             box = self._full_travel()
 
+        # The region Gently is held to, whichever way the switch goes. Without
+        # this, turning enforcement OFF writes full travel to the controller
+        # AND — because set_firmware_limits sets the software envelope from
+        # its own numbers — quietly unbounds every move Gently makes.
+        region = (
+            {k: float(saved[k]) for k in keys}
+            if all(k in saved for k in keys)
+            else self._full_travel()
+        )
         try:
             async with self.pause_state_updates():
                 await asyncio.to_thread(
@@ -3035,6 +3078,13 @@ class DeviceLayerServer(Service):
                     box["x_max"] / 1000.0,
                     box["y_min"] / 1000.0,
                     box["y_max"] / 1000.0,
+                )
+                await asyncio.to_thread(
+                    xy_stage.set_software_limits,
+                    region["x_min"],
+                    region["x_max"],
+                    region["y_min"],
+                    region["y_max"],
                 )
         except ValueError as exc:  # stage outside the box it is being given
             return web.json_response({"success": False, "error": str(exc)}, status=409)
