@@ -206,6 +206,16 @@ class UISettings:
         default_factory=lambda: _env("REPLAY_TOTAL_BUDGET_MB", 1024.0)
     )
 
+    # What a projection shows of a SPIM frame. The camera's chip carries two
+    # channels side by side, and a frame read out at the chip's full width
+    # holds both: the left one bright, the right one a dim copy beside it.
+    # "left" or "right" shows that channel; "both" shows the frame as it came.
+    # A frame narrower than `spim_full_width` is one channel already and is
+    # never divided. This is about what is DRAWN. The volume on disk is the
+    # whole frame whatever is chosen here.
+    projection_view: str = field(default_factory=lambda: _env("PROJECTION_VIEW", "left"))
+    spim_full_width: int = field(default_factory=lambda: _env("SPIM_FULL_WIDTH", 2048))
+
     # Where Fiji is, for "Open in Fiji". Empty means look in the places it is
     # usually unpacked (gently/core/reveal.py). Never Micro-Manager's ImageJ:
     # starting that starts Micro-Manager, which takes the microscope's ports.
