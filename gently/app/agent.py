@@ -1350,9 +1350,17 @@ class MicroscopyAgent:
 
         self._update_system_prompt()
 
-    def import_embryos_from_session(self, session_id: str, clear_existing: bool = False) -> dict:
+    def import_embryos_from_session(
+        self,
+        session_id: str,
+        clear_existing: bool = False,
+        only: list[str] | None = None,
+    ) -> dict:
         """
         Import embryos from another session into the current experiment.
+
+        ``only`` names the embryos to bring in, and leaves the rest where they
+        are. It is how a removed embryo is restored.
 
         Reads embryo data from the store's database (primary) and falls back
         to the JSON snapshot if needed.
@@ -1407,6 +1415,9 @@ class MicroscopyAgent:
             session_data = self.store.load_session_snapshot(session_id)
             if session_data:
                 embryo_states = session_data.get("embryo_states", {})
+
+        if only is not None:
+            embryo_states = {k: v for k, v in embryo_states.items() if k in set(only)}
 
         if not embryo_states:
             return {

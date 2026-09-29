@@ -1816,9 +1816,27 @@ const OperateManager = (function () {
         // and comes back 405 — a confusing failure for a row that should
         // never have had a delete button. Refuse it here, at the funnel.
         if (!id) { toastFail('That row has no id — refresh the roster'); return; }
+        // The x is for a false positive, and it sits one row from an embryo
+        // imaged all night. One that holds something is asked about first.
+        // Nothing is deleted either way: the server moves the folder aside.
+        const emb = _embryos.find(e => e.id === id);
+        const name = emb ? `embryo ${labelFor(emb)}` : id;
+        const holds = heldBy(emb);
+        if (holds && !window.confirm(
+            `Remove ${name} from the list?\n\nIt has ${holds}. `
+            + 'Nothing is deleted: its files are kept in the session, and it can be restored.')) return;
         try {
             const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, { method: 'DELETE' });
-            if (!res.ok) throw Object.assign(new Error('delete failed'), { status: res.status });
+            if (!res.ok) {
+                throw Object.assign(new Error('delete failed'),
+                    { status: res.status, data: await res.json().catch(() => ({})) });
+            }
+            const d = await res.json().catch(() => ({}));
+            if (d.restorable && typeof showGentlyToast === 'function') {
+                showGentlyToast(`Removed ${name}. Nothing was deleted.`, 'Undo',
+                    () => restoreEmbryo(id), 12000);
+            }
+            readRemoved();
             // EMBRYOS_UPDATE will reconcile every view; prune optimistically so
             // the row disappears immediately even before the event lands.
             _embryos = _embryos.filter(e => e.id !== id);
@@ -1828,8 +1846,48 @@ const OperateManager = (function () {
             }
             publishRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
         } catch (e) {
-            toastFail(`Delete failed (${why(e)})`);
+            toastFail(`Not removed (${why(e)})`);
         }
+    }
+
+    /** What an embryo carries that a slip of the hand would take off the list. */
+    function heldBy(emb) {
+        if (!emb) return '';
+        const parts = [];
+        const n = Number(emb.timepoints_acquired) || 0;
+        if (n > 0) parts.push(`${n} timepoint${n === 1 ? '' : 's'}`);
+        const slope = Number((emb.calibration || {}).slope_um_per_deg);
+        if (Number.isFinite(slope) && slope !== 0) parts.push('a calibration');
+        return parts.join(' and ');
+    }
+
+    async function restoreEmbryo(id) {
+        if (!id) return;
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+            if (!res.ok) {
+                throw Object.assign(new Error('restore failed'),
+                    { status: res.status, data: await res.json().catch(() => ({})) });
+            }
+            toast(`${id.replace(/^embryo_/, 'Embryo ')} is back in the list`);
+            // EMBRYOS_UPDATE brings the row back.
+            readRemoved();
+        } catch (e) {
+            toastFail(`Not restored (${why(e)})`);
+        }
+    }
+
+    /** The embryos removed from this session, for the roster to list. */
+    async function readRemoved() {
+        let rows = [];
+        try {
+            const res = await fetch('/api/embryos/removed');
+            const d = res.ok ? await res.json() : {};
+            rows = Array.isArray(d.removed) ? d.removed : [];
+        } catch (e) {
+            rows = [];
+        }
+        SharedState.set('removedEmbryos', rows);
     }
 
     // Roles are read from the canonical embryo list and written through the
@@ -3026,6 +3084,8 @@ const OperateManager = (function () {
         roster: {
             select: (id, mode) => selectEmbryo(id, mode),
             remove: id => deleteEmbryo(id),
+            restore: id => restoreEmbryo(id),
+            readRemoved: () => readRemoved(),
             centre: id => {
                 const emb = _embryos.find(e => e.id === id);
                 if (emb) centerOnEmbryo(emb);
