@@ -12,7 +12,10 @@ const HomeApp = (() => {
     let _inited = false;
     const SESSIONS_N = 5;
     const CAMPAIGNS_N = 5;
-    const IMAGES_N = 8;
+    // The last few sessions whole, embryo by embryo: up to this many
+    // sessions, and this many images among them.
+    const IMAGES_N = 24;
+    const IMAGE_SESSIONS_N = 3;
     // Recent images are stable (latest projection per embryo). refresh() runs on
     // every Home-tab entry, so guard against redundant disk-walking fetches:
     // skip if one is in flight or the strip was loaded within IMAGES_TTL_MS.
@@ -42,6 +45,52 @@ const HomeApp = (() => {
     }
     if (typeof ClientEventBus !== 'undefined') {
         ['VOLUME_ACQUIRED', 'IMAGE_ACQUIRED', 'ACQUISITION_COMPLETED'].forEach(ev => ClientEventBus.on(ev, onImagery));
+    }
+
+    /**
+     * The images under their sessions, in the order they came: the latest
+     * session first, its embryos in order. `index` is the image's place in
+     * the whole list, which is what the Lightbox walks.
+     */
+    function groupBySession(images) {
+        const groups = [];
+        images.forEach((image, index) => {
+            let g = groups.find(x => x.session_id === image.session_id);
+            if (!g) {
+                g = {
+                    session_id: image.session_id,
+                    session_name: image.session_name,
+                    created_at: image.session_created_at,
+                    items: [],
+                };
+                groups.push(g);
+            }
+            g.items.push({ image, index });
+        });
+        groups.forEach(g => g.items.sort((a, b) =>
+            String(a.image.embryo_id).localeCompare(String(b.image.embryo_id), undefined, { numeric: true })));
+        return groups;
+    }
+
+    /** A session by its name if it was given one, else by when it was. */
+    function sessionTitle(g) {
+        const named = g.session_name && g.session_name !== g.session_id && g.session_name !== 'unnamed';
+        if (named) return g.session_name;
+        const t = g.created_at ? new Date(g.created_at) : null;
+        if (t && !isNaN(t)) {
+            return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+        return 'Session';
+    }
+
+    function embryoName(id) {
+        const m = String(id || '').match(/^embryo_(\d+)$/);
+        return m ? `embryo ${m[1]}` : String(id || '');
+    }
+
+    function liveSessionId() {
+        const link = document.getElementById('session-id-link');
+        return link ? link.textContent.trim() : '';
     }
 
     /** Open the strip's images in the Lightbox, starting at the one clicked. */
@@ -144,7 +193,8 @@ const HomeApp = (() => {
         if (!force && _imgState.at && (Date.now() - _imgState.at) < IMAGES_TTL_MS) return;
         _imgState.inflight = true;
         try {
-            const data = await (await fetch(`/api/home/recent-images?limit=${IMAGES_N}`)).json();
+            const data = await (await fetch(
+                `/api/home/recent-images?limit=${IMAGES_N}&sessions=${IMAGE_SESSIONS_N}`)).json();
             // Latest projection per embryo across recent sessions (server orders
             // most-recent session first).
             const recent = (data.images || []).slice(0, IMAGES_N);
@@ -160,16 +210,36 @@ const HomeApp = (() => {
             }));
             // A tile is a button to the image, and looks like one. It used to
             // be a div: "thumbnail only … not able to click them really".
-            el.innerHTML = '<div class="home-image-strip">' + _recent.map((s, i) => {
+            // Under its session: embryo_1 is a different embryo in every
+            // session, and a strip of them said nothing about which.
+            const tile = (s, i) => {
                 const tp = (s.timepoint != null) ? ` · t${s.timepoint}` : '';
-                const label = `${s.embryo_id || ''}${tp}`;
-                const sub = s.session_name && s.session_name !== s.session_id
-                    ? ` (${s.session_name})` : '';
-                return `<button type="button" class="home-image" data-home-image="${i}" title="${escapeHtml(label + sub)}">
+                const label = `${embryoName(s.embryo_id)}${tp}`;
+                // Two lines, on purpose: a tile is 84 px wide, and the name
+                // and the timepoint on one line wrapped wherever they fell.
+                const cap = escapeHtml(embryoName(s.embryo_id))
+                    + (s.timepoint != null ? `<br>t${escapeHtml(String(s.timepoint))}` : '');
+                const n = Number(s.timepoints) || 0;
+                const title = `${s.session_id}/${s.embryo_id}${tp}`
+                    + (n ? ` · ${n} timepoint${n === 1 ? '' : 's'}` : '');
+                return `<button type="button" class="home-image" data-home-image="${i}" title="${escapeHtml(title)}">
                     <img loading="lazy" src="${s.url}" alt="${escapeHtml(label)}">
-                    <span class="home-image-cap">${escapeHtml(label)}</span>
+                    <span class="home-image-cap">${cap}</span>
                 </button>`;
-            }).join('') + '</div>';
+            };
+            el.innerHTML = groupBySession(_recent).map(g => `
+                <div class="home-image-group" data-session="${escapeHtml(g.session_id)}">
+                    <div class="home-image-group-head">
+                        <span class="home-image-session">${escapeHtml(sessionTitle(g))}</span>
+                        <span class="home-image-session-id">${escapeHtml(g.session_id)}</span>
+                        ${g.session_id === liveSessionId() ? '<span class="home-image-live">open now</span>' : ''}
+                        <span class="home-image-group-count">${g.items.length} embryo${g.items.length === 1 ? '' : 's'}</span>
+                        ${typeof Reveal !== 'undefined' ? Reveal.button(
+                            { what: 'session', session_id: g.session_id }, 'show',
+                            { title: 'Open this session’s folder' }) : ''}
+                    </div>
+                    <div class="home-image-strip">${g.items.map(x => tile(x.image, x.index)).join('')}</div>
+                </div>`).join('');
             if (!el._openWired) {
                 el._openWired = true;
                 el.addEventListener('click', e => {
