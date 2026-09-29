@@ -502,7 +502,7 @@ readout, two-point calibration, and the SPIM laser/exposure controls. The
 
 The first build in which a biologist can take an experiment from a dish to a
 running multi-embryo timelapse without leaving Devices › Operate, and get it
-back after a restart. Sixty-nine pull requests since `v1.0.0.dev1`, nearly all
+back after a restart. Seventy-six pull requests since `v1.0.0.dev1`, nearly all
 of them started as a sentence somebody said at the microscope.
 
 A release candidate: everything below is merged, and the list under **Known**
@@ -537,7 +537,11 @@ it ends (#194, #195).
 - **Templates** (#197). A plan saves under a name and runs later as the
   sentence it was saved as.
 - **A subset of embryos** can be targeted for a run (#161). Role decides what
-  an embryo is for; selection decides which ones this run images.
+  an embryo is for; selection decides which ones this run images. With
+  several selected, each highlighted row says which it is, "selected" or
+  "target", instead of being a lighter or a darker blue (#220).
+- **Start is not offered while a run is going** (#217). The button went on
+  saying "Run tactic" over a tactic that was running.
 
 Three things that were quietly wrong are fixed on the way. The laser preset
 chosen on the pane was collected and never applied. Slices and exposure were
@@ -560,6 +564,18 @@ numbered from t2 over the volumes on disk.
   embryos, and the mode (#208).
 - The snapshot now follows the run and is written at shutdown (#206).
 
+**Removing an embryo deletes nothing** (#219)
+
+The × beside an embryo is for a false positive, and it sits one row from the
+embryo that has been imaged all night. It asked nothing, and it deleted the
+embryo's folder from disk: volumes, projections, traces, calibration.
+
+- A removed embryo's folder is moved, whole, to the session's `removed`
+  folder. Undo is on the toast, and after that the roster lists the removed
+  embryos, each with Restore. It still does after a restart.
+- An embryo that holds timepoints or a calibration is asked about first.
+- An embryo the run is imaging is refused, with where to stop it.
+
 **Calibration**
 
 Calibration has its own pane (#158) and shows its sweep where the operator
@@ -573,6 +589,9 @@ slope and an offset; its evidence was not. Every exposure, focus curve and
 montage went to the browser's memory and was gone at the next restart. Each
 run now leaves a folder under its embryo, whether it calibrated, was refused,
 failed or was aborted, and the pane shows the latest run's plots.
+
+The plots can be read (#220). They were drawn 600 px wide with 9 pt type and
+shown 126 px wide, where that type is three pixels tall.
 
 **The SPIM head, and stopping things**
 
@@ -640,17 +659,39 @@ candidate crop, which is what removes the bright out-of-focus edges of
 bubbles (#166). The boot banner says when SAM cannot run instead of promising
 it (#147), and a failed detect says which failure it was (#198).
 
+**Finding the files** (#221)
+
+Everything Gently keeps is a file, and the way to one was to know the layout
+and walk to it.
+
+- **Show file** and **Open in Fiji** in both image viewers, for the image on
+  screen. A timepoint is its volume: the viewer shows a projection, and what
+  opens in Fiji is the stack.
+- **Folder** on every session, on an embryo, on a calibration run, and for
+  the logs, the recordings, the config and the settings history.
+- Fiji is found where it is usually unpacked, or where Settings says it is.
+  Micro-Manager's ImageJ is never used: starting it starts Micro-Manager,
+  which takes the microscope's ports.
+- The window opens on the computer Gently runs on. A browser on another
+  computer is handed the path instead.
+
 **The chrome**
 
 - **The gate leads into the workspace** (#215). There was a page between
   them, and the only thing anyone pressed on it was Skip.
+- **The gate offers the last sessions to carry on from** (#222). A new
+  session is what is chosen, every time; carrying on is decided.
 - The rig moved into the header: device-layer state, start and stop, the log,
   water and room light are reachable from every tab (#174).
 - A boot is a notification, not a bar to dismiss (#180).
 - The build id copies in one click and says how old the build is (#172, #188).
 - A button beside the session id opens the session's folder in the file
   manager (#205).
-- Home's recent images update as volumes land, and open (#202).
+- Home's recent images update as volumes land, and open (#202). They are
+  under their sessions, embryo by embryo (#223).
+- A note's embryos are named with their session, `6f090787/embryo_1`. A note
+  was drawn with twenty-eight one-letter tags: its embryos had been given as
+  one string, and taken apart letter by letter (#218).
 - A failure toast says why, not just which number (#146).
 - `hidden` actually hides (#181).
 
@@ -677,8 +718,13 @@ it (#147), and a failed detect says which failure it was (#198).
 
 Merged and tested against fakes, not yet exercised on the microscope: the
 acquisition plan end to end, the DIC overview's light, calibration abort,
-keeping a calibration's images, Raise head over its full traverse, and
-resuming a run after a restart.
+keeping a calibration's images, Raise head over its full traverse,
+resuming a run after a restart, and resuming a session from the gate with
+the microscope on.
+
+The folder and Fiji buttons have been checked up to the click. Opening
+Explorer and starting Fiji were not exercised, because a run was going on
+the microscope computer.
 
 Two milestone issues need the microscope and are not done: the camera ROI
 readout (#125) and the two-point calibration's beam (#106).
