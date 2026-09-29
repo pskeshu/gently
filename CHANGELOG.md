@@ -502,7 +502,7 @@ readout, two-point calibration, and the SPIM laser/exposure controls. The
 
 The first build in which a biologist can take an experiment from a dish to a
 running multi-embryo timelapse without leaving Devices › Operate, and get it
-back after a restart. Seventy-eight pull requests since `v1.0.0.dev1`, nearly all
+back after a restart. Seventy-nine pull requests since `v1.0.0.dev1`, nearly all
 of them started as a sentence somebody said at the microscope.
 
 A release candidate: everything below is merged, and the list under **Known**
@@ -542,6 +542,11 @@ it ends (#194, #195).
   "target", instead of being a lighter or a darker blue (#220).
 - **Start is not offered while a run is going** (#217). The button went on
   saying "Run tactic" over a tactic that was running.
+- **A run that was stopped says so** (#228). A run started from a saved
+  tactic left that tactic "active" after Stop, with a Stop button that did
+  nothing. However a run ends, its tactic is done, and the run records how
+  it ended: a run stopped on purpose is no longer read as "interrupted" at
+  the next start. A paused run could not be stopped at all.
 
 Three things that were quietly wrong are fixed on the way. The laser preset
 chosen on the pane was collected and never applied. Slices and exposure were
@@ -681,6 +686,13 @@ and walk to it.
   them, and the only thing anyone pressed on it was Skip.
 - **The gate offers the last sessions to carry on from** (#222). A new
   session is what is chosen, every time; carrying on is decided.
+- **Diagnostics, a third switch on the gate** (#228). The recording of a run
+  that needed working out stopped at 120 MB, partway through it. With
+  Diagnostics on, everything on screen is recorded under larger limits and
+  the log files are in detail. The workspace says when it is on.
+- **Nobody is an anonymous eagle** (#228). A browser that has given no name
+  is called by its account, or by where it is: "At the microscope" or
+  "Guest".
 - The rig moved into the header: device-layer state, start and stop, the log,
   water and room light are reachable from every tab (#174).
 - A boot is a notification, not a bar to dismiss (#180).
