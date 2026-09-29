@@ -10,7 +10,9 @@ default-run = "gently-desktop"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2" }
+# `features = []` is what the Tauri CLI writes here on every build. Without
+# it a build left this file modified, and the build id said "-dirty".
+tauri = { version = "2", features = [] }
 
 # Windows Job Object: put the spawned Python (and its device-layer grandchild)
 # in a kill-on-close job so the whole tree dies when the shell exits or crashes.

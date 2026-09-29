@@ -1208,6 +1208,28 @@ def create_router(server) -> APIRouter:
             logger.exception("LED set command failed")
             raise HTTPException(status_code=502, detail=f"led failed: {exc}") from exc
 
+    @router.get("/api/devices/led/status")
+    async def led_status():
+        """Is the LED open? Read from hardware. Read-only route.
+
+        The Light panel has asked this since it was written, and there was
+        no route: every read was a 404, the LED was never known, and the
+        panel's mode (LED, laser, both, off) was "unknown" on every rig.
+        """
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            status = await client.get_led_status()
+        except Exception as exc:
+            logger.exception("LED read failed")
+            raise HTTPException(status_code=502, detail=f"led read failed: {exc}") from exc
+        if isinstance(status, dict) and status.get("success") is False:
+            # The device layer answers 200 with success false. Unread is not
+            # the same as closed, and must not be shown as it.
+            raise HTTPException(status_code=502, detail=status.get("error") or "led read failed")
+        return status
+
     @router.post("/api/devices/laser/off", dependencies=[Depends(require_control)])
     async def laser_off():
         """Gate ALL laser lines off via the Laser config group "ALL OFF" preset.
@@ -2293,6 +2315,52 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"envelope set failed: {exc}") from exc
         if not res.get("success", True):
             raise HTTPException(status_code=409, detail=res.get("error", "refused"))
+        return res
+
+    @router.post("/api/devices/stage/region/restore", dependencies=[Depends(require_control)])
+    async def stage_region_restore(request: Request, payload: dict = Body(...)):  # noqa: B008
+        """Bring an earlier region back. Body: {"applied_at": str}.
+
+        The Map's region history has had a Restore on every row since it was
+        written, and there was no route for it here, no method on the client
+        and no route in the device layer: only the handler, never registered.
+        Every Restore was a 404.
+        """
+        from gently.core import settings_history
+
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        applied_at = payload.get("applied_at")
+        if not applied_at or not isinstance(applied_at, str):
+            raise HTTPException(status_code=400, detail="applied_at required")
+        keys = ("x_min", "x_max", "y_min", "y_max")
+        before: dict = {}
+        try:
+            got = await client.get_stage_envelope()
+            region = (got or {}).get("region") or {}
+            before = {k: region.get(k) for k in keys} if isinstance(region, dict) else {}
+        except Exception:
+            before = {}
+        try:
+            res = await client.restore_stage_region(applied_at, session_id=_session_id_now())
+        except Exception as exc:
+            logger.exception("region restore failed")
+            raise HTTPException(status_code=502, detail=f"region restore failed: {exc}") from exc
+        if not res.get("success", True):
+            error = str(res.get("error") or "refused")
+            status = 404 if "no region" in error else 409
+            raise HTTPException(status_code=status, detail=error)
+        after = res.get("region") or {}
+        settings_history.record_diff(
+            "microscope.xyRegion",
+            before,
+            {k: after.get(k) for k in keys} if isinstance(after, dict) else {},
+            reach="rig",
+            via=f"Map: restored the region of {applied_at}",
+            session_id=_session_id_now(),
+            **_who(request),
+        )
         return res
 
     @router.post("/api/devices/stage/envelope/enforced", dependencies=[Depends(require_control)])

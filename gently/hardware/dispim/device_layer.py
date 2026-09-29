@@ -3252,12 +3252,15 @@ class DeviceLayerServer(Service):
         applied_at = body.get("applied_at") if isinstance(body, dict) else None
         if not applied_at:
             return web.json_response({"success": False, "error": "applied_at required"}, status=400)
-        record = xy_region.restore(str(applied_at), session_id=body.get("session_id"))
-        if record is None or record.current is None:
+        # Looked up, not yet restored. The record used to be changed here,
+        # before the controller was written to, so a write the controller
+        # refused left a region on record that no stage was held to.
+        past = xy_region.find(str(applied_at))
+        if past is None:
             return web.json_response(
                 {"success": False, "error": "no region with that timestamp"}, status=404
             )
-        box = record.current.box
+        box = past.box
         saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
         enforced = saved.get("enforced") is True
         try:
@@ -3282,6 +3285,7 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.exception("Region restore failed")
             return web.json_response({"success": False, "error": str(exc)}, status=502)
+        xy_region.restore(str(applied_at), session_id=body.get("session_id"))
         self._write_sidecar("xy_envelope", {**box, "enforced": enforced})
         logger.warning("XY region restored to %s", box)
         return web.json_response(self._envelope_payload(xy_stage))
@@ -4468,6 +4472,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
         self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)
         self._app.router.add_post("/api/stage/envelope/enforced", self.handle_set_envelope_enforced)
+        self._app.router.add_post("/api/stage/region/restore", self.handle_restore_region)
         self._app.router.add_get("/api/stage/joystick", self.handle_get_joystick)
         self._app.router.add_post("/api/stage/joystick", self.handle_set_joystick)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
