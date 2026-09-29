@@ -1,9 +1,6 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
 import logging
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,15 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 def _open_in_file_manager(path: Path) -> None:
-    """Show ``path`` in the OS file manager: Explorer, Finder, or the
-    desktop's default. Runs on the machine the backend runs on — under the
-    desktop shell that is the operator's own screen."""
-    if sys.platform.startswith("win"):
-        os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])  # noqa: S603, S607
-    else:
-        subprocess.Popen(["xdg-open", str(path)])  # noqa: S603, S607
+    """Show ``path`` in the OS file manager. Kept for the routes that were
+    here first; ``gently/core/reveal.py`` is where it is done."""
+    from gently.core import reveal
+
+    reveal.open_folder(path)
 
 
 def create_router(server) -> APIRouter:

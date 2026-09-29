@@ -44,6 +44,7 @@ TOGGLED_CLASSES = [
     "region-strip",
     "region-history",
     "region-cam-ph",
+    "reveal-btn",
 ]
 
 

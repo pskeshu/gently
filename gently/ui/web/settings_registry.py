@@ -548,6 +548,32 @@ SETTINGS: list[Setting] = [
         source="network.viz_port",
     ),
     Setting(
+        key="system.fiji.found",
+        label="Fiji",
+        help="Where Fiji was found. Images open in it from the viewer's Open in Fiji button.",
+        category="system",
+        group="Other programs",
+        type="readonly",
+        reach=RIG,
+        source="computed:fiji",
+    ),
+    Setting(
+        key="system.fiji.path",
+        label="Where Fiji is",
+        help="Leave empty and Gently looks where Fiji is usually unpacked. Give the "
+        "program itself or the folder it is in. Micro-Manager's ImageJ is refused: "
+        "starting it starts Micro-Manager, which takes the microscope.",
+        category="system",
+        group="Other programs",
+        type="text",
+        default="",
+        reach=RIG,
+        applies=RESTART,
+        store="env:GENTLY_FIJI_PATH",
+        source="ui.fiji_path",
+        readers=(("gently/settings.py", "FIJI_PATH"),),
+    ),
+    Setting(
         key="system.timeout.volume",
         label="Volume acquisition",
         category="system",
@@ -718,6 +744,11 @@ def _dig(obj: Any, dotted: str) -> Any:
 def _computed(name: str) -> Any:
     if name == "api_key":
         return "present" if os.getenv("ANTHROPIC_API_KEY") else "not set"
+    if name == "fiji":
+        from gently.ui.web.routes.reveal import fiji_path
+
+        found = fiji_path()
+        return str(found) if found else "not found"
     if name == "build":
         from gently._version import build_date, build_id
 

@@ -22,6 +22,7 @@ from .notebook import create_router as create_notebook_router
 from .operation_plan import create_router as create_operation_plan_router
 from .pages import create_router as create_pages_router
 from .replay import create_router as create_replay_router
+from .reveal import create_router as create_reveal_router
 from .roles import create_router as create_roles_router
 from .sessions import create_router as create_sessions_router
 from .tactic_library import create_router as create_tactic_library_router
@@ -55,6 +56,7 @@ def register_all_routes(server):
         create_dic_router,
         create_calibration_records_router,
         create_replay_router,
+        create_reveal_router,
     ):
         router = factory(server)
         server.app.include_router(router)

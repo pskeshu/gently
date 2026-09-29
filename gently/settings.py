@@ -206,6 +206,11 @@ class UISettings:
         default_factory=lambda: _env("REPLAY_TOTAL_BUDGET_MB", 1024.0)
     )
 
+    # Where Fiji is, for "Open in Fiji". Empty means look in the places it is
+    # usually unpacked (gently/core/reveal.py). Never Micro-Manager's ImageJ:
+    # starting that starts Micro-Manager, which takes the microscope's ports.
+    fiji_path: str = field(default_factory=lambda: _env("FIJI_PATH", ""))
+
 
 @dataclass(frozen=True)
 class Settings:

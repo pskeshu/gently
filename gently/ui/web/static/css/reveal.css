@@ -1,0 +1,72 @@
+/* Reveal: the buttons that show a thing in the file manager or in Fiji.
+   See static/js/reveal.js. */
+
+.reveal-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary, #475569);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.3;
+    white-space: nowrap;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.reveal-btn[hidden] { display: none; }
+
+.reveal-btn:hover,
+.reveal-btn:focus-visible {
+    border-color: var(--accent, #3b82f6);
+    color: var(--accent, #3b82f6);
+    outline: none;
+}
+
+.reveal-btn svg { flex: 0 0 auto; }
+
+/* Fiji's button is there where Fiji is, and where a window it opened would
+   be seen: reveal.js says so on <html>. A button drawn later is already
+   right, which a pass over the buttons that existed would not make it. */
+.reveal-fiji { display: none; }
+html[data-reveal-fiji="1"] .reveal-fiji { display: inline-flex; }
+
+/* In the viewers, over an image: on dark. */
+.lightbox-reveal {
+    display: inline-flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.lightbox-reveal + .lightbox-close { margin-left: 0; }
+
+.dic-viewer-reveal {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    min-height: 26px;
+}
+
+.lightbox-reveal .reveal-btn,
+.dic-viewer-reveal .reveal-btn {
+    border-color: rgba(255, 255, 255, 0.22);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.lightbox-reveal .reveal-btn:hover,
+.dic-viewer-reveal .reveal-btn:hover {
+    border-color: #fff;
+    color: #fff;
+}
+
+.session-folder-btn { margin-top: 8px; margin-left: 6px; }
+.session-item .session-folder-btn:first-of-type { margin-left: 0; }
+.reasoning-embryo-info .reveal-btn { margin-left: 0.5rem; }
+.detail-panel-header .reveal-btn { margin-left: 6px; }
+.events-toolbar > .reveal-btn { margin: 0 8px; }
+.settings-reveal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#settings-history-file .reveal-btn { margin-left: 8px; }

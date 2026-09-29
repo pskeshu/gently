@@ -609,6 +609,13 @@ const SettingsHistory = {
             const rows = (d && d.changes) || [];
             if (where && d) {
                 where.textContent = `${d.total} change${d.total === 1 ? '' : 's'} kept in ${d.file}`;
+                // textContent took the button with it; the file is on disk
+                // once there is a change in it.
+                if (d.total && typeof Reveal !== 'undefined') {
+                    where.insertAdjacentHTML('beforeend', Reveal.button(
+                        { what: 'settings_history' }, 'show',
+                        { label: 'Show the file', title: 'Show the history file in its folder' }));
+                }
             }
             if (!rows.length) { host.innerHTML = '<div class="settings-hint">No setting has been changed yet.</div>'; return; }
             host.innerHTML = '<table class="settings-history"><thead><tr>' +
