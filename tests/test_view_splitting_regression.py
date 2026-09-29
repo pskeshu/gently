@@ -124,11 +124,18 @@ class TestLoadVolume:
 
 
 class TestGenerateJpegProjection:
-    """The already-correct reference path — guards against re-introduction."""
+    """The projection on disk. What it shows of a full-width frame is the
+    rig's setting now (tests/test_projections_show_one_channel.py), so this
+    case says which: with the whole frame asked for, nothing is discarded,
+    and no frame is ever divided because of its shape."""
 
-    def test_right_half_marker_survives(self, tmp_path):
+    def test_right_half_marker_survives(self, tmp_path, monkeypatch):
         pytest.importorskip("PIL")
+        from gently.core import imaging
         from gently.core.imaging import generate_jpeg_projection
+
+        whole = imaging.shown_channel
+        monkeypatch.setattr(imaging, "shown_channel", lambda vol: whole(vol, "both", 2048))
 
         out = tmp_path / "proj.jpg"
         result = generate_jpeg_projection(make_right_half_marked_volume(), out)

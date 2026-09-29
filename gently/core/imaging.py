@@ -274,6 +274,48 @@ def compress_image_for_api(
     return b64, size_kb
 
 
+VIEWS = ("left", "right", "both")
+
+
+def shown_channel(
+    volume: np.ndarray, view: str | None = None, full_width: int | None = None
+) -> np.ndarray:
+    """The part of a SPIM frame a projection shows.
+
+    The camera's chip carries two channels side by side. A frame read out at
+    the chip's full width holds both, the left one bright and the right one
+    a dim copy beside it, and a projection of all of it is mostly empty
+    field with the embryo small in one corner.
+
+    This has been decided three ways. First the left half was taken whenever
+    a frame was twice as wide as tall, which cut a centred embryo in two in
+    a frame that was one channel to begin with (1024 x 512). Then nothing
+    was ever divided, which is how projections came to show both channels.
+    The shape of a frame does not say what is in it. What says it is the
+    rig: how wide a full readout is, and which channel is wanted. Both are
+    settings (``ui.spim_full_width``, ``ui.projection_view``).
+
+    Only a frame at least as wide as a full readout is divided. Anything
+    narrower is one channel already and comes back as it is.
+    """
+    if view is None or full_width is None:
+        from gently.settings import settings
+
+        view = settings.ui.projection_view if view is None else view
+        full_width = settings.ui.spim_full_width if full_width is None else full_width
+    view = str(view).strip().lower()
+    if view not in VIEWS:
+        logger.warning("projection view %r is not one of %s; showing the frame whole", view, VIEWS)
+        return volume
+    if view == "both" or volume.ndim < 2:
+        return volume
+    width = volume.shape[-1]
+    if full_width <= 0 or width < full_width:
+        return volume
+    half = width // 2
+    return volume[..., :half] if view == "left" else volume[..., half:]
+
+
 def generate_jpeg_projection(
     volume: np.ndarray,
     output_path: Path,
@@ -304,16 +346,16 @@ def generate_jpeg_projection(
         return None
 
     try:
-        # Build the three-orthogonal-view layout (the projection we actually
-        # want — matches what the perceiver sees). For an explicit 4D
-        # (Views, Z, Y, X) volume, use View A. For a 3D volume, project the
-        # whole thing — do NOT try to split views by aspect ratio: the embryo
-        # is often centered and straddles the X midline, so a width-based
-        # "dual-view" guess slices it in half (the XY-rendered-halfway bug).
+        # Build the three-orthogonal-view layout. For an explicit 4D
+        # (Views, Z, Y, X) volume, use View A. For a 3D volume, the channel
+        # the rig's settings say to show. NOT by the frame's aspect ratio:
+        # that guess cut a centred embryo in two (the XY-rendered-halfway
+        # bug). See shown_channel.
         vol = np.squeeze(volume)
         if vol.ndim == 4:
             vol = vol[0]
         if vol.ndim == 3:
+            vol = shown_channel(vol)
             normalized, _ = projection_three_view(vol)
         else:
             normalized = normalize_to_uint8(vol, method="percentile", p_low=1, p_high=99.5)
