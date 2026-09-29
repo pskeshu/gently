@@ -133,7 +133,7 @@ async def sc_no_create_campaign(page, url):
 
 
 async def sc_temperature_alerts(page, url):
-    await _goto(page, url, "/settings")
+    await _goto(page, url, "/#settings")
     alerts = await _count_text(page, r"alert|threshold.*(alarm|notify)|out.?of.?range")
     return f"temperature-alert controls in Settings: {alerts} (no drift/out-of-range/fault alerting exists)"
 

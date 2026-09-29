@@ -55,35 +55,28 @@ const EmbryosManager = {
     // Multi-view system
     currentView: 'default',  // 'default' | 'board' | 'filmstrip' | 'vitals'
 
-    // Dashboard config (loaded from localStorage)
+    // What the views ship with. Each key is declared in the settings
+    // registry with the line that reads it; eight that nothing read are gone.
+    // What is in effect is this, under the rig's defaults, under what this
+    // browser has chosen: see SettingsStore.
     dashboardConfig: {
         defaultView: 'default',
         board: {
             columns: ['stage', 'clock', 'stereo', 'pace', 'eta', 'sparkline', 'alert'],
             sparklineLength: 20,
-            warnOvertimeRatio: 1.5,
-            criticalOvertimeRatio: 2.5
+            warnOvertimeRatio: 1.5
         },
         filmstrip: {
             thumbnailSize: 56,
             showStageLabels: true,
-            skipInterval: 1,
-            borderEncoding: 'stage'
+            skipInterval: 1
         },
         vitals: {
-            temperatureModel: '20C',
-            showExpectedLine: true,
-            timeAxis: 'elapsed'
-        },
-        detail: {
-            imageSplitRatio: 40,
-            autoAdvance: false,
-            showContrastive: true
+            showExpectedLine: true
         },
         ambient: {
             enabled: true,
-            sensitivity: 'normal',
-            audioTick: false
+            sensitivity: 'normal'
         }
     },
 
@@ -197,6 +190,21 @@ const EmbryosManager = {
         ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data));
         // A run that started before this page did has frames on disk already.
         ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip());
+        // A setting changed, here or in Settings: the views are redrawn with
+        // it. The rig's defaults arrive a moment after load; if they name a
+        // different opening view and nobody has chosen one yet, that is shown.
+        ClientEventBus.on('SETTINGS_CHANGED', (d) => {
+            this.loadDashboardConfig();
+            const opens = this.dashboardConfig.defaultView;
+            if (d && d.source === 'rig' && !this._viewChosen && opens && opens !== this.currentView) {
+                this.switchView(opens);
+                this._viewChosen = false;
+                return;
+            }
+            this._renderActiveView();
+            this.updateAmbientPulse();
+        });
+        if (typeof SettingsStore !== 'undefined') SettingsStore.loadRigDefaults();
         this._wireDicStrip();
         this.refreshDicStrip();
     },
@@ -361,6 +369,7 @@ const EmbryosManager = {
     switchView(viewName) {
         if (!['default', 'board', 'filmstrip', 'vitals'].includes(viewName)) return;
         this.currentView = viewName;
+        this._viewChosen = true;
         // Hide all view containers
         ['default', 'board', 'filmstrip', 'vitals'].forEach(v => {
             const el = document.getElementById(`view-${v}`);
@@ -411,11 +420,14 @@ const EmbryosManager = {
 
     loadDashboardConfig() {
         try {
-            const stored = localStorage.getItem('gently-dashboard-config');
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                // Deep merge with defaults
-                this.dashboardConfig = this._deepMerge(this.dashboardConfig, parsed);
+            // The shipped values are kept aside, so a reload after a setting
+            // is cleared goes back to them and not to what was last merged.
+            if (!this._shippedConfig) this._shippedConfig = JSON.parse(JSON.stringify(this.dashboardConfig));
+            if (typeof SettingsStore !== 'undefined') {
+                this.dashboardConfig = SettingsStore.merged(this._shippedConfig);
+            } else {
+                const stored = localStorage.getItem('gently-dashboard-config');
+                this.dashboardConfig = this._deepMerge(this._shippedConfig, stored ? JSON.parse(stored) : {});
             }
             // Migrate legacy board columns: drop the never-populated
             // 'confidence' column and the misleading 'rate' column in

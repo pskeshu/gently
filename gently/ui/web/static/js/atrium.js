@@ -677,7 +677,7 @@ const Atrium = (() => {
         c.innerHTML = `
           <div id="atr-tl">
             <div id="atr-hint">Atrium · drag to pan · wheel to zoom · Backspace back
-              <a href="/settings" id="atr-settings">settings</a>
+              <a href="/#settings" id="atr-settings">settings</a>
               <a href="#" id="atr-off">exit</a></div>
             <div id="atr-chips"></div>
           </div>
@@ -872,6 +872,10 @@ const Atrium = (() => {
         } catch (_) { /* private mode */ }
     }
     function wanted() {
+        // Settings is a tab, and it is where the Atrium is switched off. A link
+        // to it opens the tabs, or the switch would be behind the thing it
+        // switches.
+        if (/^#settings\b/.test(location.hash)) return false;
         return new URLSearchParams(location.search).get('atrium') === '1' || preferred();
     }
 

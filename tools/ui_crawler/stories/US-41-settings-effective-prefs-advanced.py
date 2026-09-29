@@ -15,14 +15,18 @@ META = {
 
 
 async def flow(page, url, rec):
-    await goto(page, url, "/settings")
-    effective = await exists(page, "#section-effective") and await exists(page, "#effective-config")
+    await goto(page, url, "/#settings")
+    effective = await exists(page, "#settings-block-effective") and await exists(
+        page, "#effective-config"
+    )
     prefs = (
         await exists(page, "#pref-export")
         and await exists(page, "#pref-import")
         and await exists(page, "#pref-save-defaults")
     )
-    advanced = await exists(page, "#section-advanced") and await exists(page, "#adv-save")
+    # Restart-required tunables are rows of the System category now, drawn
+    # from the registry; the history block sits beside them.
+    advanced = await exists(page, "#settings-block-history") and await exists(page, "#settings-nav")
     await rec.shot("settings-config")
     if effective and prefs and advanced:
         rec.ok(
