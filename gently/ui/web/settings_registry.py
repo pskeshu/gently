@@ -292,6 +292,22 @@ SETTINGS: list[Setting] = [
         href="devices",
     ),
     Setting(
+        key="experiment.calibrationImages",
+        label="Keep what a calibration looked at",
+        help="Every exposure and plot of each run, kept with the embryo. A run is sixty "
+        "to eighty exposures, so keeping them all costs disk.",
+        category="experiment",
+        group="Calibration",
+        type="choice",
+        default="all",
+        reach=RIG,
+        applies=RESTART,
+        store="env:GENTLY_CALIBRATION_IMAGES",
+        source="storage.calibration_images",
+        choices=(("all", "Everything"), ("plots", "Plots only"), ("none", "Nothing")),
+        readers=(("gently/core/calibration_record.py", "calibration_images"),),
+    ),
+    Setting(
         key="experiment.detection",
         label="Detection options",
         help="Whether Claude and SAM take part in finding embryos, and how permissive to be.",

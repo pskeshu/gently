@@ -40,6 +40,111 @@ from .hardware_common import (  # noqa: E402
     select_view_and_crop_roi,
 )
 
+# ── what a calibration looks at, it keeps ──────────────────────────────────
+# Every frame, curve and montage used to go to the browser's image store and
+# nowhere else, so it was gone at the next restart and a fit was numbers with
+# nothing behind them. See gently/core/calibration_record.py.
+
+
+def _recording(agent, embryo_id: str):
+    """The record open for this embryo's calibration, or None."""
+    records = getattr(agent, "_calibration_records", None)
+    return records.get(embryo_id) if isinstance(records, dict) else None
+
+
+def _show(agent, *, array, uid, data_type, metadata=None):
+    """Show an image, and keep it if this embryo's calibration is recording.
+
+    Every image calibration produces goes through here. Showing is for whoever
+    is watching now; keeping is for whoever asks later why a fit is what it is.
+    """
+    metadata = metadata or {}
+    if getattr(agent, "viz_server", None):
+        agent.push_viz(array=array, uid=uid, data_type=data_type, metadata=metadata)
+    record = _recording(agent, str(metadata.get("embryo_id") or ""))
+    if record is not None:
+        record.add(array, data_type, metadata, uid=uid)
+
+
+def records_calibration(fn):
+    """Keep what a calibration run looked at, whatever came of it.
+
+    Opens a record before the routine starts and closes it when it ends:
+    calibrated, refused, failed, or aborted. The ones that did not work are
+    the ones somebody will want to look at.
+    """
+    import asyncio
+    import functools
+    import inspect
+
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            bound = sig.bind_partial(*args, **kwargs)
+            asked = dict(bound.arguments)
+        except TypeError:
+            asked = dict(kwargs)
+        context = asked.pop("context", None)
+        embryo_id = str(asked.get("embryo_id") or "")
+        agent = ctx_get(context, "agent")
+        record = _open_record(agent, embryo_id, asked)
+        try:
+            result = await fn(*args, **kwargs)
+        except asyncio.CancelledError:
+            _close_record(agent, embryo_id, record, "aborted", "Aborted by the operator")
+            raise
+        except BaseException as exc:
+            _close_record(agent, embryo_id, record, "failed", str(exc))
+            raise
+        _close_record(agent, embryo_id, record, _outcome(result), result)
+        return result
+
+    return wrapper
+
+
+def _outcome(result) -> str:
+    text = str(result or "").lstrip()
+    if text.startswith("\u2713"):
+        return "calibrated"
+    if text.startswith(NO_OBJECT_PREFIX):
+        return "refused"
+    return "failed"
+
+
+def _open_record(agent, embryo_id: str, asked: dict):
+    store = getattr(agent, "store", None)
+    session_id = getattr(agent, "session_id", None)
+    if agent is None or store is None or not session_id or not embryo_id:
+        return None
+    if not hasattr(store, "open_calibration_record"):
+        return None
+    try:
+        record = store.open_calibration_record(session_id, embryo_id, requested=asked)
+    except Exception as exc:
+        logger.warning("calibration of %s will not be recorded: %s", embryo_id, exc)
+        return None
+    records = getattr(agent, "_calibration_records", None)
+    if not isinstance(records, dict):
+        records = {}
+        agent._calibration_records = records
+    records[embryo_id] = record
+    return record
+
+
+def _close_record(agent, embryo_id: str, record, outcome: str, message) -> None:
+    if record is None:
+        return
+    try:
+        embryo = getattr(getattr(agent, "experiment", None), "embryos", {}).get(embryo_id)
+        fit = getattr(embryo, "calibration", None) if outcome == "calibrated" else None
+        record.finish(outcome, message=str(message or ""), calibration=fit or None)
+    finally:
+        records = getattr(agent, "_calibration_records", None)
+        if isinstance(records, dict) and records.get(embryo_id) is record:
+            records.pop(embryo_id, None)
+
 
 async def _adaptive_focus_sweep(
     client,
@@ -132,8 +237,9 @@ async def _adaptive_focus_sweep(
             decision = sparse_state.add_point(float(piezo), float(score))
 
             # Push to viz server
-            if agent.viz_server:
-                agent.push_viz(
+            if agent.viz_server or _recording(agent, embryo_id):
+                _show(
+                    agent,
                     array=img,
                     uid=f"focus_sparse_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -191,8 +297,9 @@ async def _adaptive_focus_sweep(
             logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
-            if agent.viz_server:
-                agent.push_viz(
+            if agent.viz_server or _recording(agent, embryo_id):
+                _show(
+                    agent,
                     array=img,
                     uid=f"focus_dense_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -255,7 +362,7 @@ async def _adaptive_focus_sweep(
     }
 
     # Push focus curve plot
-    if agent.viz_server and len(dense_state.positions) >= 4:
+    if (agent.viz_server or _recording(agent, embryo_id)) and len(dense_state.positions) >= 4:
         try:
             positions = np.array(dense_state.positions)
             scores = np.array(dense_state.scores)
@@ -273,7 +380,8 @@ async def _adaptive_focus_sweep(
                 r_squared=r_squared,
                 title=f"{embryo_id} - {galvo_name.upper()} Focus Curve (Adaptive)",
             )
-            agent.push_viz(
+            _show(
+                agent,
                 array=plot_img,
                 uid=f"focus_curve_{embryo_id}_{galvo_name}",
                 data_type="focus_plot",
@@ -366,8 +474,9 @@ async def _fine_focus_sweep(
             logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
-            if agent.viz_server:
-                agent.push_viz(
+            if agent.viz_server or _recording(agent, embryo_id):
+                _show(
+                    agent,
                     array=img,
                     uid=f"focus_fine_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -431,7 +540,7 @@ async def _fine_focus_sweep(
     }
 
     # Push focus curve plot
-    if agent.viz_server and len(piezo_scores) >= 4:
+    if (agent.viz_server or _recording(agent, embryo_id)) and len(piezo_scores) >= 4:
         try:
             positions_arr = np.array([p for p, _ in piezo_scores])
             scores_arr = np.array([s for _, s in piezo_scores])
@@ -444,7 +553,8 @@ async def _fine_focus_sweep(
                 r_squared=r_squared,
                 title=f"{embryo_id} - {galvo_name.upper()} Focus Curve (Fine-Only)",
             )
-            agent.push_viz(
+            _show(
+                agent,
                 array=plot_img,
                 uid=f"focus_curve_{embryo_id}_{galvo_name}",
                 data_type="focus_plot",
@@ -530,9 +640,10 @@ async def hybrid_focus_selection(
     montage = create_focus_montage(images, labels=labels, offsets=offsets)
 
     def _push_montage(pick: str, method: str, reasoning: str | None = None) -> None:
-        if not getattr(agent, "viz_server", None):
+        if not (getattr(agent, "viz_server", None) or _recording(agent, embryo_id)):
             return
-        agent.push_viz(
+        _show(
+            agent,
             array=montage,
             uid=f"focus_montage_{embryo_id}",
             data_type="focus_montage",
@@ -973,6 +1084,7 @@ acquisition.""",
         ToolExample("More Z padding", {"embryo_id": "embryo_1", "z_buffer_um": 25.0}),
     ],
 )
+@records_calibration
 async def calibrate_embryo(
     embryo_id: str,
     skip_edge_detection: bool = False,
@@ -1363,8 +1475,8 @@ async def calibrate_embryo(
         if total_exposures > 0:
             embryo.record_exposure(exposure_ms=50.0, num_frames=total_exposures)
 
-        # Push calibration summary plot to viz server
-        if agent.viz_server:
+        # The summary plot: shown to whoever is watching, kept either way.
+        if agent.viz_server or _recording(agent, embryo_id):
             try:
                 summary_plot = generate_calibration_summary_plot(
                     embryo_id=embryo_id,
@@ -1377,7 +1489,8 @@ async def calibrate_embryo(
                     r_squared_top=results["top"]["r_squared"],
                     r_squared_bottom=results["bottom"]["r_squared"],
                 )
-                agent.push_viz(
+                _show(
+                    agent,
                     array=summary_plot,
                     uid=f"calibration_summary_{embryo_id}",
                     data_type="calibration_summary",
@@ -1584,8 +1697,11 @@ async def observe_at_galvo(
             feature_score,
             (description or "")[:40],
         )
-        if agent is not None and getattr(agent, "viz_server", None):
-            agent.push_viz(
+        if agent is not None and (
+            getattr(agent, "viz_server", None) or _recording(agent, embryo_id)
+        ):
+            _show(
+                agent,
                 array=img_norm,
                 uid=uid or f"edge_detect_{embryo_id}_{galvo:.3f}",
                 data_type=data_type,

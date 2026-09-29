@@ -765,6 +765,16 @@
                         <span class="op-num" id="op-cal-target">no embryo selected</span></div>
                       <div class="op-row"><span class="op-label">Piezo–galvo</span>
                         <span class="op-num" id="op-cal-result">—</span></div>
+                      {# What the calibration looked at, kept with the embryo: the
+                         latest run's plots, and every image behind a click. #}
+                      <div class="op-cal-kept" id="op-cal-kept" hidden>
+                        <div class="op-cal-kept-head">
+                          <span class="op-cap" id="op-cal-kept-say"></span>
+                          <button class="op-nbtn" id="op-cal-kept-open" type="button"
+                                  title="Open this run's folder in the file manager">Open folder</button>
+                        </div>
+                        <div class="op-cal-kept-strip" id="op-cal-kept-strip"></div>
+                      </div>
 
                       {# The routine's own parameters, not a fixed recipe. Edge
                          detection and the z buffer are the two an operator
