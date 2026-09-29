@@ -1091,6 +1091,35 @@
     color: var(--accent);
 }
 
+/* Removed embryos: under the list, quieter than it. They are not in the
+   experiment; they are what can be put back. */
+.rp-removed {
+    margin-top: var(--op-3);
+    padding-top: var(--op-2);
+    border-top: 1px dashed var(--op-rule);
+}
+
+.rp-removed-head {
+    padding: 0 var(--op-2) 4px;
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+
+.rp-removed-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--op-2);
+    padding: 3px var(--op-2);
+}
+
+.rp-removed-what { display: flex; flex-direction: column; min-width: 0; }
+.rp-removed-name { font-size: 0.76rem; color: var(--op-ink-dim); text-decoration: line-through; }
+.rp-removed-held { font-size: 0.68rem; color: var(--op-ink-dim); }
+.rp-restore:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .rp-empty {
     display: flex;
     flex-direction: column;

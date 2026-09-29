@@ -105,6 +105,7 @@ D:/Gently3/
       summary.yaml                         # auto-generated stats
       perception_runs.yaml                 # run metadata
       snapshots/{source}_{stem}.tif
+      removed/{embryo_id}__{YYYYMMDD_HHMMSS}/  # an embryo taken off the list: its whole folder, restorable
       embryos/{embryo_id}/
         embryo.yaml                        # position, calibration, uid
         calibration/{YYYYMMDD_HHMMSS}/     # one calibration run's evidence

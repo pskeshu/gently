@@ -350,9 +350,108 @@ def create_router(server) -> APIRouter:
                 logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
 
+    def _the_run_is_imaging(agent, embryo_id: str) -> bool:
+        """Is a run that is going still taking this embryo's timepoints?"""
+        orch = getattr(agent, "timelapse_orchestrator", None)
+        if orch is None:
+            return False
+        status = getattr(getattr(orch, "_status", None), "value", None)
+        if status not in ("running", "paused"):
+            return False
+        row = (getattr(orch, "_embryo_states", None) or {}).get(embryo_id)
+        return row is not None and not getattr(row, "is_complete", False)
+
+    def _session_store(agent):
+        store = getattr(agent, "store", None)
+        sid = getattr(agent, "session_id", None)
+        if store is None or not sid or not hasattr(store, "set_aside_embryo"):
+            return None, None
+        return store, sid
+
+    @router.get("/api/embryos/removed")
+    async def removed_embryos():
+        """The embryos removed from this session, the latest first. Each can
+        be put back: nothing of a removed embryo is deleted."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge else None
+        store, sid = _session_store(agent) if agent is not None else (None, None)
+        if store is None:
+            return {"removed": [], "session_id": None}
+        taken = set(getattr(getattr(agent, "experiment", None), "embryos", {}) or {})
+        rows = await asyncio.to_thread(store.list_removed_embryos, sid)
+        for row in rows:
+            row["id_taken"] = row["embryo_id"] in taken
+        return {"removed": rows, "session_id": sid}
+
+    @router.post("/api/embryos/{embryo_id}/restore", dependencies=[Depends(require_control)])
+    async def restore_embryo(embryo_id: str, request: Request):
+        """Put a removed embryo back: its folder, and its place in the list."""
+        agent = _require_agent_with_experiment()
+        if embryo_id in agent.experiment.embryos:
+            raise HTTPException(
+                status_code=409,
+                detail=f"There is an {embryo_id} in the list already, so the removed one "
+                "cannot take its name back. Its folder is kept under the session's "
+                "'removed' folder.",
+            )
+        store, sid = _session_store(agent)
+        if store is None:
+            raise HTTPException(status_code=409, detail="No session to restore into")
+        try:
+            record = await asyncio.to_thread(store.restore_embryo, sid, embryo_id)
+        except FileExistsError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        except OSError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{embryo_id} could not be moved back ({e.strerror or e}). "
+                "One of its files may be open in another program.",
+            ) from None
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"No removed {embryo_id} in this session")
+        result = await asyncio.to_thread(agent.import_embryos_from_session, sid, False, [embryo_id])
+        if embryo_id not in agent.experiment.embryos:
+            # The folder is back, which is the part that matters. It will be
+            # in the list at the next resume even if it could not be read now.
+            logger.error("Restored %s on disk but not into the list: %s", embryo_id, result)
+            raise HTTPException(
+                status_code=500,
+                detail=f"{embryo_id}'s folder is back in the session, but it could not be "
+                "read into the list. Resume the session to load it.",
+            )
+        # Back in its place, not at the end: the list is in the order the
+        # embryos were numbered, and a restored one was numbered long ago.
+        import re as _re
+
+        def _by_number(item):
+            m = _re.search(r"(\d+)", item[0])
+            return (int(m.group(1)) if m else 10**9, item[0])
+
+        agent.experiment.embryos = dict(sorted(agent.experiment.embryos.items(), key=_by_number))
+        agent.experiment.notify_embryos_changed()
+
+        bus = getattr(agent, "_event_bus", None)
+        if bus is not None:
+            from gently.core.event_bus import EventType
+
+            try:
+                bus.publish(
+                    event_type=EventType.OPERATOR_EDITED_EMBRYO,
+                    data={"embryo_id": embryo_id, "restored": True, "by": _who(request)},
+                    source="web:restore",
+                )
+            except Exception:
+                logger.exception("Failed to publish the restore of %s", embryo_id)
+        return {"ok": True, "embryo_id": embryo_id, "restored": record}
+
     @router.delete("/api/embryos/{embryo_id}", dependencies=[Depends(require_control)])
-    async def delete_embryo(embryo_id: str):
-        """Remove an embryo from the experiment.
+    async def delete_embryo(embryo_id: str, request: Request):
+        """Remove an embryo from the list. Nothing of it is deleted.
+
+        Its folder is moved to the session's ``removed`` folder, whole, and
+        ``POST /api/embryos/{id}/restore`` puts it back. An embryo the run is
+        still imaging is refused: the run would go on writing timepoints for
+        an embryo that is not in the list.
 
         Goes through ExperimentState.remove_embryo so the observer hook
         fires EMBRYOS_UPDATE automatically. Also publishes
@@ -362,25 +461,40 @@ def create_router(server) -> APIRouter:
         """
         agent = _require_agent_with_experiment()
         emb = agent.experiment.embryos.get(embryo_id)
-        last_position = None
-        if emb is not None:
-            last_position = {
-                "coarse": dict(emb.position_coarse) if emb.position_coarse else None,
-                "fine": dict(emb.position_fine) if emb.position_fine else None,
-            }
+        if emb is None:
+            raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+        if _the_run_is_imaging(agent, embryo_id):
+            raise HTTPException(
+                status_code=409,
+                detail=f"The run is imaging {embryo_id}. Stop it in the run first "
+                "(Acquisition, its row, Stop), then remove it.",
+            )
+        last_position = {
+            "coarse": dict(emb.position_coarse) if emb.position_coarse else None,
+            "fine": dict(emb.position_fine) if emb.position_fine else None,
+        }
+
+        # The folder first. If it cannot be moved the embryo stays in the
+        # list, so the list and the disk never disagree about it. Left in
+        # place it would come back on the next restart: embryos are reloaded
+        # from disk on resume.
+        kept = None
+        store, sid = _session_store(agent)
+        if store is not None:
+            try:
+                kept = await asyncio.to_thread(
+                    store.set_aside_embryo, sid, embryo_id, _who(request)
+                )
+            except OSError as e:
+                logger.warning("Could not set %s aside: %s", embryo_id, e)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{embryo_id} was not removed: its folder could not be moved "
+                    f"({e.strerror or e}). One of its files may be open in another program.",
+                ) from None
+
         if not agent.experiment.remove_embryo(embryo_id):
             raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
-
-        # Also drop it from the session files, or a false positive deleted here
-        # would reappear on the next restart (embryos are reloaded from disk on
-        # resume). Best-effort — the in-memory removal already succeeded.
-        store = getattr(agent, "store", None)
-        sid = getattr(agent, "session_id", None)
-        if store is not None and sid and hasattr(store, "delete_embryo"):
-            try:
-                store.delete_embryo(sid, embryo_id)
-            except Exception:
-                logger.exception("Failed to delete embryo %s from session files", embryo_id)
 
         bus = getattr(agent, "_event_bus", None)
         if bus is not None:
@@ -397,7 +511,7 @@ def create_router(server) -> APIRouter:
                 )
             except Exception:
                 logger.exception("Failed to publish OPERATOR_REMOVED_EMBRYO")
-        return {"ok": True, "embryo_id": embryo_id}
+        return {"ok": True, "embryo_id": embryo_id, "kept": kept, "restorable": kept is not None}
 
     @router.get("/api/embryos/current")
     async def get_current_embryos():

@@ -798,25 +798,157 @@ class FileStore:
             return []
         return [e.name for e in sorted(embryos_dir.iterdir()) if e.is_dir()]
 
-    def delete_embryo(self, session_id: str, embryo_id: str) -> bool:
-        """Remove an embryo's folder from a session (e.g. an operator-deleted
-        false positive), so it does not reappear when the session is reloaded
-        from disk. Returns True if a folder was removed.
+    # ------------------------------------------------------------------
+    # Removing an embryo
+    #
+    # The x beside an embryo is for a false positive, and it sits one row
+    # from the embryo that has been imaged all night. It used to delete the
+    # folder: volumes, projections, traces and calibration, with no way back.
+    # Nothing here deletes. A removed embryo's folder is moved, whole, to
+    #
+    #     <session>/removed/{embryo_id}__{YYYYMMDD_HHMMSS}/
+    #
+    # beside a removed.yaml saying what it held. It is out of every listing,
+    # so it does not come back on a restart, and it can be put back.
+    # ------------------------------------------------------------------
 
-        Removes the whole ``embryos/{embryo_id}/`` tree — for a marked-but-never-
-        imaged embryo that is just ``embryo.yaml``, but a later-imaged one may
-        also carry volumes/projections/traces, and all of it goes with it.
+    _REMOVED = "removed"
+    _REMOVED_RECORD = "removed.yaml"
+
+    def _removed_dir(self, session_dir: Path) -> Path:
+        return session_dir / self._REMOVED
+
+    @staticmethod
+    def _embryo_holdings(embryo_dir: Path) -> dict[str, Any]:
+        """What an embryo's folder holds, counted from its directory names."""
+
+        def count(sub: str, pattern: str) -> int:
+            d = embryo_dir / sub
+            return sum(1 for _ in d.glob(pattern)) if d.is_dir() else 0
+
+        cal = embryo_dir / "calibration"
+        return {
+            "timepoints": count("volumes", "t*.tif"),
+            "projections": count("projections", "t*.jpg"),
+            "calibration_runs": sum(1 for p in cal.iterdir() if p.is_dir()) if cal.is_dir() else 0,
+        }
+
+    def embryo_holdings(self, session_id: str, embryo_id: str) -> dict[str, Any]:
+        """What would be set aside with this embryo. Zeros if it has no folder."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return {"timepoints": 0, "projections": 0, "calibration_runs": 0}
+        return self._embryo_holdings(self._embryo_dir_for_session(sd, embryo_id))
+
+    def set_aside_embryo(
+        self, session_id: str, embryo_id: str, by: Any = None
+    ) -> dict[str, Any] | None:
+        """Move an embryo's folder out of the session's embryos, whole.
+
+        Returns the record of what was set aside, or None if the embryo has no
+        folder. Raises ``OSError`` if the folder cannot be moved, which on
+        Windows is what happens while one of its files is open: the move is a
+        rename, so it is all of the folder or none of it.
         """
         sd = self._session_dir(session_id)
         if sd is None:
-            return False
+            return None
         ed = self._embryo_dir_for_session(sd, embryo_id)
         if not ed.exists():
-            return False
-        import shutil
+            return None
+        record: dict[str, Any] = {
+            "embryo_id": embryo_id,
+            "removed_at": datetime.now().isoformat(timespec="seconds"),
+            "removed_by": by,
+            **self._embryo_holdings(ed),
+        }
+        info = _read_yaml(ed / "embryo.yaml") or {}
+        calibration = info.get("calibration") or {}
+        record["calibrated"] = bool(calibration.get("slope_um_per_deg"))
 
-        shutil.rmtree(ed, ignore_errors=True)
-        return True
+        removed = self._removed_dir(sd)
+        removed.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = removed / f"{ed.name}__{stamp}"
+        n = 1
+        while target.exists():
+            n += 1
+            target = removed / f"{ed.name}__{stamp}_{n}"
+        os.rename(ed, target)
+        record["folder"] = target.name
+        try:
+            _write_yaml(target / self._REMOVED_RECORD, record)
+        except Exception:
+            # The folder's name says which embryo and when. The record is a
+            # convenience, and failing to write it must not undo the move.
+            logger.warning("Could not write %s in %s", self._REMOVED_RECORD, target, exc_info=True)
+        return record
+
+    def delete_embryo(self, session_id: str, embryo_id: str) -> bool:
+        """Kept for its callers. Deletes nothing: see ``set_aside_embryo``."""
+        return self.set_aside_embryo(session_id, embryo_id) is not None
+
+    def list_removed_embryos(self, session_id: str) -> list[dict[str, Any]]:
+        """The embryos set aside in this session, the latest removal first."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        removed = self._removed_dir(sd)
+        if not removed.is_dir():
+            return []
+        out: list[dict[str, Any]] = []
+        for entry in removed.iterdir():
+            if not entry.is_dir() or "__" not in entry.name:
+                continue
+            record = _read_yaml(entry / self._REMOVED_RECORD) or {}
+            embryo_id, _, stamp = entry.name.partition("__")
+            record.setdefault("embryo_id", embryo_id)
+            if not record.get("removed_at"):
+                try:
+                    record["removed_at"] = datetime.strptime(stamp[:15], "%Y%m%d_%H%M%S").isoformat(
+                        timespec="seconds"
+                    )
+                except ValueError:
+                    record["removed_at"] = None
+            for key, value in self._embryo_holdings(entry).items():
+                record.setdefault(key, value)
+            record["folder"] = entry.name
+            out.append(record)
+        out.sort(key=lambda r: (str(r.get("removed_at") or ""), r["folder"]), reverse=True)
+        return out
+
+    def restore_embryo(
+        self, session_id: str, embryo_id: str, folder: str | None = None
+    ) -> dict[str, Any] | None:
+        """Put a removed embryo's folder back. The latest removal of that
+        embryo, unless ``folder`` names another.
+
+        Returns its record, or None if nothing of that embryo was set aside.
+        Raises ``FileExistsError`` if the session has an embryo of that id.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        found = [
+            r
+            for r in self.list_removed_embryos(session_id)
+            if r["embryo_id"] == embryo_id and (folder is None or r["folder"] == folder)
+        ]
+        if not found:
+            return None
+        record = found[0]
+        # The folder's name comes from the listing, never from the request.
+        source = self._removed_dir(sd) / record["folder"]
+        ed = self._embryo_dir_for_session(sd, embryo_id)
+        if ed.exists():
+            raise FileExistsError(f"{embryo_id} is in the session already")
+        ed.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(source, ed)
+        try:
+            (ed / self._REMOVED_RECORD).unlink()
+        except OSError:
+            pass
+        return record
 
     # ==================================================================
     # Volumes

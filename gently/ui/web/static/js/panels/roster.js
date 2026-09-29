@@ -32,6 +32,27 @@ const RosterPanel = (() => {
 
     const mounts = new Map();   // hostId -> opts
 
+    // The embryos removed from this session. Nothing of a removed embryo is
+    // deleted, so each can be put back, and the toast that offers Undo is
+    // gone in twelve seconds. This is where it can still be done tomorrow.
+    // The list is read by operate.js, which owns the endpoints, and arrives
+    // here as SharedState.removedEmbryos.
+    let _removedFor = null;     // the roster's size when the list was last asked for
+    let _removedTimer = null;
+
+    // Whatever removed the embryo (this panel, the map, the assistant), the
+    // roster changes size when it happens.
+    function removedMayHaveChanged() {
+        const n = (SharedState.get('embryos') || []).length;
+        if (n === _removedFor) return;
+        _removedFor = n;
+        clearTimeout(_removedTimer);
+        _removedTimer = setTimeout(() => {
+            const v = verbs();
+            if (v && v.readRemoved) v.readRemoved();
+        }, 250);
+    }
+
     // label, then a cell per action. One row style at both widths — the narrow
     // rail simply declares fewer actions than the Acquisition pane.
     const ACTIONS = {
@@ -68,7 +89,10 @@ const RosterPanel = (() => {
         });
         if (mounts.size === 1) {
             SharedState.on('embryos', render);
+            SharedState.on('embryos', removedMayHaveChanged);
+            SharedState.on('removedEmbryos', render);
             SharedState.on('selectedEmbryoId', render);
+            removedMayHaveChanged();
         }
         render();
     }
@@ -119,11 +143,37 @@ const RosterPanel = (() => {
         mounts.forEach((opts, hostId) => {
             const host = document.getElementById(hostId);
             if (!host) return;
-            host.innerHTML = embryos.length
+            host.innerHTML = (embryos.length
                 ? embryos.map(e => row(e, selected, inSet, opts)).join('')
-                : empty(opts);
+                : empty(opts)) + removed(opts);
             wire(host);
         });
+    }
+
+    /** The removed embryos, under the list, where a mount can remove. */
+    function removed(opts) {
+        const list = SharedState.get('removedEmbryos') || [];
+        if (!opts.actions.includes('remove') || !list.length) return '';
+        const rows = list.map(r => {
+            const n = Number(r.timepoints) || 0;
+            const held = [n ? `${n} timepoint${n === 1 ? '' : 's'}` : '', r.calibrated ? 'calibrated' : '']
+                .filter(Boolean).join(', ') || 'no images';
+            const when = String(r.removed_at || '').slice(11, 16);
+            const taken = !!r.id_taken;
+            return `<div class="rp-removed-row">
+                      <span class="rp-removed-what">
+                        <span class="rp-removed-name">Embryo ${esc(labelOf({ id: r.embryo_id }))}</span>
+                        <span class="rp-removed-held">${esc(held)}${when ? ` · ${esc(when)}` : ''}</span>
+                      </span>
+                      <button class="rp-btn rp-restore" type="button" ${taken ? 'disabled' : ''}
+                        title="${taken ? 'There is an embryo of this name in the list. The removed one is kept in the session’s removed folder.'
+                                       : 'Put this embryo back in the list, with everything it had'}"
+                        data-verb="restore" data-id="${esc(r.embryo_id)}">Restore</button>
+                    </div>`;
+        }).join('');
+        return `<div class="rp-removed" data-removed>
+                  <div class="rp-removed-head">Removed · nothing deleted</div>${rows}
+                </div>`;
     }
 
     function empty(opts) {

@@ -1044,14 +1044,21 @@ const DevicesManager = (function () {
         if (!id) return;
         const emb = embryoById(id);
         const num = emb ? embryoNumberFor(emb) : id;
-        if (!window.confirm(`Remove embryo ${num}?`)) return;
+        if (!window.confirm(`Remove embryo ${num} from the list?\n\n`
+            + 'Nothing is deleted: its files are kept in the session, and it can be restored.')) return;
         try {
             const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, {
                 method: 'DELETE',
             });
             if (!res.ok) {
-                window.alert(`Delete failed (${res.status}): ${await res.text()}`);
+                const d = await res.json().catch(() => ({}));
+                window.alert(`Not removed: ${d.detail || res.status}`);
                 return;
+            }
+            if (typeof showGentlyToast === 'function'
+                && typeof OperateManager !== 'undefined' && OperateManager.roster) {
+                showGentlyToast(`Removed embryo ${num}. Nothing was deleted.`, 'Undo',
+                    () => OperateManager.roster.restore(id), 12000);
             }
             // The embryo is gone from the server snapshot; EMBRYOS_UPDATE
             // will arrive and drop it from _embryos. Clear locally too.

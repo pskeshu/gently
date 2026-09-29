@@ -106,6 +106,10 @@ const SharedState = (() => {
         // The embryo roster itself, owned by operate.js and rendered by
         // panels/roster.js. One value, so the copies cannot disagree (#129).
         embryos: [],
+        // The embryos removed from this session, read by operate.js and
+        // listed under the roster. Nothing of a removed embryo is deleted,
+        // so each of these can be put back.
+        removedEmbryos: [],
     };
     const subs = new Map();     // key -> Set<handler>
 
