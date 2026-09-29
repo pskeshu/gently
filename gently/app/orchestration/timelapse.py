@@ -127,6 +127,12 @@ class TimelapseOrchestrator:
         # duplication of state.
         self._embryo_states: dict[str, EmbryoState] = {}
         self._status = TimelapseStatus.IDLE
+        # How the last run ended: "stopped" (somebody stopped it),
+        # "completed", "failed", or "interrupted" (the backend went away
+        # under it). None while a run is going, and before there has been
+        # one. An idle run with embryos still going is one of two things,
+        # and they are not the same thing to the operator who stopped it.
+        self._ended: str | None = None
         self._started_at: datetime | None = None
         self._total_timepoints = 0
         self._current_round = 0
@@ -379,6 +385,7 @@ class TimelapseOrchestrator:
 
         # Reset state (but preserve total timepoints from existing embryos)
         self._status = TimelapseStatus.RUNNING
+        self._ended = None
         self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
         self._current_round = -1  # Will become 0 on first round
         self._stop_requested = False
@@ -972,7 +979,9 @@ class TimelapseOrchestrator:
                 )
                 if active_count == 0:
                     self._status = TimelapseStatus.COMPLETED
+                    self._ended = "completed"
                     await self._finalize_timelapse()
+                    self.save_state()
                     logger.info("Timelapse completed - all embryos finished")
                     break
 
@@ -1030,6 +1039,7 @@ class TimelapseOrchestrator:
         except Exception as e:
             logger.error(f"Timelapse error: {e}\n{traceback.format_exc()}")
             self._status = TimelapseStatus.FAILED
+            self._ended = "failed"
             self._error_message = str(e)
             self._finalize_perception_run("failed", error_message=str(e))
             self._emit_event(
@@ -1733,6 +1743,7 @@ class TimelapseOrchestrator:
             self._started_at = now
         self._pause_start = None
         self._status = TimelapseStatus.RUNNING
+        self._ended = None
         self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
         self._stop_requested = False
         self._error_message = None
@@ -1768,7 +1779,9 @@ class TimelapseOrchestrator:
         str
             Confirmation message
         """
-        if self._status != TimelapseStatus.RUNNING:
+        # A paused run is a run. It could not be stopped: this returned
+        # "No timelapse running" for it, and it stayed paused.
+        if self._status not in (TimelapseStatus.RUNNING, TimelapseStatus.PAUSED):
             return "No timelapse running"
 
         self._stop_requested = True
@@ -1804,6 +1817,12 @@ class TimelapseOrchestrator:
             self._perception_tasks.clear()
 
         self._status = TimelapseStatus.IDLE
+        self._ended = "stopped"
+        self._pause_start = None
+        # The checkpoint was last written while the run was going, and said
+        # so. Left that way, the next start of Gently reads a run that was
+        # stopped on purpose as one that was interrupted.
+        self.save_state()
 
         # Log trace file count
         if self._trace_dir:
@@ -1849,6 +1868,7 @@ class TimelapseOrchestrator:
             self._pause_start = None
 
         self._status = TimelapseStatus.RUNNING
+        self._ended = None
 
         return "Timelapse resumed."
 
@@ -2243,6 +2263,7 @@ class TimelapseOrchestrator:
             "saved_at": datetime.now().isoformat(),
             "schema_version": 1,
             "status": self._status.value if hasattr(self._status, "value") else str(self._status),
+            "ended": self._ended,
             "started_at": _iso(self._started_at),
             "base_interval_seconds": self._base_interval_seconds,
             "current_round": self._current_round,
@@ -2303,6 +2324,14 @@ class TimelapseOrchestrator:
         self._dic_next_due_at = _parse_dt(doc.get("dic_next_due_at"))
         if started := _parse_dt(doc.get("started_at")):
             self._started_at = started
+        # A checkpoint written while the run was going, and then nothing: the
+        # backend went away under it. One written at the run's end says how
+        # it ended.
+        if doc.get("status") in ("running", "paused"):
+            self._ended = "interrupted"
+        else:
+            ended = doc.get("ended")
+            self._ended = ended if ended in ("stopped", "completed", "failed") else None
 
         self._interval_rules = []
         for r in doc.get("interval_rules") or []:

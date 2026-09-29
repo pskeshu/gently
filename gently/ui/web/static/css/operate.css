@@ -1651,12 +1651,14 @@
 
 /* ── The acquisition plan ─────────────────────────────────────────────── */
 /* The sentence is the plan. It is the one thing on the pane set in prose,
-   because it is the one thing the operator reads rather than fills in. */
+   because it is the one thing the operator reads rather than fills in.
+   Upright: it was in italics, and a sentence read at the microscope is
+   read more easily without them. The serif is what sets it apart. */
 .op-plan-say {
     margin: 0 0 var(--op-3);
     font-family: 'Instrument Serif', Georgia, serif;
-    font-style: italic;
-    font-size: 0.92rem;
+    font-style: normal;
+    font-size: 0.98rem;
     line-height: 1.4;
     color: var(--op-ink);
 }
@@ -1722,8 +1724,8 @@
 .op-libitem .op-lib-say {
     display: block;
     font-family: 'Instrument Serif', Georgia, serif;
-    font-style: italic;
-    font-size: 0.78rem;
+    font-style: normal;
+    font-size: 0.84rem;
     white-space: normal;
     line-height: 1.35;
     margin-top: 2px;
@@ -1731,7 +1733,7 @@
 
 /* A restored run's rows: there, but nothing is imaging them yet. */
 .op-runrow.is-waiting { opacity: 0.75; }
-.op-runrow.is-waiting .op-runrow-state { color: var(--text-muted, #888); font-style: italic; }
+.op-runrow.is-waiting .op-runrow-state { color: var(--text-muted, #888); }
 
 
 /* What the calibration looked at: the latest run's plots, kept with the embryo. */
