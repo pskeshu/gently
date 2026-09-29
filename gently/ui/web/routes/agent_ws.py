@@ -752,17 +752,15 @@ def create_router(server) -> APIRouter:
 
             if not wizard_ran:
                 enter_resolution = bridge.should_enter_resolution()
-                # Under ux_v2 the agent-first landing owns the session-entry
-                # decision ("Plan an experiment" / "Take a quick look"), so the
-                # legacy connect-time resolution picker would just duplicate it —
-                # and contradict it, by offering "Standalone" after the user has
-                # already chosen to plan. Stay quiet on connect for new sessions;
-                # the landing drives plan-mode (/plan) or standalone instead.
+                # Under ux_v2 a new session starts unattached and says nothing
+                # on connect: the operator is on their way to the instrument,
+                # and a picker asking "plan or standalone?" in the chat would be
+                # in the way. A session is attached to a plan from the Plans
+                # tab, or by asking the assistant (/plan).
                 if enter_resolution and not settings.ui.ux_v2:
                     bootstrap_task = asyncio.create_task(_run_resolution_bootstrap())
                 elif not enter_resolution:
-                    # Resume / already-resolved sessions still get their briefing
-                    # (it sits behind the landing overlay until dismissed).
+                    # Resume / already-resolved sessions still get their briefing.
                     briefing = bridge.get_session_briefing()
                     if briefing:
                         await send_fn({"type": "stream_start"})

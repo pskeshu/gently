@@ -43,15 +43,6 @@ const BootBanner = (function () {
         cacheDom();
         if (!_el) return;
         _details.addEventListener('click', () => {
-            // The v2 landing overlay covers the workspace — dismiss it first,
-            // or the tab switch below happens invisibly behind it and the
-            // click feels dead (found via session replay: the operator
-            // clicked Details and saw nothing for over two minutes).
-            const landing = document.getElementById('v2-landing');
-            if (landing && !landing.classList.contains('dismissed')) {
-                const skip = document.getElementById('v2-landing-skip');
-                if (skip) skip.click(); else landing.classList.add('dismissed');
-            }
             if (typeof switchTab === 'function' && typeof TABS !== 'undefined') switchTab(TABS.DEVICES);
             // The console we just opened IS the details — acknowledge so the
             // click always has visible feedback (Retry lives on in the

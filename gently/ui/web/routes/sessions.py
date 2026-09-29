@@ -4,7 +4,6 @@ import logging
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -212,11 +211,6 @@ def create_router(server) -> APIRouter:
         # assistant. gate_passed is in-memory and resets on any backend restart,
         # which is exactly what made a resume-to-view land on the launch gate.
         server.gate_passed = True
-        # Also skip the "what are we doing today?" landing overlay on the reload
-        # below — resuming existing work isn't starting fresh. A timestamp (not a
-        # one-shot bool) so EVERY client the broadcast reloads skips the landing,
-        # not just whichever one hits the index route first.
-        server._resumed_at = time.monotonic()
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
         try:

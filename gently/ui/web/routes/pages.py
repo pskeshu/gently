@@ -1,7 +1,5 @@
 """Page routes - HTML template rendering."""
 
-import time
-
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -29,22 +27,9 @@ def create_router(server) -> APIRouter:
             # broken. launch.html carries it back on the way in.
             q = request.url.query
             return RedirectResponse(f"/launch?{q}" if q else "/launch", status_code=302)
-        # The v2 landing ("what are we doing today?") is for STARTING fresh. Skip
-        # it when resuming a session (one-shot flag from the resume route) or when
-        # the live session already has work — so a resumed/underway session lands
-        # straight in the workspace instead of bouncing through the welcome screen.
-        # Resumed within the last few seconds? (time-window, not a one-shot, so
-        # all clients the resume-broadcast reloads skip the landing together.)
-        just_resumed = (time.monotonic() - getattr(server, "_resumed_at", 0.0)) < 15.0
-        has_work = False
-        try:
-            bridge = getattr(server, "agent_bridge", None)
-            agent = getattr(bridge, "agent", None) if bridge else None
-            if agent is not None:
-                has_work = len(agent.experiment.embryos) > 0
-        except Exception:
-            has_work = False
-        show_landing = bool(settings.ui.ux_v2) and not (just_resumed or has_work)
+        # The gate leads into the workspace. There used to be a second page
+        # between them ("what are we doing today?"), and the only thing anyone
+        # ever pressed on it was Skip.
         return server.templates.TemplateResponse(
             request,
             "index.html",
@@ -52,7 +37,6 @@ def create_router(server) -> APIRouter:
                 "active_section": "embryos",
                 "is_live": True,
                 "ux_v2": settings.ui.ux_v2,
-                "show_landing": show_landing,
             },
         )
 

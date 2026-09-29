@@ -615,7 +615,7 @@ const ExperimentOverview = {
                     </div>
                 </div>`;
 
-            // Wire CTA buttons — same open+send pattern as landing.js sendFreeform.
+            // Wire CTA buttons: open the chat, then send.
             function _opsOpenAgent(prompt) {
                 if (typeof AgentChat === 'undefined' || !AgentChat.togglePanel) return;
                 AgentChat.togglePanel(true);

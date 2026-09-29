@@ -1,24 +1,4 @@
 {
-  "US-01": {
-    "status": "works",
-    "title": "First-run landing shows the entry choices"
-  },
-  "US-02": {
-    "status": "partial",
-    "title": "Skip to workspace and resume a prior session"
-  },
-  "US-03": {
-    "status": "partial",
-    "title": "Return to the landing after dismissing it"
-  },
-  "US-04": {
-    "status": "blocked",
-    "title": "Design a plan with the agent"
-  },
-  "US-05": {
-    "status": "gap",
-    "title": "Review & commit a designed plan"
-  },
   "US-06": {
     "status": "gap",
     "title": "Start a new plan from the workspace"
@@ -26,10 +6,6 @@
   "US-07": {
     "status": "partial",
     "title": "Edit / revise an existing plan"
-  },
-  "US-08": {
-    "status": "works",
-    "title": "Take a quick look jumps straight to the scope"
   },
   "US-09": {
     "status": "blocked",
