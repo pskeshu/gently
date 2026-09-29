@@ -11494,3 +11494,13 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
     text-align: left;
     pointer-events: none;
 }
+
+/* ── Film: the DIC overview is the first row, on the same timeline ───────── */
+.filmstrip-dic-row { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+.filmstrip-dic-row .filmstrip-label { background: var(--bg-hover); }
+.filmstrip-dic-thumb {
+    /* The whole field, not the left of a three-view. */
+    object-position: center;
+    border-color: var(--border);
+}
+.filmstrip-dic-cell .filmstrip-stage-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }

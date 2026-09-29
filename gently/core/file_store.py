@@ -1112,6 +1112,39 @@ class FileStore:
         logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
         return canonical
 
+    def put_snapshot(
+        self,
+        session_id: str,
+        source: str,
+        image: Any,
+        metadata: dict | None = None,
+        stem: str | None = None,
+    ) -> Path:
+        """File a snapshot from its pixels, for a frame that has no staged
+        file to move. Same place and same sidecar as ``register_snapshot``."""
+        import uuid
+
+        import tifffile
+
+        sd = self._require_session_dir(session_id)
+        snap_dir = sd / "snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        canonical = snap_dir / f"{source}_{stem or uuid.uuid4().hex[:12]}.tif"
+        arr = np.asarray(image)
+        tifffile.imwrite(str(canonical), arr)
+        sidecar: dict[str, Any] = {
+            "session_id": session_id,
+            "source": source,
+            "file_path": str(canonical),
+            "metadata": metadata,
+            "captured_at": _now(),
+            "width": int(arr.shape[-1]) if arr.ndim >= 2 else None,
+            "height": int(arr.shape[-2]) if arr.ndim >= 2 else None,
+        }
+        _write_yaml(canonical.with_suffix(".meta.yaml"), sidecar)
+        logger.debug("put_snapshot: %s", canonical)
+        return canonical
+
     def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         sd = self._session_dir(session_id)

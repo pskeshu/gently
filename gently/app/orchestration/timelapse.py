@@ -24,6 +24,7 @@ from gently.core import EventType, get_event_bus, spim_alignment
 from gently.core.imaging import (
     apply_crop_bounds,
     compute_crop_bounds,
+    downsample_mean,
     image_to_base64,
     normalize_to_uint8,
     projection_three_view,
@@ -623,29 +624,45 @@ class TimelapseOrchestrator:
             image = (result or {}).get("image")
             try:
                 if image is not None and getattr(image, "ndim", 0) == 2:
-                    h, w = image.shape[:2]
-                    step = max(1, -(-max(h, w) // 512))
-                    image_b64 = image_to_base64(normalize_to_uint8(image[::step, ::step]))
+                    image_b64 = image_to_base64(normalize_to_uint8(downsample_mean(image, 512)))
             except Exception as exc:
                 logger.debug("DIC thumbnail skipped: %s", exc)
             stored: Path | None = None
-            if image_path and self._store is not None and self._session_id:
+            if self._store is not None and self._session_id:
+                meta = {
+                    "channel": "dic",
+                    "frame": frame,
+                    "round": self._current_round,
+                    "position": pos,
+                    "exposure_ms": dic.exposure_ms,
+                    "captured_at": captured_at.isoformat(),
+                }
+                # The client's empty-capture placeholder is a 100x100 of zeros.
+                real = (
+                    image is not None
+                    and getattr(image, "ndim", 0) == 2
+                    and tuple(image.shape) != (100, 100)
+                )
                 try:
-                    stored = self._store.register_snapshot(
-                        self._session_id,
-                        "dic",
-                        Path(image_path),
-                        metadata={
-                            "channel": "dic",
-                            "frame": frame,
-                            "round": self._current_round,
-                            "position": pos,
-                            "exposure_ms": dic.exposure_ms,
-                            "captured_at": captured_at.isoformat(),
-                        },
-                    )
+                    if image_path and Path(image_path).exists():
+                        stored = self._store.register_snapshot(
+                            self._session_id, "dic", Path(image_path), metadata=meta
+                        )
+                    elif real:
+                        # No staged file to move: file the pixels themselves.
+                        stored = self._store.put_snapshot(
+                            self._session_id, "dic", image, metadata=meta
+                        )
                 except Exception as exc:
                     logger.warning("DIC overview frame %d captured but not filed: %s", frame, exc)
+                # Never silently. The frame used to be skipped without a word
+                # whenever the capture reported no path, which on a real device
+                # layer was every time.
+                if stored is None:
+                    logger.warning(
+                        "DIC overview frame %d was NOT filed: no staged file and no image",
+                        frame,
+                    )
             self._dic_frames = frame
             self._dic_last_at = captured_at
             self._emit_event(

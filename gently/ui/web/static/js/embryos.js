@@ -258,8 +258,11 @@ const EmbryosManager = {
         const count = document.getElementById('dic-strip-count');
         if (!strip || !frames) return;
         const all = this._dicFrames;
-        strip.hidden = all.length === 0;
+        // In the film the overview is a row of the film, not a block above it.
+        const inFilm = this.currentView === 'filmstrip';
+        strip.hidden = all.length === 0 || inFilm;
         if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}`;
+        if (inFilm) { this.renderFilmstripView(); return; }
         // The last dozen on the strip; the viewer walks the whole series.
         const shown = all.slice(-12);
         frames.innerHTML = shown.map(f => {
@@ -370,6 +373,8 @@ const EmbryosManager = {
         }
         // Update buttons
         this._updateViewButtons();
+        // The DIC strip gives way to the film's own DIC row, and comes back.
+        this.renderDicStrip();
         // Render the active view's content
         this._renderActiveView();
     },
@@ -749,6 +754,43 @@ const EmbryosManager = {
     // Filmstrip View
     // ==========================================
 
+    /**
+     * The DIC overview as the film's first row: the same cell as an embryo's
+     * timepoint, on the same scroll, one frame per round. It used to sit above
+     * the film as its own block, at twice the size, showing the last twelve
+     * frames over a film that starts at the first.
+     */
+    _filmDicRow(thumbSize, config) {
+        const all = this._dicFrames;
+        if (!all.length) return '';
+        const skip = (config && config.skipInterval) || 1;
+        const shown = skip > 1 ? all.filter((_, i) => i % skip === 0 || i === all.length - 1) : all;
+        let html = '<div class="filmstrip-row filmstrip-dic-row">';
+        html += `<div class="filmstrip-label">
+                <span class="filmstrip-name">DIC</span>
+                <span class="filmstrip-stage">overview</span>
+                <span class="filmstrip-count">${all.length} frame${all.length === 1 ? '' : 's'}</span>
+            </div>`;
+        html += '<div class="filmstrip-thumbs">';
+        for (const f of shown) {
+            const when = f.when ? new Date(f.when) : null;
+            const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const idx = all.indexOf(f);
+            html += `<div class="filmstrip-cell filmstrip-dic-cell" data-dic-index="${idx}" title="DIC overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
+            if (f.thumb) {
+                html += `<img class="filmstrip-thumb filmstrip-dic-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="DIC overview, frame ${f.frame}"/>`;
+            } else {
+                html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px">${f.frame}</div>`;
+            }
+            if (config && config.showStageLabels) {
+                html += `<span class="filmstrip-stage-label">${t || f.frame}</span>`;
+            }
+            html += '</div>';
+        }
+        html += '</div></div>';
+        return html;
+    },
+
     renderFilmstripView() {
         const container = document.getElementById('view-filmstrip');
         if (!container) return;
@@ -779,6 +821,7 @@ const EmbryosManager = {
         const thumbSize = config.thumbnailSize || 56;
 
         let html = '<div class="filmstrip-container">';
+        html += this._filmDicRow(thumbSize, config);
         for (const embryo of embryos) {
             const reasoning = this.detectionReasoning[embryo.embryoId] || [];
             const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
@@ -841,8 +884,12 @@ const EmbryosManager = {
         html += '<div class="filmstrip-detail" id="filmstrip-detail"></div>';
         container.innerHTML = html;
 
-        // Click handlers
-        container.querySelectorAll('.filmstrip-cell').forEach(cell => {
+        // Click handlers. A DIC cell opens the overview viewer; it is not
+        // an embryo's timepoint and has no detail panel.
+        container.querySelectorAll('.filmstrip-dic-cell').forEach(cell => {
+            cell.addEventListener('click', () => this.openDicViewer(Number(cell.dataset.dicIndex)));
+        });
+        container.querySelectorAll('.filmstrip-cell:not(.filmstrip-dic-cell)').forEach(cell => {
             cell.addEventListener('click', () => {
                 const eid = cell.dataset.embryoId;
                 const tp = parseInt(cell.dataset.timepoint);
