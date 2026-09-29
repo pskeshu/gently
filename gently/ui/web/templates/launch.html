@@ -85,6 +85,28 @@
   /* A second line under the build id, quieter than it: the id is the thing
      you act on, the date is the thing you check. */
   .foot-when{margin-top:4px;font-size:11px;opacity:.8}
+  /* Which session: a new one, or one of the last few there is something
+     to carry on with. Quieter than the two switches above it: most days the
+     answer is a new one, and that is what is chosen until somebody says
+     otherwise. */
+  .which{margin-top:20px}
+  .which[hidden]{display:none}
+  .which-cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--g-faint);margin:0 2px 8px}
+  .pick{display:flex;align-items:flex-start;gap:11px;width:100%;text-align:left;font:inherit;color:inherit;
+    padding:11px 13px;border:1px solid var(--g-border);border-radius:11px;background:var(--g-card);
+    margin-bottom:7px;cursor:pointer;transition:.15s}
+  .pick:hover{border-color:var(--g-faint)}
+  .pick:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
+  .pick[aria-checked="true"]{border-color:color-mix(in srgb, var(--g-accent) 55%, transparent);
+    background:color-mix(in srgb, var(--g-accent) 8%, var(--g-card))}
+  .pick-dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--g-faint);flex:none;margin-top:2px;position:relative}
+  .pick[aria-checked="true"] .pick-dot{border-color:var(--g-accent)}
+  .pick[aria-checked="true"] .pick-dot::after{content:"";position:absolute;inset:2px;border-radius:50%;background:var(--g-accent)}
+  .pick-txt{flex:1;min-width:0}
+  .pick-t{display:block;font-size:14px;font-weight:600}
+  .pick-s{display:block;font-size:12px;color:var(--g-muted);margin-top:2px;line-height:1.45}
+  .pick-id{font-family:ui-monospace,"JetBrains Mono",Consolas,monospace;font-size:11px;color:var(--g-faint)}
+  .pick-run{color:var(--g-accent)}
   .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--g-muted)}
   .status.err{color:#f85149}
 </style>
@@ -116,6 +138,13 @@
       <span class="sw" aria-hidden="true"></span>
     </div>
 
+    {# Which session. Filled from /api/sessions/resumable, and hidden when
+       there is nothing to carry on with. #}
+    <div class="which" id="which" hidden role="radiogroup" aria-labelledby="which-cap">
+      <div class="which-cap" id="which-cap">Session</div>
+      <div id="which-list"></div>
+    </div>
+
     <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
     <div class="status" id="status"></div>
     <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
@@ -134,6 +163,10 @@
 
 <script>
 const state = { hardware: true, agent: true };
+// Which session to open: null is a new one. Not remembered between launches.
+// Carrying on is something somebody decides, each time.
+let resume = null;
+let resumable = [];
 const COPY = {
   hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
   agent:    { on: "Help find embryos and watch the timelapse.", off: "Off — manual control only." },
@@ -147,8 +180,82 @@ function paint() {
   document.getElementById("opt-agent").setAttribute("aria-checked", String(state.agent));
   document.getElementById("ag-s").textContent = state.agent ? COPY.agent.on : COPY.agent.off;
   // Honest button label: "Start" spins up the microscope; "Open" is instant.
-  document.querySelector("#go").childNodes[0].nodeValue = (state.hardware ? "Start " : "Open ");
+  document.querySelector("#go").childNodes[0].nodeValue = resume
+    ? (state.hardware ? "Resume and start " : "Resume ")
+    : (state.hardware ? "Start " : "Open ");
 }
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function ago(iso) {
+  const t = new Date(iso);
+  if (!iso || isNaN(t)) return "";
+  const min = Math.max(0, Math.round((Date.now() - t.getTime()) / 60000));
+  if (min < 1) return "just now";
+  if (min < 60) return min + " min ago";
+  if (min < 48 * 60) return Math.round(min / 60) + " h ago";
+  return Math.round(min / 1440) + " days ago";
+}
+
+function when(iso) {
+  const t = new Date(iso);
+  if (!iso || isNaN(t)) return "";
+  return t.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+
+function paintWhich() {
+  const box = document.getElementById("which");
+  const list = document.getElementById("which-list");
+  if (!resumable.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const pick = (id, title, sub) =>
+    `<button type="button" class="pick" role="radio" data-session="${esc(id)}"
+             aria-checked="${String((resume || "") === id)}">
+       <span class="pick-dot" aria-hidden="true"></span>
+       <span class="pick-txt"><span class="pick-t">${title}</span>
+         <span class="pick-s">${sub}</span></span>
+     </button>`;
+  list.innerHTML = pick("", "A new session", "Start with an empty dish.")
+    + resumable.map(s => {
+      const named = s.name && s.name !== s.session_id && s.name !== "unnamed";
+      const title = (named ? esc(s.name) : "Carry on from " + esc(when(s.created_at) || s.session_id))
+        + ` <span class="pick-id">${esc(s.session_id)}</span>`;
+      const parts = [plural(s.embryo_count, "embryo")];
+      if (s.timepoints) parts.push(plural(s.timepoints, "image"));
+      if (s.last_image_at) parts.push("last " + ago(s.last_image_at));
+      const run = s.run
+        ? `<br><span class="pick-run">A run was interrupted, with ${plural(s.run.embryos_going, "embryo")} still going. It can be resumed from Acquisition.</span>`
+        : "";
+      return pick(s.session_id, title, esc(parts.join(" · ")) + run);
+    }).join("");
+}
+
+async function loadResumable() {
+  try {
+    const r = await fetch("/api/sessions/resumable?limit=3");
+    if (r.ok) {
+      const d = await r.json();
+      resumable = Array.isArray(d.sessions) ? d.sessions : [];
+      // Started with --resume: that session is open already, and is the
+      // one chosen. Anything else has to be chosen.
+      const open = resumable.find(s => s.active);
+      if (open) resume = open.session_id;
+    }
+  } catch (e) { resumable = []; }
+  paintWhich(); paint();
+}
+
+document.getElementById("which-list").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-session]");
+  if (!b) return;
+  resume = b.dataset.session || null;
+  paintWhich(); paint();
+});
 
 async function loadPrefs() {
   try {
@@ -160,6 +267,7 @@ async function loadPrefs() {
     }
   } catch (e) { /* keep defaults */ }
   paint();
+  loadResumable();
 }
 
 function toggle(key) { state[key] = !state[key]; paint(); }
@@ -180,8 +288,21 @@ function setStatus(msg, kind) {
 document.getElementById("go").addEventListener("click", async () => {
   const btn = document.getElementById("go");
   btn.disabled = true;
-  btn.childNodes[0].nodeValue = "Starting ";
+  btn.childNodes[0].nodeValue = resume ? "Resuming " : "Starting ";
   try {
+    // The session first, the microscope after: the same order as a start
+    // with --resume. If the session cannot be resumed nothing has been
+    // started, and the choice is still on the screen.
+    if (resume) {
+      setStatus("Resuming " + resume + "…");
+      const s = await fetch("/api/sessions/" + encodeURIComponent(resume) + "/resume", { method: "POST" });
+      if (!s.ok) {
+        const b = await s.json().catch(() => ({}));
+        setStatus("Couldn't resume " + resume + ": " + (b.detail || s.status), "err");
+        btn.disabled = false; paint();
+        return;
+      }
+    }
     const r = await fetch("/api/launch/go", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

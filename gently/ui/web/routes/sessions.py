@@ -1,6 +1,8 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
+import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -65,6 +67,104 @@ def create_router(server) -> APIRouter:
         except Exception as e:
             logger.warning("Failed to list sessions from FileStore: %s", e)
         return {"sessions": sessions}
+
+    def _what_a_session_holds(store, sid: str) -> dict | None:
+        """What there is to carry on with in a session, read from its folder:
+        directory names and one small checkpoint, no image decoded. None for
+        a session with no embryo in it."""
+        try:
+            embryo_ids = store.list_embryo_ids(sid)
+        except Exception:
+            embryo_ids = []
+        if not embryo_ids:
+            return None
+        timepoints = 0
+        last_image: float | None = None
+        for eid in embryo_ids:
+            try:
+                tps = store.list_projection_timepoints(sid, eid) or []
+            except Exception:
+                tps = []
+            if not tps:
+                continue
+            timepoints += len(tps)
+            try:
+                newest = store.get_projection_path(sid, eid, max(tps))
+                if newest is not None:
+                    taken = newest.stat().st_mtime
+                    last_image = taken if last_image is None else max(last_image, taken)
+            except OSError:
+                pass
+
+        run = None
+        try:
+            folder = store._session_dir(sid)
+            checkpoint = Path(folder) / "timelapse.yaml" if folder is not None else None
+            if checkpoint is not None and checkpoint.is_file():
+                import yaml
+
+                state = yaml.safe_load(checkpoint.read_text(encoding="utf-8")) or {}
+                rows = state.get("embryos") or {}
+                going = [k for k, v in rows.items() if not (v or {}).get("is_complete")]
+                if state.get("status") in ("running", "paused") and going:
+                    run = {
+                        "status": "interrupted",
+                        "embryos_going": len(going),
+                        "saved_at": state.get("saved_at"),
+                        "started_at": state.get("started_at"),
+                    }
+        except Exception:
+            logger.debug("checkpoint of %s could not be read", sid, exc_info=True)
+
+        info = store.get_session(sid) or {}
+        return {
+            "session_id": sid,
+            "name": info.get("name") or sid,
+            "created_at": info.get("created_at", ""),
+            "embryo_count": len(embryo_ids),
+            "timepoints": timepoints,
+            "last_image_at": (
+                datetime.fromtimestamp(last_image).isoformat(timespec="seconds")
+                if last_image is not None
+                else None
+            ),
+            "run": run,
+        }
+
+    @router.get("/api/sessions/resumable")
+    async def resumable_sessions(limit: int = 3, scan: int = 40):
+        """The latest sessions there is something to carry on with, newest
+        first, for the launch gate. A session with no embryo is not offered:
+        a rig accrues many that were opened and closed.
+
+        Declared before ``/api/sessions/{session_id}``, which would take
+        "resumable" for an id.
+        """
+        store = _file_store()
+        if store is None:
+            return {"sessions": [], "active": None}
+        limit = max(1, min(int(limit), 8))
+        scan = max(1, min(int(scan), 200))
+        active = _active_session_id()
+
+        def gather() -> list[dict]:
+            out: list[dict] = []
+            for sid in store.recent_session_ids(scan) or []:
+                held = _what_a_session_holds(store, sid)
+                if held is None:
+                    continue
+                held["active"] = sid == active
+                out.append(held)
+                if len(out) >= limit:
+                    break
+            return out
+
+        try:
+            sessions = await asyncio.to_thread(gather)
+        except Exception as e:
+            logger.warning("Failed to list resumable sessions: %s", e)
+            sessions = []
+        return {"sessions": sessions, "active": active}
 
     @router.get("/api/home/recent-images")
     async def recent_images(limit: int = 8, scan: int = 200):
