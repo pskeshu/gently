@@ -360,11 +360,13 @@ const AgentChat = (() => {
         return content;
     }
 
-    /** Normalize an author for display: clean up legacy/anonymous labels. */
+    /** Normalize an author for display: clean up legacy/unnamed labels. */
     function displayAuthor(author) {
-        if (!author) return 'Anonymous';
-        // Legacy/per-connection labels ("window 3", "User 5") read as anonymous.
-        if (/^(window|user)\s+\d+$/i.test(author)) return 'Anonymous';
+        if (!author) return 'Guest';
+        // Legacy/per-connection labels ("window 3", "User 5"), and the animal
+        // names older sessions recorded, read as somebody who gave no name.
+        if (/^(window|user)\s+\d+$/i.test(author)) return 'Guest';
+        if (/^anonymous\b/i.test(author)) return 'Guest';
         return author;
     }
 

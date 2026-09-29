@@ -69,6 +69,12 @@
   .sw::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--g-faint);transition:.15s}
   .opt.on .sw{background:var(--g-accent);border-color:transparent}
   .opt.on .sw::after{left:21px;background:#fff}
+  /* Diagnostics is not a question of every day. It sits under the two that
+     are, smaller, and says what it costs. */
+  .opt-quiet{padding:12px 18px;margin-top:4px}
+  .opt-quiet .ic{width:34px;height:34px;border-radius:9px}
+  .opt-quiet .ic svg{width:17px;height:17px}
+  .opt-quiet .t{font-size:14px}
   .btn{width:100%;margin-top:18px;background:var(--g-accent);color:#fff;border:0;border-radius:12px;
     padding:16px;font-size:16px;font-weight:700;cursor:pointer;
     display:flex;align-items:center;justify-content:center;gap:9px;transition:filter .15s,opacity .15s}
@@ -138,6 +144,17 @@
       <span class="sw" aria-hidden="true"></span>
     </div>
 
+    <div class="opt opt-quiet" id="opt-diagnostic" data-key="diagnostic" role="switch" aria-checked="false" tabindex="0" aria-labelledby="dg-t">
+      <div class="ic" aria-hidden="true">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+      </div>
+      <div class="txt">
+        <div class="t" id="dg-t">Diagnostics</div>
+        <div class="s" id="dg-s"></div>
+      </div>
+      <span class="sw" aria-hidden="true"></span>
+    </div>
+
     {# Which session. Filled from /api/sessions/resumable, and hidden when
        there is nothing to carry on with. #}
     <div class="which" id="which" hidden role="radiogroup" aria-labelledby="which-cap">
@@ -162,7 +179,7 @@
   </div>
 
 <script>
-const state = { hardware: true, agent: true };
+const state = { hardware: true, agent: true, diagnostic: false };
 // Which session to open: null is a new one. Not remembered between launches.
 // Carrying on is something somebody decides, each time.
 let resume = null;
@@ -170,6 +187,8 @@ let resumable = [];
 const COPY = {
   hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
   agent:    { on: "Help find embryos and watch the timelapse.", off: "Off — manual control only." },
+  diagnostic: { on: "Recording everything on screen and logging in detail. Uses more disk.",
+                off: "Off — for a run that needs working out." },
 };
 
 function paint() {
@@ -179,6 +198,9 @@ function paint() {
   document.getElementById("opt-agent").classList.toggle("on", state.agent);
   document.getElementById("opt-agent").setAttribute("aria-checked", String(state.agent));
   document.getElementById("ag-s").textContent = state.agent ? COPY.agent.on : COPY.agent.off;
+  document.getElementById("opt-diagnostic").classList.toggle("on", state.diagnostic);
+  document.getElementById("opt-diagnostic").setAttribute("aria-checked", String(state.diagnostic));
+  document.getElementById("dg-s").textContent = state.diagnostic ? COPY.diagnostic.on : COPY.diagnostic.off;
   // Honest button label: "Start" spins up the microscope; "Open" is instant.
   document.querySelector("#go").childNodes[0].nodeValue = resume
     ? (state.hardware ? "Resume and start " : "Resume ")
@@ -264,6 +286,7 @@ async function loadPrefs() {
       const p = await r.json();
       if (typeof p.hardware === "boolean") state.hardware = p.hardware;
       if (typeof p.agent === "boolean") state.agent = p.agent;
+      if (typeof p.diagnostic === "boolean") state.diagnostic = p.diagnostic;
     }
   } catch (e) { /* keep defaults */ }
   paint();
@@ -271,7 +294,7 @@ async function loadPrefs() {
 }
 
 function toggle(key) { state[key] = !state[key]; paint(); }
-for (const id of ["opt-hardware", "opt-agent"]) {
+for (const id of ["opt-hardware", "opt-agent", "opt-diagnostic"]) {
   const el = document.getElementById(id);
   el.addEventListener("click", () => toggle(el.dataset.key));
   el.addEventListener("keydown", (e) => {

@@ -125,6 +125,12 @@ def create_router(server) -> APIRouter:
         body = await _safe_json(request)
         prefs = _save_and_record(request, body if isinstance(body, dict) else {}, "launch gate")
         server.gate_passed = True
+        try:
+            from gently.ui.web.routes.replay import apply_diagnostic
+
+            apply_diagnostic(server, bool(prefs.get("diagnostic")))
+        except Exception:
+            logger.warning("could not apply the launch's diagnostics choice", exc_info=True)
         device = None
         if prefs.get("hardware"):
             try:
@@ -136,6 +142,7 @@ def create_router(server) -> APIRouter:
             "ok": True,
             "hardware": bool(prefs.get("hardware")),
             "agent": bool(prefs.get("agent")),
+            "diagnostic": bool(prefs.get("diagnostic")),
             "device": device,
         }
 

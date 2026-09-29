@@ -45,6 +45,7 @@ TOGGLED_CLASSES = [
     "region-history",
     "region-cam-ph",
     "reveal-btn",
+    "diag-badge",
 ]
 
 

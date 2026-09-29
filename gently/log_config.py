@@ -19,6 +19,26 @@ _DEFAULT_FILE_FORMAT = "%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno
 _DEFAULT_DATEFMT = "%H:%M:%S"
 
 
+def set_file_detail(detailed: bool) -> int:
+    """How much the log files are told: everything (DEBUG), or what they are
+    told on an ordinary night (INFO). Returns how many files were changed.
+
+    The loggers already pass DEBUG; it is each file's own level that leaves
+    it out. So this can be changed while Gently runs, which is what the
+    launch gate's Diagnostics does.
+    """
+    level = logging.DEBUG if detailed else logging.INFO
+    seen: set[int] = set()
+    names = [None, *logging.root.manager.loggerDict]
+    for name in names:
+        lgr = logging.getLogger(name)
+        for handler in getattr(lgr, "handlers", []):
+            if isinstance(handler, logging.FileHandler) and id(handler) not in seen:
+                seen.add(id(handler))
+                handler.setLevel(level)
+    return len(seen)
+
+
 def configure_logging(
     level: str | None = None,
     log_file: str | None = None,

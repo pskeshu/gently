@@ -65,7 +65,9 @@ class ConnectionManager:
 
             client_id = str(uuid.uuid4())[:8]
         if not name:
-            name = f"Anonymous {client_id[:4]}"
+            from gently.ui.web.auth import unnamed
+
+            name = unnamed(websocket.client.host if websocket.client else None)
 
         client_info = ClientInfo(
             client_id=client_id,

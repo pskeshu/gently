@@ -268,3 +268,19 @@ body.rail-collapsed[data-run] .v2-nav-item::after { right: 6px; top: 8px; margin
    the strip already say where you are. This lived in the landing page's
    stylesheet, and outlived the page. */
 body.ux-v2 .home-hero { display: none; }
+
+/* Diagnostics is on: said beside LIVE, for as long as it is. */
+.diag-badge {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 0 7px;
+    border: 1px solid var(--accent-orange, #f59e0b);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent-orange, #b45309);
+    cursor: help;
+}
+.diag-badge[hidden] { display: none; }

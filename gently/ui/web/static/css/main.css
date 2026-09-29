@@ -324,6 +324,8 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+.presence-avatar.is-rig svg { display: block; }
+
 .presence-avatar.is-you {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--bg-dark);

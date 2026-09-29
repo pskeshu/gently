@@ -47,6 +47,21 @@ class Role(str, Enum):
     CONTROL = "control"
 
 
+# What somebody is called when they have given no name. Not an animal:
+# "Anonymous Eagle" told the operator nothing about who was watching, and
+# was what they were called themselves.
+AT_THE_RIG = "At the microscope"
+GUEST = "Guest"
+
+
+def unnamed(host: str | None) -> str:
+    """What to call a connection that has no account and has given no name:
+    where it is, which is the one thing known about it."""
+    from gently.core.reveal import is_local
+
+    return AT_THE_RIG if is_local(host) else GUEST
+
+
 def current_username(request: Request) -> str | None:
     """Return the authenticated username from the session cookie, or None.
 
