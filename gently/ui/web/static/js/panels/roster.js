@@ -143,11 +143,46 @@ const RosterPanel = (() => {
         mounts.forEach((opts, hostId) => {
             const host = document.getElementById(hostId);
             if (!host) return;
-            host.innerHTML = (embryos.length
-                ? embryos.map(e => row(e, selected, inSet, opts)).join('')
-                : empty(opts)) + removed(opts);
+            host.innerHTML = legend(embryos, selected, inSet)
+                + (embryos.length
+                    ? embryos.map(e => row(e, selected, inSet, opts)).join('')
+                    : empty(opts)) + removed(opts);
             wire(host);
         });
+    }
+
+    /**
+     * What the two highlights mean, said once above the list.
+     *
+     * With several embryos selected there are two kinds of highlighted row,
+     * and they were told apart by shade alone: a darker one and lighter
+     * ones. Only while there are two kinds. One embryo selected is one
+     * highlight, and needs no explaining.
+     */
+    function legend(embryos, selected, inSet) {
+        const members = embryos.filter(e => inSet.has(e.id));
+        if (members.length < 2) return '';
+        const target = embryos.find(e => e.id === selected);
+        return `<div class="rp-legend" data-legend>
+                  <span><b>${members.length} selected</b> for a run.</span>
+                  ${target ? `<span>The instrument acts on
+                    <b class="rp-legend-target">Embryo ${esc(labelOf(target))}</b>:
+                    Centre, the SPIM head, calibration.</span>` : ''}
+                  <span class="rp-legend-how">Click one to select it alone. Ctrl-click adds or takes out.</span>
+                </div>`;
+    }
+
+    /** The word on a highlighted row, while there are two kinds of them. */
+    function mark(emb, selected, inSet, opts) {
+        if (inSet.size < 2 || !inSet.has(emb.id)) return '';
+        const isTarget = emb.id === selected;
+        const title = isTarget
+            ? 'The instrument acts on this one: Centre, the SPIM head and calibration'
+            : 'Selected for a run. Ctrl-click to take it out.';
+        // The rail is too narrow for a second word beside the name.
+        const word = opts.compact ? (isTarget ? '◎' : '') : (isTarget ? 'target' : 'selected');
+        if (!word) return '';
+        return `<span class="rp-mark${isTarget ? ' is-target' : ''}" title="${title}">${word}</span>`;
     }
 
     /** The removed embryos, under the list, where a mount can remove. */
@@ -217,7 +252,7 @@ const RosterPanel = (() => {
         return `<div class="rp-row${cls}" tabindex="0"
                  data-embryo="${esc(emb.id)}">
                   <span class="rp-main">
-                    <span class="rp-label">Embryo ${esc(labelOf(emb))}${fitBadge(emb, opts)}</span>
+                    <span class="rp-label">Embryo ${esc(labelOf(emb))}${fitBadge(emb, opts)}${mark(emb, selected, inSet, opts)}</span>
                     <span class="rp-xy">${xy ? `${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}` : '—'}</span>
                   </span>
                   <span class="rp-acts">${buttons}</span>

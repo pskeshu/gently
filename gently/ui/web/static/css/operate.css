@@ -1183,6 +1183,44 @@
     background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
+/* Two kinds of highlighted row were told apart by shade alone. Each now
+   carries its word, and the one the instrument acts on a bar down its
+   leading edge, so neither depends on telling two blues apart. */
+.rp-mark {
+    margin-left: 6px;
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 3px;
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--accent);
+    vertical-align: 1px;
+}
+
+.rp-mark.is-target {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+.rp-row.is-primary:has(.rp-mark) { box-shadow: inset 3px 0 0 var(--accent); }
+
+.rp-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    margin: 0 0 var(--op-2);
+    padding: 5px var(--op-2);
+    border-left: 2px solid var(--accent);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    color: var(--op-ink-dim);
+}
+
+.rp-legend b { font-weight: 600; color: var(--op-ink); }
+.rp-legend-how { flex-basis: 100%; font-size: 0.66rem; }
+
 /* Disabled until something is selected, so it cannot be switched to an empty
    target set. */
 #op-target-scope .op-segbtn:disabled {
@@ -1696,7 +1734,15 @@
 .op-cal-kept { margin: 8px 0 12px; }
 .op-cal-kept[hidden] { display: none; }
 .op-cal-kept-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.op-cal-kept-strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 6px; scrollbar-width: thin; }
+/* A plot is read, not glanced at: its axes and its legend are the point. It
+   was 84 px tall in a strip, where its type was three pixels. Two to a row
+   in the pane, and one to a row where the pane is narrow. */
+.op-cal-kept-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 8px;
+    margin-top: 6px;
+}
 .op-cal-kept-img {
     flex: 0 0 auto;
     padding: 0;
@@ -1706,4 +1752,4 @@
     cursor: pointer;
 }
 .op-cal-kept-img:hover, .op-cal-kept-img:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
-.op-cal-kept-img img { display: block; height: 84px; width: auto; border-radius: 3px; }
+.op-cal-kept-img img { display: block; width: 100%; height: auto; border-radius: 3px; }
