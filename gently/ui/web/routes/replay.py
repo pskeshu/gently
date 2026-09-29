@@ -154,7 +154,7 @@ def _prune_recordings(server) -> None:
     store = _store(server)
     if store is None:
         return
-    budget = int(settings.ui.replay_total_budget_mb * 1024 * 1024)
+    budget = int(limits(server)["budget_mb"] * 1024 * 1024)
     active: str | None = None
     try:
         active = server._current_session_id()
@@ -205,6 +205,68 @@ def _read_jsonl(path: Path) -> list[Any]:
     return out
 
 
+def limits(server) -> dict[str, Any]:
+    """What the recording is held to, for this start of Gently.
+
+    Two sets of limits: the ordinary ones, and the larger ones Diagnostics
+    brings. Which applies is chosen at the launch gate, so it is read from
+    the server each time and not fixed when Gently was imported.
+    """
+    diagnostic = getattr(server, "diagnostic", None)
+    if not isinstance(diagnostic, bool):
+        try:
+            from gently.ui.web.launch_prefs import load_prefs
+
+            diagnostic = bool(load_prefs().get("diagnostic"))
+        except Exception:  # noqa: BLE001
+            diagnostic = False
+    if diagnostic:
+        return {
+            "diagnostic": True,
+            "fidelity": "full",
+            "tab_mb": float(
+                max(settings.ui.replay_diagnostic_tab_mb, settings.ui.replay_max_tab_mb)
+            ),
+            "budget_mb": float(
+                max(settings.ui.replay_diagnostic_budget_mb, settings.ui.replay_total_budget_mb)
+            ),
+        }
+    return {
+        "diagnostic": False,
+        "fidelity": settings.ui.replay_fidelity,
+        "tab_mb": float(settings.ui.replay_max_tab_mb),
+        "budget_mb": float(settings.ui.replay_total_budget_mb),
+    }
+
+
+def apply_diagnostic(server, on: bool) -> dict[str, Any]:
+    """Diagnostics on or off, for this start of Gently: what the recorder
+    keeps on pages loaded from now, what the recording is held to, and how
+    much the log files are told."""
+    server.diagnostic = bool(on)
+    now = limits(server)
+    try:
+        server.templates.env.globals["replay_fidelity"] = now["fidelity"]
+    except Exception:  # noqa: BLE001 — a missing templates attr is not fatal
+        pass
+    try:
+        from gently.log_config import set_file_detail
+
+        set_file_detail(bool(on))
+    except Exception:  # noqa: BLE001
+        logger.debug("could not change the log files' detail", exc_info=True)
+    # A tab that reached the ordinary cap is recorded again under the larger one.
+    if on:
+        _capped_tabs.clear()
+        logger.warning(
+            "Diagnostics on: recording in full, up to %.0f MB a tab and %.0f MB in all; "
+            "log files in detail",
+            now["tab_mb"],
+            now["budget_mb"],
+        )
+    return now
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -212,9 +274,14 @@ def create_router(server) -> APIRouter:
     # recorder — the flag is the only coupling between replay and the pages.
     try:
         server.templates.env.globals["replay_enabled"] = settings.ui.replay
-        server.templates.env.globals["replay_fidelity"] = settings.ui.replay_fidelity
+        server.templates.env.globals["replay_fidelity"] = limits(server)["fidelity"]
     except Exception:  # noqa: BLE001 — a missing templates attr is not fatal
         pass
+
+    @router.get("/replay/limits")
+    async def replay_limits():
+        """What the recording is held to now, and whether Diagnostics is on."""
+        return {"recording": bool(settings.ui.replay), **limits(server)}
 
     @router.post("/replay/ingest")
     async def ingest(request: Request):
@@ -261,7 +328,9 @@ def create_router(server) -> APIRouter:
             _pruned = True
             asyncio.create_task(asyncio.to_thread(_prune_recordings, server))
 
-        cap_bytes = int(settings.ui.replay_max_tab_mb * 1024 * 1024)
+        held_to = limits(server)
+        cap_mb = held_to["tab_mb"]
+        cap_bytes = int(cap_mb * 1024 * 1024)
 
         def _write() -> None:
             rrweb_path = base / f"rrweb-{tab}.jsonl"
@@ -283,13 +352,18 @@ def create_router(server) -> APIRouter:
                                 "t": datetime.now().isoformat(),
                                 "action": "rrweb-capped",
                                 "tab": tab,
-                                "params": {"cap_mb": settings.ui.replay_max_tab_mb},
+                                "params": {"cap_mb": cap_mb, "diagnostic": held_to["diagnostic"]},
                             }
                         )
                         logger.warning(
-                            "replay: rrweb cap (%.0f MB) hit for tab %s — dropping further frames",
-                            settings.ui.replay_max_tab_mb,
+                            "replay: rrweb cap (%.0f MB) hit for tab %s — dropping further "
+                            "frames. %s",
+                            cap_mb,
                             tab,
+                            "Raise it in Settings › Recording."
+                            if held_to["diagnostic"]
+                            else "Start Gently with Diagnostics on to record a run in full, "
+                            "or raise the cap in Settings › Recording.",
                         )
                 else:
                     _append_lines(rrweb_path, rrweb_events)

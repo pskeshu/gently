@@ -866,6 +866,29 @@ class MicroscopyAgent:
             unsub = self._event_bus.subscribe(EventType.STAGE_DETECTED, on_stage_detected)
             self._cv_subscriptions.append(unsub)
 
+            def on_run_ended(event):
+                # However the run ended, its tactic is done. See
+                # close_timelapse_tactics.
+                try:
+                    from gently.app.orchestration.tactic_executor import close_timelapse_tactics
+
+                    closed = close_timelapse_tactics(
+                        self, getattr(self, "timelapse_orchestrator", None)
+                    )
+                    if closed:
+                        logger.info(
+                            "Run ended (%s): tactics done: %s", event.event_type.name, closed
+                        )
+                except Exception as e:
+                    logger.warning(f"Error closing the run's tactics: {e}")
+
+            for ended in (
+                EventType.ACQUISITION_STOPPED,
+                EventType.ACQUISITION_COMPLETED,
+                EventType.ACQUISITION_FAILED,
+            ):
+                self._cv_subscriptions.append(self._event_bus.subscribe(ended, on_run_ended))
+
             def on_perception(event):
                 # Bridge the perception loop's DETECTOR_EVALUATED into EmbryoState so
                 # the prompt/display developmental stage reflects the live Perceiver.

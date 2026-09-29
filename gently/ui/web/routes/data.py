@@ -2892,11 +2892,21 @@ def create_router(server) -> APIRouter:
         return orch, agent
 
     def _reconcile_operate_tactics(orch, agent, state: str, clear: bool):
-        """Transition the run's operate-seeded tactics to ``state`` so the
-        Operation Plan / run-spine reflect stop/pause/resume. Best-effort."""
+        """Transition the run's tactics to ``state`` so the Operation Plan and
+        the run view say what the run is doing. Best-effort.
+
+        The tactics the run was linked to, and any other timelapse tactic
+        the plan still calls active or paused: there is one run, so a
+        timelapse tactic that says it is going is this one or is wrong.
+        """
+        from gently.app.orchestration.tactic_executor import timelapse_tactics_going
+
         cs = getattr(agent, "context_store", None)
         sid = getattr(agent, "session_id", None)
         ids = list(getattr(orch, "_operate_tactic_ids", []) or [])
+        for tid in timelapse_tactics_going(agent):
+            if tid not in ids:
+                ids.append(tid)
         if cs is not None and sid and ids:
             for tid in ids:
                 try:
@@ -2921,11 +2931,21 @@ def create_router(server) -> APIRouter:
             return
         try:
             plan = cs.get_operation_plan(sid) or {}
-            ids = [
+            ended = [
                 t.get("id")
                 for t in (plan.get("tactics") or [])
                 if t.get("kind") == "standing_timelapse" and t.get("state") in ("done", "paused")
             ]
+            # The run that is carried on is one run: the tactic the session's
+            # kept plan names, or the last timelapse tactic there was. Every
+            # timelapse tactic the session had ever finished used to be
+            # brought back to "active" together.
+            kept: dict = {}
+            store = getattr(agent, "store", None)
+            if store is not None and hasattr(store, "get_acquisition_plan"):
+                kept = store.get_acquisition_plan(sid) or {}
+            named = kept.get("tactic_id")
+            ids = [named] if named in ended else ended[-1:]
             for tid in ids:
                 cs.transition_tactic(sid, tid, "active")
             if ids:
@@ -3016,6 +3036,9 @@ def create_router(server) -> APIRouter:
                 "last_error": getattr(e, "last_error", None),
             }
         out["embryos"] = rows
+        # How the last run ended, so an idle run with embryos still going can
+        # be told apart: stopped by somebody, or interrupted.
+        out["ended"] = getattr(orch, "_ended", None)
         # A restored run the operator can carry on — idle, embryos still going.
         try:
             out["resumable"] = bool(orch.can_continue())

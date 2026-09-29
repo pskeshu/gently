@@ -290,14 +290,16 @@ const PresenceManager = {
     clientId: null,
     name: null,
     clients: [],
+    // Whether the name is one somebody chose. One that was not follows
+    // what the server says about this browser.
+    chosen: false,
+    // What this browser is, from the server: signed in or not, and whether
+    // it is the microscope's own computer.
+    me: null,
+    ready: null,
 
-    // Animal names for anonymous users
-    ANIMALS: [
-        'Koala', 'Penguin', 'Fox', 'Owl', 'Panda', 'Tiger', 'Dolphin',
-        'Eagle', 'Bear', 'Wolf', 'Rabbit', 'Deer', 'Otter', 'Falcon',
-        'Hedgehog', 'Badger', 'Lynx', 'Seal', 'Raven', 'Crane', 'Gecko',
-        'Meerkat', 'Lemur', 'Toucan', 'Sloth', 'Jaguar', 'Pelican', 'Moose'
-    ],
+    AT_THE_RIG: 'At the microscope',
+    GUEST: 'Guest',
 
     init() {
         // Load or generate client ID
@@ -307,11 +309,20 @@ const PresenceManager = {
             localStorage.setItem('gently-client-id', this.clientId);
         }
 
-        // Load saved name or generate anonymous name
-        this.name = localStorage.getItem('gently-user-name');
-        if (!this.name) {
-            this.name = this.getAnonymousName();
-        }
+        // A name somebody gave wins. The animal names this used to make up
+        // ("Anonymous Eagle") were never chosen by anybody.
+        const saved = localStorage.getItem('gently-user-name');
+        this.chosen = !!saved && !/^anonymous\b/i.test(saved);
+        this.name = this.chosen ? saved : this.GUEST;
+
+        // Without one: the account's name, or where this browser is.
+        this.ready = fetch('/api/auth/me')
+            .then(r => (r.ok ? r.json() : null))
+            .catch(() => null)
+            .then(me => {
+                this.me = me || {};
+                if (!this.chosen) this.name = this.unnamedName();
+            });
 
         // Subscribe to presence updates via event bus
         ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
@@ -323,21 +334,26 @@ const PresenceManager = {
         );
     },
 
-    getAnonymousName() {
-        // Use client ID to pick a consistent animal
-        const hash = this.clientId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-        const animal = this.ANIMALS[hash % this.ANIMALS.length];
-        return `Anonymous ${animal}`;
+    /** What this browser is called when nobody has named it. */
+    unnamedName() {
+        const me = this.me || {};
+        if (me.authenticated && me.username) return me.username;
+        return me.unnamed || (me.local ? this.AT_THE_RIG : this.GUEST);
     },
 
     sendJoin() {
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({
-                type: 'join',
-                client_id: this.clientId,
-                name: this.name
-            }));
-        }
+        // After the server has said who this is, so that nobody is
+        // announced as a guest and renamed a moment later.
+        const join = () => {
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                state.ws.send(JSON.stringify({
+                    type: 'join',
+                    client_id: this.clientId,
+                    name: this.name
+                }));
+            }
+        };
+        (this.ready || Promise.resolve()).then(join, join);
     },
 
     handlePresenceUpdate(clients) {
@@ -368,8 +384,15 @@ const PresenceManager = {
             const avatar = document.createElement('div');
             avatar.className = 'presence-avatar' + (client.is_you ? ' is-you' : '');
             avatar.style.backgroundColor = client.color;
-            avatar.textContent = this.getInitials(client.name);
-            avatar.setAttribute('data-tooltip', client.is_you ? `${client.name} (you)` : client.name);
+            if (client.name === this.AT_THE_RIG) {
+                avatar.innerHTML = this.RIG_ICON;
+                avatar.classList.add('is-rig');
+            } else {
+                avatar.textContent = this.getInitials(client.name);
+            }
+            avatar.setAttribute('data-tooltip', client.is_you
+                ? `${this.shown(client.name)} (you) · click to give your name`
+                : this.shown(client.name));
 
             // Click on your own avatar to change name
             if (client.is_you) {
@@ -390,12 +413,19 @@ const PresenceManager = {
         }
     },
 
+    // A microscope, for whoever is at it: the same mark as Devices.
+    RIG_ICON: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+        + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<circle cx="12" cy="9" r="4"/><path d="M12 13v6M8 21h8M6 9a6 6 0 0 1 8-5.6"/></svg>',
+
+    /** A name as it is shown. Sessions from before this still hold animals. */
+    shown(name) {
+        return /^anonymous\b/i.test(name || '') ? this.GUEST : (name || this.GUEST);
+    },
+
     getInitials(name) {
+        name = this.shown(name);
         if (!name) return '?';
-        // For "Anonymous X", use animal initial
-        if (name.startsWith('Anonymous ')) {
-            return name.split(' ')[1]?.[0] || 'A';
-        }
         // Otherwise use first letter of each word (max 2)
         const words = name.trim().split(/\s+/);
         if (words.length === 1) {
@@ -409,7 +439,11 @@ const PresenceManager = {
 
         this.name = name.trim();
         localStorage.setItem('gently-user-name', this.name);
+        this.announce();
+    },
 
+    /** Tell the others what this browser is called now. Saves nothing. */
+    announce() {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
             state.ws.send(JSON.stringify({
                 type: 'set_name',
@@ -419,22 +453,22 @@ const PresenceManager = {
     },
 
     showNamePrompt() {
-        const current = this.name;
-        const isAnonymous = current.startsWith('Anonymous ');
-
+        const unnamed = this.unnamedName();
         const newName = prompt(
-            'Enter your display name (or leave blank for anonymous):',
-            isAnonymous ? '' : current
+            `Your name, as the others watching see it.\nLeave it blank to go by "${unnamed}".`,
+            this.chosen ? this.name : ''
         );
 
         if (newName === null) return; // Cancelled
 
         if (newName.trim() === '') {
-            // Reset to anonymous
+            // Back to what the server says this browser is.
             localStorage.removeItem('gently-user-name');
-            this.name = this.getAnonymousName();
-            this.setName(this.name);
+            this.chosen = false;
+            this.name = unnamed;
+            this.announce();
         } else {
+            this.chosen = true;
             this.setName(newName);
         }
     }
@@ -693,6 +727,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize presence manager (before WebSocket so ID is ready)
     PresenceManager.init();
+    // Diagnostics is chosen at the launch gate and costs disk for as long
+    // as it is on. The workspace says so.
+    fetch('/replay/limits').then(r => (r.ok ? r.json() : null)).catch(() => null).then(d => {
+        const badge = document.getElementById('diag-badge');
+        if (badge) badge.hidden = !(d && d.diagnostic);
+    });
 
     // Initialize tooltip system
     Tooltips.init();

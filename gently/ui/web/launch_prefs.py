@@ -32,6 +32,9 @@ _DEFAULTS: dict = {
     # biologist should never have to choose (RFC #78). Only a scope wrangler
     # pins a concrete value (in Settings).
     "sam_device": "auto",
+    # Record in full, with the larger limits, and log in detail. For a run
+    # that is being worked out. See gently/ui/web/routes/replay.py.
+    "diagnostic": False,
 }
 _ALLOWED_KEYS = set(_DEFAULTS)
 

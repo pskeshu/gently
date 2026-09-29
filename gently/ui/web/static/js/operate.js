@@ -2445,7 +2445,12 @@ const OperateManager = (function () {
 
         const parts = [];
         if (running || ids.length) {
-            const bits = [resumable ? 'interrupted — press Resume run to carry on' : st.status];
+            // Idle with embryos still going is one of two things. A run
+            // somebody stopped is not one that was interrupted.
+            const idle = st.ended === 'stopped'
+                ? 'stopped — Resume run carries it on'
+                : 'interrupted — press Resume run to carry on';
+            const bits = [resumable ? idle : (st.ended && !running ? st.ended : st.status)];
             if (st.current_round != null && st.current_round >= 0) bits.push(`${st.total_timepoints || 0} volumes`);
             if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
             if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);

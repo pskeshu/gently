@@ -93,6 +93,56 @@ def _num(v, default=None):
         return default
 
 
+def timelapse_tactics_going(agent) -> list[str]:
+    """The ids of the session's timelapse tactics the plan calls active or paused."""
+    cs = getattr(agent, "context_store", None)
+    sid = getattr(agent, "session_id", None)
+    if cs is None or not sid:
+        return []
+    try:
+        plan = cs.get_operation_plan(sid) or {}
+    except Exception:
+        return []
+    return [
+        t["id"]
+        for t in (plan.get("tactics") or [])
+        if t.get("kind") == "standing_timelapse"
+        and t.get("state") in ("active", "paused")
+        and t.get("id")
+    ]
+
+
+def close_timelapse_tactics(agent, orchestrator=None) -> list[str]:
+    """The run has ended: its tactics are done. Returns the ids closed.
+
+    Called for every way a run ends, whoever ended it: the Stop button, the
+    assistant's tool, the last embryo reaching its ending, an error. The
+    Stop button used to be the only one that said so, and only for a run
+    started from the pane.
+    """
+    cs = getattr(agent, "context_store", None)
+    sid = getattr(agent, "session_id", None)
+    if cs is None or not sid:
+        return []
+    ids = timelapse_tactics_going(agent)
+    for tid in list(getattr(orchestrator, "_operate_tactic_ids", None) or []):
+        if tid and tid not in ids:
+            ids.append(tid)
+    closed = []
+    for tid in ids:
+        try:
+            if cs.transition_tactic(sid, tid, "done"):
+                closed.append(tid)
+        except Exception:
+            logger.debug("could not close tactic %s", tid, exc_info=True)
+    if orchestrator is not None:
+        try:
+            orchestrator._operate_tactic_ids = []
+        except Exception:
+            pass
+    return closed
+
+
 async def execute_tactic(agent, tactic: dict) -> dict:
     """Execute one tactic against the agent's orchestrator.
 
@@ -140,6 +190,15 @@ async def execute_tactic(agent, tactic: dict) -> dict:
                 start_kwargs["stop_conditions"] = overrides
             message = await orchestrator.start(**start_kwargs)
             _keep_plan(agent, structure, embryo_ids, message, tactic)
+            # The run knows which tactic it is, so that pausing and resuming
+            # it can say so on the tactic. A run started from the pane has
+            # always been linked this way; one started from a saved tactic
+            # was not, and its tactic stayed "active" after the run stopped.
+            if tactic_id:
+                try:
+                    orchestrator._operate_tactic_ids = [tactic_id]
+                except Exception:
+                    logger.debug("could not link the run to tactic %s", tactic_id, exc_info=True)
             mode = structure.get("monitoring_mode")
             if mode and mode != "idle":
                 try:

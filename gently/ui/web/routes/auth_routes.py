@@ -76,12 +76,19 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/auth/me")
     async def me(request: Request):
+        from gently.core.reveal import is_local
+        from gently.ui.web.auth import unnamed
+
+        # Where this browser is, and what it is called until it says
+        # otherwise. Known whether or not there are accounts.
+        host = request.client.host if request.client else None
+        here = {"local": is_local(host), "unnamed": unnamed(host)}
         store = get_account_store()
         if store is None or not store.has_users():
-            return JSONResponse({"accounts": False, "authenticated": False})
+            return JSONResponse({"accounts": False, "authenticated": False, **here})
         username = current_username(request)
         if not username:
-            return JSONResponse({"accounts": True, "authenticated": False})
+            return JSONResponse({"accounts": True, "authenticated": False, **here})
         role = store.get_role(username)
         return JSONResponse(
             {
@@ -90,6 +97,7 @@ def create_router(server) -> APIRouter:
                 "username": username,
                 "role": role,
                 "can_control": role in CONTROL_ROLES,
+                **here,
             }
         )
 

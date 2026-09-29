@@ -206,6 +206,18 @@ class UISettings:
         default_factory=lambda: _env("REPLAY_TOTAL_BUDGET_MB", 1024.0)
     )
 
+    # Diagnostics, chosen at the launch gate for one start of Gently: the
+    # recording is kept in full, and these larger limits replace the two
+    # above. A run that is being worked out needs what an ordinary night
+    # does not: "replay: rrweb cap (120 MB) hit ... dropping further frames"
+    # was the recording stopping partway through the run it was wanted for.
+    replay_diagnostic_tab_mb: float = field(
+        default_factory=lambda: _env("REPLAY_DIAGNOSTIC_TAB_MB", 1024.0)
+    )
+    replay_diagnostic_budget_mb: float = field(
+        default_factory=lambda: _env("REPLAY_DIAGNOSTIC_BUDGET_MB", 8192.0)
+    )
+
     # What a projection shows of a SPIM frame. The camera's chip carries two
     # channels side by side, and a frame read out at the chip's full width
     # holds both: the left one bright, the right one a dim copy beside it.
