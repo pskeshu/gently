@@ -31,6 +31,7 @@ WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static"
 # Classes the UI toggles through `.hidden` in JS. Kept explicit rather than
 # inferred: the point is to state which surfaces must be able to disappear.
 TOGGLED_CLASSES = [
+    "settings-radio",
     "rig-progress",
     "cp",
     "cp-strip",

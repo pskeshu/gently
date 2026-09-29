@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from gently.harness import calibration_gate
@@ -152,6 +152,26 @@ def _parse_stop_overrides(raw) -> dict:
                 ),
             )
     return out
+
+
+def _who(request) -> dict:
+    """Who is changing a setting, for the history: the account when there is
+    one, the machine they came from, and the session the rig was in."""
+    from gently.ui.web.auth import current_username
+
+    by = None
+    try:
+        by = current_username(request)
+    except Exception:
+        by = None
+    host = getattr(getattr(request, "client", None), "host", None)
+    return {"by": by, "client": host}
+
+
+def _registry_category_label(category_id: str) -> str:
+    from gently.ui.web.settings_registry import CATEGORIES
+
+    return next((c["label"] for c in CATEGORIES if c["id"] == category_id), category_id)
 
 
 def create_router(server) -> APIRouter:
@@ -655,12 +675,20 @@ def create_router(server) -> APIRouter:
         return res
 
     @router.post("/api/devices/temperature/config", dependencies=[Depends(require_control)])
-    async def set_temperature_config(payload: dict = Body(...)):  # noqa: B008
+    async def set_temperature_config(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Reconfigure the thermalizer (serial/mqtt/mock). Live hot-swap where
         possible; otherwise persisted for the next device-layer restart."""
+        from gently.core import settings_history
+
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
+        before: dict = {}
+        try:
+            got = await client.get_temperature_config()
+            before = (got or {}).get("config") or {}
+        except Exception:
+            before = {}
         try:
             res = await client.set_temperature_config(payload)
         except Exception as exc:
@@ -668,6 +696,19 @@ def create_router(server) -> APIRouter:
             raise HTTPException(
                 status_code=502, detail=f"thermalizer reconfigure failed: {exc}"
             ) from exc
+        if isinstance(res, dict) and (res.get("success") or res.get("restart_required")):
+            # Only what was sent is compared: the form sends the connection it
+            # means, and a field it did not send was not changed by it.
+            sent = payload if isinstance(payload, dict) else {}
+            settings_history.record_diff(
+                "microscope.thermalizer",
+                {k: before.get(k) for k in sent},
+                sent,
+                reach="rig",
+                via="Settings: thermalizer",
+                session_id=_session_id_now(),
+                **_who(request),
+            )
         return res
 
     @router.get("/api/config/effective")
@@ -746,78 +787,52 @@ def create_router(server) -> APIRouter:
             return {}
 
     @router.put("/api/config/dashboard-defaults", dependencies=[Depends(require_control)])
-    async def put_dashboard_defaults(payload: dict = Body(...)):  # noqa: B008
+    async def put_dashboard_defaults(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Save the current dashboard prefs as the rig-wide defaults."""
         import json
 
+        from gently.core import settings_history
+
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="body must be an object")
+        before: dict = {}
+        if _dashboard_defaults_path.exists():
+            try:
+                loaded = json.loads(_dashboard_defaults_path.read_text())
+                before = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                before = {}
         _dashboard_defaults_path.write_text(json.dumps(payload, indent=2))
+        settings_history.record_diff(
+            "rig-defaults",
+            before,
+            payload,
+            reach="rig",
+            via="Settings: save as rig defaults",
+            session_id=_session_id_now(),
+            **_who(request),
+        )
         return {"saved": True}
 
     # --- Restart-required settings.py editors (persisted to config/settings.local.yml) ---
-    # Allowlist of knobs that are ACTUALLY consumed by the runtime (verified live
-    # readers) + grouped for the UI. Never expose ports/hosts/model-IDs/storage/
-    # secrets. Deliberately omitted: timeouts.rpc_call (removed — RPyC-era dead),
-    # timeouts.plan_execution and ml.* defaults (currently 0 readers — editing
-    # would be a silent no-op).
+    # The allowlist is the settings registry's: every setting it keeps in the
+    # overrides file, and nothing else. It used to be a second list, here, that
+    # had to be kept in step by hand. Ports, hosts, model ids, the storage root
+    # and secrets are not in the registry as editable, so they are not here.
+    from gently.ui.web import settings_registry as _registry
+
+    def _getter(source: str):
+        return lambda S: _registry._dig(S, source)
+
     _override_keys = [
         {
-            "env": "GENTLY_TIMEOUT_VOLUME",
-            "label": "Volume acquisition (s)",
-            "type": "int",
-            "group": "Timeouts",
-            "get": lambda S: S.timeouts.volume_acquisition,
-        },
-        {
-            "env": "GENTLY_TIMEOUT_API",
-            "label": "External API call (s)",
-            "type": "int",
-            "group": "Timeouts",
-            "get": lambda S: S.timeouts.api_call,
-        },
-        {
-            "env": "GENTLY_MESH_BROADCAST_INTERVAL",
-            "label": "Broadcast interval (s)",
-            "type": "float",
-            "group": "Mesh network",
-            "get": lambda S: S.mesh.broadcast_interval_s,
-        },
-        {
-            "env": "GENTLY_MESH_STALE_THRESHOLD",
-            "label": "Stale threshold (s)",
-            "type": "float",
-            "group": "Mesh network",
-            "get": lambda S: S.mesh.stale_threshold_s,
-        },
-        {
-            "env": "GENTLY_MESH_DEAD_THRESHOLD",
-            "label": "Dead threshold (s)",
-            "type": "float",
-            "group": "Mesh network",
-            "get": lambda S: S.mesh.dead_threshold_s,
-        },
-        {
-            "env": "GENTLY_UX_V2",
-            "label": "UX v2 dashboard",
-            "type": "bool",
-            "group": "Interface",
-            "get": lambda S: S.ui.ux_v2,
-        },
-        {
-            "env": "GENTLY_NCBI_TOOL",
-            "label": "Tool name",
-            "type": "str",
-            "group": "NCBI (Entrez)",
-            "get": lambda S: S.api.ncbi_tool,
-        },
-        {
-            "env": "GENTLY_NCBI_EMAIL",
-            "label": "Contact email",
-            "type": "str",
-            "group": "NCBI (Entrez)",
-            "get": lambda S: S.api.ncbi_email,
-        },
+            "env": _registry.env_name(st),
+            "label": st.label,
+            "type": _registry.override_type(st),
+            "group": st.group or _registry_category_label(st.category),
+            "get": _getter(st.source),
+        }
+        for st in _registry.env_settings()
     ]
     _settings_local_path = _HARDWARE_CONFIG_PATH.parent / "settings.local.yml"
 
@@ -837,6 +852,78 @@ def create_router(server) -> APIRouter:
             return yaml.safe_load(_settings_local_path.read_text()) or {}
         except Exception:
             return {}
+
+    @router.get("/api/settings/schema")
+    async def get_settings_schema():
+        """Every setting the Settings surface shows: what it is about, how far
+        it reaches, when a change takes effect, where it is kept, and — for the
+        ones the server knows — what is in effect now. The page is drawn from
+        this. Read-only, so it needs no control."""
+        import json
+
+        from gently.settings import settings as S
+        from gently.ui.web.launch_prefs import load_prefs
+
+        rig_defaults: dict = {}
+        if _dashboard_defaults_path.exists():
+            try:
+                loaded = json.loads(_dashboard_defaults_path.read_text())
+                rig_defaults = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                rig_defaults = {}
+        try:
+            launch = load_prefs()
+        except Exception:
+            launch = {}
+        return _registry.schema(
+            S,
+            overridden=set(_read_settings_local()),
+            launch_prefs=launch,
+            rig_defaults=rig_defaults,
+        )
+
+    @router.get("/api/settings/history")
+    async def get_settings_history(limit: int = 200, key: str | None = None):
+        """Every change to a setting, newest first. Kept on disk for good."""
+        from gently.core import settings_history
+
+        return {
+            "changes": settings_history.read(limit=limit, key=key),
+            "total": settings_history.count(),
+            "file": str(settings_history.path()),
+        }
+
+    @router.post("/api/settings/history")
+    async def report_setting_change(request: Request, payload: dict = Body(...)):  # noqa: B008
+        """A browser reports a change to one of its own preferences.
+
+        The preference lives in that browser, so the server learns of the
+        change only by being told. Only a setting the registry keeps in the
+        browser can be reported, which is also why this needs no control: it
+        records a choice the caller was always free to make.
+        """
+        from gently.core import settings_history
+
+        key = str((payload or {}).get("key") or "")
+        st = _registry.by_key().get(key)
+        if st is None and key not in ("views.reset", "views.import"):
+            raise HTTPException(status_code=400, detail=f"unknown setting: {key}")
+        if st is not None and not (st.store == "theme" or st.store.startswith("prefs:")):
+            raise HTTPException(status_code=400, detail=f"{key} is not kept in the browser")
+        who = _who(request)
+        if payload.get("client_id"):
+            who["client"] = f"{who.get('client') or ''} {payload['client_id']}".strip()
+        entry = settings_history.record(
+            key,
+            payload.get("old"),
+            payload.get("new"),
+            reach="browser",
+            via="Settings",
+            label=st.label if st else None,
+            session_id=_session_id_now(),
+            **who,
+        )
+        return {"recorded": entry is not None}
 
     @router.get("/api/config/settings-overrides")
     async def get_settings_overrides():
@@ -859,9 +946,12 @@ def create_router(server) -> APIRouter:
         return {"note": "changes take effect on the next process restart", "items": items}
 
     @router.put("/api/config/settings-overrides", dependencies=[Depends(require_control)])
-    async def put_settings_overrides(payload: dict = Body(...)):  # noqa: B008
+    async def put_settings_overrides(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Persist restart-required overrides to config/settings.local.yml. Only
         allowlisted keys; never mutates the frozen settings singleton live."""
+        from gently.core import settings_history
+        from gently.settings import settings as S
+
         allowed = {k["env"]: k["type"] for k in _override_keys}
         updates = {}
         for k, v in (payload or {}).items():
@@ -876,10 +966,32 @@ def create_router(server) -> APIRouter:
                     status_code=400, detail=f"{k}: invalid {allowed[k]} value"
                 ) from None
         existing = _read_settings_local()
+        before = dict(existing)
         existing.update(updates)
         _settings_local_path.write_text(
             yaml.safe_dump(existing, default_flow_style=False, sort_keys=True)
         )
+        # What it was: the override that was on file, or, with none, what the
+        # process is running with.
+        in_effect = {k["env"]: k["get"] for k in _override_keys}
+        names = {_registry.env_name(st): st for st in _registry.env_settings()}
+        who = _who(request)
+        for env, value in updates.items():
+            try:
+                was = before[env] if env in before else in_effect[env](S)
+            except Exception:
+                was = None
+            st = names.get(env)
+            settings_history.record(
+                st.key if st else env,
+                was,
+                value,
+                reach="rig",
+                via=f"Settings: {env}, applies after a restart",
+                label=st.label if st else None,
+                session_id=_session_id_now(),
+                **who,
+            )
         return {
             "saved": list(updates.keys()),
             "restart_required": True,
@@ -2033,16 +2145,35 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"envelope read failed: {exc}") from exc
 
     @router.post("/api/devices/stage/envelope", dependencies=[Depends(require_control)])
-    async def stage_envelope_set(payload: dict = Body(...)):  # noqa: B008
+    async def stage_envelope_set(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Set the XY safety envelope from the Map's Edit region wizard (#107)."""
+        from gently.core import settings_history
+
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         vals = {k: _num(payload.get(k)) for k in ("x_min", "x_max", "y_min", "y_max")}
         if any(v is None for v in vals.values()):
             raise HTTPException(status_code=400, detail="x_min, x_max, y_min, y_max (µm) required")
+        region_before: dict = {}
+        try:
+            got = await client.get_stage_envelope()
+            env = (got or {}).get("envelope") or got or {}
+            region_before = {k: env.get(k) for k in vals if isinstance(env, dict)}
+        except Exception:
+            region_before = {}
         try:
             res = await client.set_stage_envelope(**vals)
+            if res.get("success", True):
+                settings_history.record_diff(
+                    "microscope.xyRegion",
+                    region_before,
+                    vals,
+                    reach="rig",
+                    via="Map: edit region",
+                    session_id=_session_id_now(),
+                    **_who(request),
+                )
         except Exception as exc:
             logger.exception("envelope set failed")
             raise HTTPException(status_code=502, detail=f"envelope set failed: {exc}") from exc
@@ -2051,7 +2182,7 @@ def create_router(server) -> APIRouter:
         return res
 
     @router.post("/api/devices/stage/envelope/enforced", dependencies=[Depends(require_control)])
-    async def stage_envelope_enforced(payload: dict = Body(...)):  # noqa: B008
+    async def stage_envelope_enforced(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Turn the controller's XY soft limits on or off. Body: {enforced: bool}.
 
         Not a Gently-only setting: the Tiger enforces its limits against every
@@ -2065,7 +2196,21 @@ def create_router(server) -> APIRouter:
         if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            return await client.set_envelope_enforced(enforced)
+            res = await client.set_envelope_enforced(enforced)
+            if not (isinstance(res, dict) and res.get("success") is False):
+                from gently.core import settings_history
+
+                settings_history.record(
+                    "microscope.xyLimits.enforced",
+                    (not enforced) if isinstance(res, dict) and res.get("changed", True) else None,
+                    enforced,
+                    reach="rig",
+                    via="Map: XY limits",
+                    label="The controller's XY limits",
+                    session_id=_session_id_now(),
+                    **_who(request),
+                )
+            return res
         except Exception as exc:
             logger.exception("Envelope enforcement change failed")
             raise HTTPException(status_code=502, detail=f"limits change failed: {exc}") from exc
@@ -2082,13 +2227,20 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"joystick read failed: {exc}") from exc
 
     @router.post("/api/devices/stage/joystick", dependencies=[Depends(require_control)])
-    async def stage_joystick_set(payload: dict = Body(...)):  # noqa: B008
+    async def stage_joystick_set(request: Request, payload: dict = Body(...)):  # noqa: B008
         """Joystick lock: {"enabled": bool}. Settings → Stage."""
+        from gently.core import settings_history
+
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         if not isinstance(payload.get("enabled"), bool):
             raise HTTPException(status_code=400, detail="boolean 'enabled' required")
+        was = None
+        try:
+            was = (await client.get_joystick() or {}).get("enabled")
+        except Exception:
+            was = None
         try:
             res = await client.set_joystick(payload["enabled"])
         except Exception as exc:
@@ -2096,6 +2248,16 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"joystick set failed: {exc}") from exc
         if not res.get("success", True):
             raise HTTPException(status_code=502, detail=res.get("error", "refused"))
+        settings_history.record(
+            "microscope.joystick.enabled",
+            was,
+            bool(res.get("enabled", payload["enabled"])),
+            reach="rig",
+            via="Settings: joystick lock",
+            label="Joystick enabled at the controller",
+            session_id=_session_id_now(),
+            **_who(request),
+        )
         return res
 
     @router.post("/api/devices/motion/halt")
@@ -2588,6 +2750,13 @@ def create_router(server) -> APIRouter:
                 orch._operate_tactic_ids = [i for i in ids if i]
         except Exception:
             logger.debug("reawaken tactics failed", exc_info=True)
+
+    def _session_id_now() -> str | None:
+        """The session the rig is in, for a line of the settings history."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        sid = getattr(agent, "session_id", None) if agent is not None else None
+        return sid if isinstance(sid, str) else None
 
     def _keep_plan(agent, plan: dict) -> None:
         """Write the run's plan to the session. Best-effort."""

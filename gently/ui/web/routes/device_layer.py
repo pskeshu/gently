@@ -70,6 +70,29 @@ def create_router(server) -> APIRouter:
         """The bare two-question launch screen (prefilled from last choice)."""
         return server.templates.TemplateResponse(request, "launch.html", {})
 
+    def _save_and_record(request: Request, body: dict, via: str) -> dict:
+        """save_prefs, with each choice that changed added to the settings history."""
+        from gently.core import settings_history
+        from gently.ui.web.auth import current_username
+
+        before = stored_prefs()
+        merged = save_prefs(body)
+        after = stored_prefs()
+        try:
+            by = current_username(request)
+        except Exception:
+            by = None
+        settings_history.record_diff(
+            "launch",
+            {k: before.get(k) for k in set(before) | set(after)},
+            after,
+            reach="rig",
+            via=via,
+            by=by,
+            client=getattr(getattr(request, "client", None), "host", None),
+        )
+        return merged
+
     @router.get("/api/launch/prefs")
     async def get_launch_prefs():
         """Persisted launch choices (hardware/agent toggles + advanced defaults).
@@ -86,7 +109,7 @@ def create_router(server) -> APIRouter:
     async def set_launch_prefs(request: Request):
         """Persist launch choices; returns the merged result."""
         body = await request.json()
-        return save_prefs(body if isinstance(body, dict) else {})
+        return _save_and_record(request, body if isinstance(body, dict) else {}, "Settings")
 
     @router.post("/api/launch/go", dependencies=[Depends(require_control)])
     async def launch_go(request: Request):
@@ -100,7 +123,7 @@ def create_router(server) -> APIRouter:
         immediately and follow the boot there.
         """
         body = await _safe_json(request)
-        prefs = save_prefs(body if isinstance(body, dict) else {})
+        prefs = _save_and_record(request, body if isinstance(body, dict) else {}, "launch gate")
         server.gate_passed = True
         device = None
         if prefs.get("hardware"):

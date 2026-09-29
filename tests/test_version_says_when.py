@@ -21,7 +21,7 @@ from gently._version import __version__, build_date, build_id
 
 WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web"
 LAUNCH = (WEB / "templates" / "launch.html").read_text(encoding="utf-8")
-SETTINGS = (WEB / "templates" / "settings.html").read_text(encoding="utf-8")
+REGISTRY = (WEB / "settings_registry.py").read_text(encoding="utf-8")
 SERVER = (WEB / "server.py").read_text(encoding="utf-8")
 
 
@@ -114,7 +114,11 @@ def test_the_iso_survives_when_the_script_does_not():
 
 
 def test_settings_carries_it_too():
-    assert "built {{ gently_build_date }}" in SETTINGS
+    """Settings is a tab drawn from the registry now; the build and its date
+    are one of its entries, under System."""
+    assert 'key="system.version"' in REGISTRY
+    fn = REGISTRY[REGISTRY.index("def _computed(name: str)") :][:500]
+    assert "build_id()" in fn and "build_date()" in fn
 
 
 def test_the_server_hands_both_to_every_template():

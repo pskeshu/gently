@@ -11504,3 +11504,103 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
     border-color: var(--border);
 }
 .filmstrip-dic-cell .filmstrip-stage-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+/* ── Settings, as a tab of the app ───────────────────────────────────────── */
+#settings-content .settings-layout {
+    min-height: 0;
+    height: calc(100vh - 110px);
+    background: transparent;
+}
+#settings-content .settings-nav {
+    position: static;
+    height: auto;
+    width: 190px;
+    min-width: 190px;
+    padding: 1rem 0;
+}
+#settings-content .settings-content {
+    max-width: 860px;
+    padding: 1.5rem 2rem 2rem;
+}
+.settings-blurb {
+    margin: -0.6rem 0 1.4rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.settings-row {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+.settings-row-main { flex: 1 1 auto; min-width: 0; }
+.settings-row-side {
+    flex: 0 0 170px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    text-align: right;
+}
+/* How far a setting reaches. One of two colours, so it can be read at a
+   glance down the column: a choice of mine, or a choice for everyone here. */
+.settings-badge {
+    font-size: 0.66rem;
+    letter-spacing: 0.02em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.settings-badge.is-rig {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--accent);
+}
+.settings-badge.is-set { border-style: dashed; }
+.settings-row-status { font-size: 0.72rem; color: var(--accent-green); min-height: 1em; }
+.settings-row-status.is-err { color: var(--accent-orange); }
+.settings-readonly {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text);
+    word-break: break-all;
+}
+.settings-where { font-size: 0.82rem; color: var(--text-muted); }
+.settings-where b { color: var(--text); font-weight: 500; }
+.settings-go { margin-left: 0.75rem; padding: 2px 10px; font-size: 0.75rem; }
+.settings-input-wide { width: 100%; max-width: 360px; }
+.settings-list { margin: 0 0 0.9rem 1.1rem; padding: 0; font-size: 0.82rem; line-height: 1.55; }
+.settings-custom { margin-bottom: 1.25rem; }
+a.settings-btn { display: inline-block; text-decoration: none; }
+@media (max-width: 900px) {
+    .settings-row { flex-direction: column; gap: 0.4rem; }
+    .settings-row-side { flex-basis: auto; align-items: flex-start; text-align: left; }
+}
+
+/* In the tab the defaults bar ends the list; it does not ride over it. */
+#settings-content .settings-save-bar { position: static; background: transparent; margin-top: 0.5rem; }
+
+/* The history of changes */
+.settings-history { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.settings-history th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 4px 8px 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+.settings-history td {
+    padding: 5px 8px 5px 0;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    word-break: break-word;
+}
+.settings-history-key { font-family: 'JetBrains Mono', monospace; font-size: 0.64rem; color: var(--text-muted); }
+
+/* `hidden` loses the specificity tie to a class that sets display, so each
+   class that is hidden through the attribute says so itself. */
+.settings-radio[hidden], .settings-custom[hidden], .settings-save-bar[hidden] { display: none; }

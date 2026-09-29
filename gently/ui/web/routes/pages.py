@@ -69,12 +69,9 @@ def create_router(server) -> APIRouter:
     async def plan_review_page(campaign_id: str):
         return RedirectResponse(f"/#plans:{campaign_id}", status_code=302)
 
-    @router.get("/settings", response_class=HTMLResponse)
-    async def settings_page(request: Request):
-        """Serve the dashboard settings page"""
-        return server.templates.TemplateResponse(
-            request,
-            "settings.html",
-        )
+    @router.get("/settings")
+    async def settings_page():
+        """Settings is a tab of the app now, not a page beside it."""
+        return RedirectResponse("/#settings", status_code=302)
 
     return router

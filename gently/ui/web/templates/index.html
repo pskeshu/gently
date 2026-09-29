@@ -186,6 +186,10 @@
             <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14"></path><path d="M5 10h14"></path><path d="M5 15h9"></path><path d="M5 20h6"></path></svg>
             <span class="v2-nav-text">Logs</span>
           </button>
+          <button class="v2-nav-item" data-tab="settings" title="Settings">
+            <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10"></path><path d="M18 7h2"></path><circle cx="16" cy="7" r="2"></circle><path d="M4 17h2"></path><path d="M10 17h10"></path><circle cx="8" cy="17" r="2"></circle></svg>
+            <span class="v2-nav-text">Settings</span>
+          </button>
         </div>
       </nav>
       <button class="v2-rail-collapse" id="v2-rail-collapse" type="button"
@@ -1593,6 +1597,108 @@
     </div>
 
     <!-- Gallery Tab -->
+    <div id="settings-content" class="tab-content">
+      {# Settings, drawn from the registry (GET /api/settings/schema) by
+         settings.js. It used to be a page beside the app; it is a tab of it. #}
+      <div class="settings-layout">
+        <nav class="settings-nav" id="settings-nav" aria-label="Settings categories"></nav>
+        <main class="settings-content" id="settings-body"><div class="settings-hint">Loading…</div></main>
+      </div>
+
+      {# Blocks that are more than one value. They wait here, hidden, and
+         settings.js places each in the category the registry gives it. #}
+      <div id="settings-blocks" hidden>
+        <div class="settings-block" id="settings-block-devicelayer" hidden>
+          <p class="settings-hint th-note">Install-time settings for the microscope control process.
+            Most rigs never change these.</p>
+          <div class="settings-field">
+            <label class="settings-label" for="dl-port">Device layer port</label>
+            <div class="settings-input-row">
+              <input type="number" class="settings-input" id="dl-port" min="1" max="65535">
+            </div>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Image analysis (SAM) runs on</label>
+            <div class="settings-radio-group" id="dl-sam">
+              <label class="settings-radio"><input type="radio" name="dlsam" value="auto"> Auto-detect</label>
+              <label class="settings-radio"><input type="radio" name="dlsam" value="cuda"> GPU (CUDA)</label>
+              <label class="settings-radio"><input type="radio" name="dlsam" value="cpu"> CPU</label>
+            </div>
+            <p class="settings-hint" id="dl-sam-detected"></p>
+          </div>
+          <p class="settings-hint" id="dl-status"></p>
+        </div>
+
+        <div class="settings-block" id="settings-block-joystick" hidden>
+          <div class="settings-field">
+            <label class="settings-checkbox">
+              <input type="checkbox" id="hw-joystick-lock"> Joystick lock
+            </label>
+            <div class="settings-hint">Disables the physical XY joystick at the controller, so nothing
+              but Gently can move the stage. Read back from the hardware; survives a device-layer
+              restart. Requires control.</div>
+          </div>
+          <p class="settings-hint" id="hw-joystick-status">Loading…</p>
+        </div>
+
+        <div class="settings-block" id="settings-block-thermalizer" hidden>
+          <div class="settings-hint th-note">Kept on the rig, not in this browser. Requires control.</div>
+          <div class="settings-field">
+            <label class="settings-label">Live status</label>
+            <div class="th-status" id="th-status">Loading…</div>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Connection</label>
+            <div class="settings-radio-group" id="th-backend">
+              <label class="settings-radio"><input type="radio" name="th-backend" value="serial"> Serial (COM)</label>
+              <label class="settings-radio"><input type="radio" name="th-backend" value="mqtt"> MQTT (HiveMQ)</label>
+              <label class="settings-radio th-mock-opt" hidden><input type="radio" name="th-backend" value="mock"> Mock (dev)</label>
+            </div>
+          </div>
+          <div id="th-serial">
+            <div class="settings-field"><label class="settings-label" for="th-com">COM port</label><input class="settings-input" id="th-com" type="text" placeholder="COM8"></div>
+            <div class="settings-field"><label class="settings-label" for="th-baud">Baud rate</label><input class="settings-input" id="th-baud" type="number" value="115200"></div>
+          </div>
+          <div id="th-mqtt" hidden>
+            <div class="settings-field"><label class="settings-label" for="th-broker">Broker</label><input class="settings-input" id="th-broker" type="text" placeholder="blank = embedded HiveMQ default"></div>
+            <div class="settings-field"><label class="settings-label" for="th-port">Port</label><input class="settings-input" id="th-port" type="number" placeholder="8883"></div>
+            <div class="settings-field"><label class="settings-label" for="th-user">Username</label><input class="settings-input" id="th-user" type="text"></div>
+            <div class="settings-field"><label class="settings-label" for="th-pass">Password</label><input class="settings-input" id="th-pass" type="password" placeholder="•••• (blank keeps stored)" autocomplete="new-password"><div class="settings-hint">Write-only: never shown. Blank keeps the stored password.</div></div>
+          </div>
+          <div class="settings-field"><label class="settings-label" for="th-stabilize">Stabilize timeout (s)</label><input class="settings-input" id="th-stabilize" type="number" value="600"></div>
+          <div class="settings-field"><label class="settings-checkbox"><input type="checkbox" id="th-peltier"> Control off the Peltier sensor (else water)</label></div>
+          <div class="settings-field th-actions">
+            <button class="settings-btn" id="th-test" type="button">Test connection</button>
+            <button class="settings-btn settings-btn-primary" id="th-apply" type="button">Apply</button>
+          </div>
+          <div class="settings-result" id="th-result"></div>
+        </div>
+
+        <div class="settings-block" id="settings-block-recording" hidden>
+          <ul class="settings-list">
+            <li><b>Kept:</b> every change on screen, every click and every page you open, with the
+              label of what was clicked.</li>
+            <li><b>Kept:</b> what is typed into a field, as it stood when the field was left. That
+              includes messages to the assistant.</li>
+            <li><b>Not kept:</b> the live camera images. Stored images replay from the session.</li>
+          </ul>
+          <p class="settings-hint" id="rec-usage">Reading…</p>
+          <p><a class="settings-btn" href="/replay" target="_blank" rel="noopener">Open the recordings</a></p>
+        </div>
+
+        <div class="settings-block" id="settings-block-history" hidden>
+          <div class="settings-hint th-note" id="settings-history-file">Every change to a setting is
+            kept on disk, and never deleted.</div>
+          <div id="settings-history"></div>
+        </div>
+
+        <div class="settings-block" id="settings-block-effective" hidden>
+          <div class="settings-hint th-note">What the server is running with, secrets left out. Read-only.</div>
+          <pre class="settings-pre" id="effective-config">Loading…</pre>
+        </div>
+      </div>
+    </div>
+
     <div id="gallery-content" class="tab-content">
         <div class="gallery-tab-container">
             <div class="gallery-tab-header">
@@ -1718,6 +1824,7 @@
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/logconsole.js"></script>
     <script src="/static/js/event-bus.js"></script>
+    <script src="/static/js/settings-store.js"></script>
     <script src="/static/js/status-store.js"></script>
     <script src="/static/js/websocket.js"></script>
     <script src="/static/js/zoom-pan.js"></script>
@@ -1746,6 +1853,7 @@
          after boot-banner.js, whose global device-layer poll it rides. -->
     <script src="/static/js/xy-limits-state.js"></script>
     <script src="/static/js/rig-menu.js"></script>
+    <script src="/static/js/settings.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->

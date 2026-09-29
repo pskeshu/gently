@@ -14,8 +14,8 @@ META = {
 
 
 async def flow(page, url, rec):
-    await goto(page, url, "/settings")
-    section = await exists(page, "#section-thermalizer")
+    await goto(page, url, "/#settings")
+    section = await exists(page, "#settings-block-thermalizer")
     backends = await dom_count(
         page, 'input[name="th-backend"]'
     )  # radios are display:none, styled labels

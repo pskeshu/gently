@@ -110,6 +110,12 @@ function switchTab(tabName) {
         GalleryTab.init();
     }
 
+    // Settings reads its schema each time it is opened: what is in effect may
+    // have changed since.
+    if (tabName === TABS.SETTINGS && typeof SettingsTab !== 'undefined') {
+        SettingsTab.init();
+    }
+
     // Update statusbar for context
     updateStatusbar();
 }
@@ -740,8 +746,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY) {
+        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY || tab === TABS.DEVICES || tab === TABS.SETTINGS) {
             switchTab(tab);
+            if (tab === TABS.SETTINGS && param && typeof SettingsTab !== 'undefined') {
+                setTimeout(() => SettingsTab.show(param), 300);
+            }
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);
             }

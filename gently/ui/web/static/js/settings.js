@@ -1,310 +1,368 @@
 /**
- * Dashboard Settings Page
- * Reads/writes gently-dashboard-config in localStorage
+ * Settings — a tab of the app, drawn from the settings registry.
+ *
+ * GET /api/settings/schema says what every setting is about, how far it
+ * reaches, when a change takes effect and where it is kept. This draws them.
+ * A new setting is an entry in gently/ui/web/settings_registry.py, not a
+ * control built here.
+ *
+ * Three hardware blocks are not single values and keep their own markup and
+ * code: the thermalizer's connection, the device layer's port and SAM device,
+ * and the joystick lock. The registry names them as `custom` and this places
+ * them in their category.
  */
+const SettingsTab = (function () {
+    'use strict';
 
-const SettingsManager = {
-    STORAGE_KEY: 'gently-dashboard-config',
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-    defaults: {
-        defaultView: 'default',
-        atrium: false,
-        board: {
-            columns: ['stage', 'confidence', 'rate', 'eta', 'sparkline', 'alert'],
-            sparklineLength: 20,
-            warnOvertimeRatio: 1.5,
-            criticalOvertimeRatio: 2.5
-        },
-        filmstrip: {
-            thumbnailSize: 56,
-            showStageLabels: true,
-            skipInterval: 1,
-            borderEncoding: 'stage'
-        },
-        vitals: {
-            temperatureModel: '20C',
-            showExpectedLine: true,
-            timeAxis: 'elapsed'
-        },
-        detail: {
-            imageSplitRatio: 40,
-            autoAdvance: false,
-            showContrastive: true
-        },
-        ambient: {
-            enabled: true,
-            sensitivity: 'normal',
-            audioTick: false
-        }
-    },
+    let _schema = null;
+    let _category = 'views';
+    let _inited = false;
 
-    config: null,
-
-    async init() {
-        this.serverDefaults = await this.fetchServerDefaults();
-        this.config = this.load();
-        this.populateForm();
-        this.setupNavigation();
-        this.setupListeners();
-        this.setupDefaultsBar();
-    },
-
-    async fetchServerDefaults() {
-        try {
-            const res = await fetch('/api/config/dashboard-defaults');
-            if (!res.ok) return {};
-            const d = await res.json();
-            return (d && typeof d === 'object') ? d : {};
-        } catch (e) { return {}; }
-    },
-
-    load() {
-        // Effective config = hardcoded defaults < rig-wide server defaults < this browser's localStorage.
-        const base = this.deepMerge(this.defaults, this.serverDefaults || {});
-        try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (stored) {
-                return this.deepMerge(base, JSON.parse(stored));
-            }
-        } catch (e) {
-            console.warn('Failed to load settings:', e);
-        }
-        return base;
-    },
-
-    setupDefaultsBar() {
-        const byId = (id) => document.getElementById(id);
-        const saveDef = byId('pref-save-defaults');
-        if (saveDef) saveDef.addEventListener('click', async () => {
-            try {
-                const res = await fetch('/api/config/dashboard-defaults', {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.config),
-                });
-                if (res.status === 401 || res.status === 403) { this.showSaveStatus('Need control'); return; }
-                this.showSaveStatus(res.ok ? 'Saved as rig defaults' : 'Failed to save defaults');
-            } catch (e) { this.showSaveStatus('Failed to save defaults'); }
-        });
-        const reset = byId('pref-reset');
-        if (reset) reset.addEventListener('click', () => {
-            if (!confirm("Clear this browser's dashboard prefs and use the rig defaults?")) return;
-            localStorage.removeItem(this.STORAGE_KEY);
-            location.reload();
-        });
-        const exp = byId('pref-export');
-        if (exp) exp.addEventListener('click', () => {
-            const blob = new Blob([JSON.stringify(this.config, null, 2)], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob); a.download = 'gently-dashboard-prefs.json';
-            a.click(); URL.revokeObjectURL(a.href);
-        });
-        const imp = byId('pref-import'), impFile = byId('pref-import-file');
-        if (imp && impFile) {
-            imp.addEventListener('click', () => impFile.click());
-            impFile.addEventListener('change', async () => {
-                const file = impFile.files[0]; if (!file) return;
-                try {
-                    const obj = JSON.parse(await file.text());
-                    this.config = this.deepMerge(this.defaults, obj);
-                    this.save(); this.populateForm();
-                    this.showSaveStatus('Imported');
-                } catch (e) { this.showSaveStatus('Import failed: invalid JSON'); }
-                impFile.value = '';
-            });
-        }
-    },
-
-    save() {
-        try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
-            this.showSaveStatus('Settings saved');
-        } catch (e) {
-            this.showSaveStatus('Failed to save');
-        }
-    },
-
-    deepMerge(target, source) {
-        const result = { ...target };
-        for (const key of Object.keys(source)) {
-            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-                result[key] = this.deepMerge(target[key] || {}, source[key]);
-            } else {
-                result[key] = source[key];
-            }
-        }
-        return result;
-    },
-
-    showSaveStatus(msg) {
-        const el = document.getElementById('settings-save-status');
-        if (el) {
-            el.textContent = msg;
-            el.classList.add('visible');
-            setTimeout(() => el.classList.remove('visible'), 2000);
-        }
-    },
-
-    // Populate form from config
-    populateForm() {
-        const c = this.config;
-
-        // Default view
-        this.setRadio('defaultView', c.defaultView);
-        this.setCheckbox('cfg-atrium', !!c.atrium);
-
-        // Alerts
-        this.setInput('cfg-warnOvertimeRatio', c.board.warnOvertimeRatio);
-        this.setInput('cfg-criticalOvertimeRatio', c.board.criticalOvertimeRatio);
-
-        // Ambient
-        this.setCheckbox('cfg-ambientEnabled', c.ambient.enabled);
-        this.setCheckbox('cfg-audioTick', c.ambient.audioTick);
-        this.setRadio('ambientSensitivity', c.ambient.sensitivity);
-
-        // Board
-        const colCheckboxes = document.querySelectorAll('#cfg-boardColumns input[type="checkbox"]');
-        colCheckboxes.forEach(cb => {
-            cb.checked = c.board.columns.includes(cb.value);
-        });
-        this.setInput('cfg-sparklineLength', c.board.sparklineLength);
-
-        // Filmstrip
-        this.setRadio('thumbnailSize', String(c.filmstrip.thumbnailSize));
-        this.setCheckbox('cfg-showStageLabels', c.filmstrip.showStageLabels);
-        this.setInput('cfg-skipInterval', c.filmstrip.skipInterval);
-        this.setRadio('borderEncoding', c.filmstrip.borderEncoding);
-
-        // Vitals
-        this.setRadio('temperatureModel', c.vitals.temperatureModel);
-        this.setCheckbox('cfg-showExpectedLine', c.vitals.showExpectedLine);
-        this.setRadio('timeAxis', c.vitals.timeAxis);
-
-        // Default view settings
-        const splitRange = document.getElementById('cfg-imageSplitRatio');
-        if (splitRange) {
-            splitRange.value = c.detail.imageSplitRatio;
-            this.updateSplitDisplay(c.detail.imageSplitRatio);
-        }
-        this.setCheckbox('cfg-autoAdvance', c.detail.autoAdvance);
-        this.setCheckbox('cfg-showContrastive', c.detail.showContrastive);
-    },
-
-    setRadio(name, value) {
-        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
-        if (radio) radio.checked = true;
-    },
-
-    setCheckbox(id, value) {
-        const el = document.getElementById(id);
-        if (el) el.checked = value;
-    },
-
-    setInput(id, value) {
-        const el = document.getElementById(id);
-        if (el) el.value = value;
-    },
-
-    updateSplitDisplay(value) {
-        const display = document.getElementById('cfg-imageSplitRatio-display');
-        if (display) display.textContent = `${value} / ${100 - value}`;
-    },
-
-    // Navigation
-    setupNavigation() {
-        const nav = document.getElementById('settings-nav');
-        if (!nav) return;
-        nav.addEventListener('click', (e) => {
-            const item = e.target.closest('.settings-nav-item');
-            if (!item) return;
-            e.preventDefault();
-            const section = item.dataset.section;
-            // Update nav active state
-            nav.querySelectorAll('.settings-nav-item').forEach(n => n.classList.remove('active'));
-            item.classList.add('active');
-            // Scroll to section
-            const sectionEl = document.getElementById(`section-${section}`);
-            if (sectionEl) {
-                sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        });
-    },
-
-    // Auto-save on any change
-    setupListeners() {
-        const content = document.getElementById('settings-content');
-        if (!content) return;
-
-        // Ignore the server-backed hardware sections — they own their own
-        // handlers (ThermalizerSettings) and must not trigger the localStorage
-        // save or its "Settings saved" toast.
-        const isHardware = (t) => t && t.closest && t.closest('#section-thermalizer, #section-effective, #section-stage, #section-devicelayer');
-        content.addEventListener('change', (e) => {
-            if (isHardware(e.target)) return;
-            this.readFormAndSave();
-        });
-        content.addEventListener('input', (e) => {
-            // Live update for range sliders
-            if (e.target.id === 'cfg-imageSplitRatio') {
-                this.updateSplitDisplay(e.target.value);
-            }
-        });
-    },
-
-    readFormAndSave() {
-        const c = this.config;
-
-        // Default view
-        c.defaultView = this.getRadio('defaultView') || 'default';
-        c.atrium = document.getElementById('cfg-atrium')?.checked ?? false;
-
-        // Alerts
-        c.board.warnOvertimeRatio = parseFloat(document.getElementById('cfg-warnOvertimeRatio')?.value) || 1.5;
-        c.board.criticalOvertimeRatio = parseFloat(document.getElementById('cfg-criticalOvertimeRatio')?.value) || 2.5;
-
-        // Ambient
-        c.ambient.enabled = document.getElementById('cfg-ambientEnabled')?.checked ?? true;
-        c.ambient.audioTick = document.getElementById('cfg-audioTick')?.checked ?? false;
-        c.ambient.sensitivity = this.getRadio('ambientSensitivity') || 'normal';
-
-        // Board columns
-        const colCheckboxes = document.querySelectorAll('#cfg-boardColumns input[type="checkbox"]');
-        c.board.columns = Array.from(colCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-        c.board.sparklineLength = parseInt(document.getElementById('cfg-sparklineLength')?.value) || 20;
-
-        // Filmstrip
-        c.filmstrip.thumbnailSize = parseInt(this.getRadio('thumbnailSize')) || 56;
-        c.filmstrip.showStageLabels = document.getElementById('cfg-showStageLabels')?.checked ?? true;
-        c.filmstrip.skipInterval = parseInt(document.getElementById('cfg-skipInterval')?.value) || 1;
-        c.filmstrip.borderEncoding = this.getRadio('borderEncoding') || 'stage';
-
-        // Vitals
-        c.vitals.temperatureModel = this.getRadio('temperatureModel') || '20C';
-        c.vitals.showExpectedLine = document.getElementById('cfg-showExpectedLine')?.checked ?? true;
-        c.vitals.timeAxis = this.getRadio('timeAxis') || 'elapsed';
-
-        // Default view
-        c.detail.imageSplitRatio = parseInt(document.getElementById('cfg-imageSplitRatio')?.value) || 40;
-        c.detail.autoAdvance = document.getElementById('cfg-autoAdvance')?.checked ?? false;
-        c.detail.showContrastive = document.getElementById('cfg-showContrastive')?.checked ?? true;
-
-        this.save();
-    },
-
-    getRadio(name) {
-        const checked = document.querySelector(`input[name="${name}"]:checked`);
-        return checked ? checked.value : null;
+    // ── what a setting reaches, in words ────────────────────────────────────
+    function badge(s) {
+        const reach = s.reach === 'rig' ? 'this rig' : 'this browser';
+        const when = { load: 'next page load', launch: 'next launch', restart: 'needs restart' }[s.applies];
+        return when ? `${reach} · ${when}` : reach;
     }
-};
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => SettingsManager.init());
+    // ── reading and writing, by where a setting is kept ─────────────────────
+    function readValue(s) {
+        const store = s.store || '';
+        if (store === 'theme') {
+            try { return localStorage.getItem('gently-theme') || s.default; } catch (_) { return s.default; }
+        }
+        if (store.startsWith('prefs:')) return SettingsStore.get(store.slice(6), s.default);
+        return s.value !== undefined ? s.value : s.default;
+    }
+
+    async function postJSON(url, method, body) {
+        const res = await fetch(url, {
+            method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const err = new Error(res.status === 401 || res.status === 403
+                ? 'Sign in with control to change this'
+                : (data.detail || `Failed (${res.status})`));
+            err.status = res.status;
+            throw err;
+        }
+        return data;
+    }
+
+    /**
+     * A browser's preference lives in that browser, so the history on the rig
+     * learns of a change only by being told. Told and forgotten: a history
+     * that could not be written never stops the change it records.
+     */
+    function report(key, old, value) {
+        let clientId = null;
+        try { clientId = localStorage.getItem('gently-client-id'); } catch (_) { /* private mode */ }
+        fetch('/api/settings/history', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, old, new: value, client_id: clientId }),
+        }).catch(() => {});
+    }
+
+    async function writeValue(s, value) {
+        const store = s.store || '';
+        if (store === 'theme' || store.startsWith('prefs:')) report(s.key, readValue(s), value);
+        if (store === 'theme') {
+            if (typeof ThemeManager !== 'undefined' && ThemeManager.setTheme) ThemeManager.setTheme(value);
+            else {
+                document.documentElement.setAttribute('data-theme', value);
+                document.body.setAttribute('data-theme', value);
+                try { localStorage.setItem('gently-theme', value); } catch (_) { /* private mode */ }
+            }
+            return 'Saved';
+        }
+        if (store.startsWith('prefs:')) {
+            SettingsStore.set(store.slice(6), value);
+            return s.applies === 'load' ? 'Saved. Applies the next time the page loads.' : 'Saved';
+        }
+        if (store.startsWith('env:')) {
+            await postJSON('/api/config/settings-overrides', 'PUT', { [store.slice(4)]: value });
+            s.value = value; s.overridden = true;
+            return 'Saved. Applies after Gently restarts.';
+        }
+        if (store.startsWith('launch:')) {
+            await postJSON('/api/launch/prefs', 'POST', { [store.slice(7)]: value });
+            s.value = value;
+            return 'Saved. Applies the next time Gently is launched.';
+        }
+        throw new Error('This setting has nowhere to be kept');
+    }
+
+    // ── controls ────────────────────────────────────────────────────────────
+    function control(s) {
+        const v = readValue(s);
+        const id = `set-${s.key.replace(/[^a-z0-9]+/gi, '-')}`;
+        const unit = s.unit ? `<span class="settings-unit">${esc(s.unit)}</span>` : '';
+        if (s.type === 'bool') {
+            return `<label class="settings-checkbox"><input type="checkbox" id="${id}" data-set="${esc(s.key)}"${v ? ' checked' : ''}> ${esc(s.label)}</label>`;
+        }
+        if (s.type === 'choice') {
+            const opts = (s.choices || []).map(c =>
+                `<label class="settings-radio"><input type="radio" name="${id}" data-set="${esc(s.key)}" value="${esc(c.value)}"${String(c.value) === String(v) ? ' checked' : ''}> ${esc(c.label)}</label>`);
+            return `<div class="settings-radio-group">${opts.join('')}</div>`;
+        }
+        if (s.type === 'multichoice') {
+            const on = Array.isArray(v) ? v.map(String) : [];
+            const opts = (s.choices || []).map(c =>
+                `<label class="settings-checkbox"><input type="checkbox" data-set="${esc(s.key)}" data-multi="1" value="${esc(c.value)}"${on.includes(String(c.value)) ? ' checked' : ''}> ${esc(c.label)}</label>`);
+            return `<div class="settings-checkbox-group">${opts.join('')}</div>`;
+        }
+        if (s.type === 'int' || s.type === 'float') {
+            const attrs = ['min', 'max', 'step'].filter(a => s[a] != null).map(a => `${a}="${s[a]}"`).join(' ');
+            const step = s.step == null && s.type === 'float' ? ' step="any"' : '';
+            return `<div class="settings-input-row"><input type="number" class="settings-input" id="${id}" data-set="${esc(s.key)}" ${attrs}${step} value="${esc(v)}">${unit}</div>`;
+        }
+        if (s.type === 'text') {
+            return `<div class="settings-input-row"><input type="text" class="settings-input settings-input-wide" id="${id}" data-set="${esc(s.key)}" value="${esc(v)}"></div>`;
+        }
+        if (s.type === 'readonly') {
+            return `<div class="settings-readonly">${esc(v == null ? '—' : v)}</div>`;
+        }
+        if (s.type === 'link') {
+            const go = s.href
+                ? `<button type="button" class="settings-btn settings-go" data-go="${esc(s.href)}">Open ${esc(s.href === 'devices' ? 'Devices' : s.href)}</button>`
+                : '';
+            return `<div class="settings-where">Set in <b>${esc(s.where)}</b>${go}</div>`;
+        }
+        return '';
+    }
+
+    function row(s) {
+        if (s.type === 'custom') return `<div class="settings-custom" data-block="${esc(s.block)}"></div>`;
+        const label = s.type === 'bool' ? '' : `<label class="settings-label">${esc(s.label)}</label>`;
+        const help = s.help ? `<div class="settings-hint">${esc(s.help)}</div>` : '';
+        const flag = s.overridden ? '<span class="settings-badge is-set">set here</span>' : '';
+        return `<div class="settings-field settings-row" data-row="${esc(s.key)}">` +
+            `<div class="settings-row-main">${label}${control(s)}${help}</div>` +
+            `<div class="settings-row-side"><span class="settings-badge is-${esc(s.reach)}">${esc(badge(s))}</span>${flag}` +
+            `<span class="settings-row-status" aria-live="polite"></span></div></div>`;
+    }
+
+    // ── the page ────────────────────────────────────────────────────────────
+    function renderNav() {
+        const nav = $('settings-nav');
+        if (!nav || !_schema) return;
+        nav.innerHTML = _schema.categories.map(c =>
+            `<a class="settings-nav-item${c.id === _category ? ' active' : ''}" data-category="${esc(c.id)}" href="#settings:${esc(c.id)}">${esc(c.label)}</a>`).join('');
+    }
+
+    function parkBlocks() {
+        // Custom blocks live in the page; before a redraw they go back to the
+        // shelf so the redraw does not take them, and their state, with it.
+        const shelf = $('settings-blocks');
+        if (!shelf) return;
+        document.querySelectorAll('#settings-body .settings-block').forEach(b => shelf.appendChild(b));
+    }
+
+    function renderBody() {
+        const body = $('settings-body');
+        if (!body || !_schema) return;
+        parkBlocks();
+        const cat = _schema.categories.find(c => c.id === _category) || _schema.categories[0];
+        const mine = _schema.settings.filter(s => s.category === cat.id);
+        const groups = [];
+        mine.forEach(s => {
+            const g = s.group || '';
+            let at = groups.find(x => x.name === g);
+            if (!at) { at = { name: g, items: [] }; groups.push(at); }
+            at.items.push(s);
+        });
+        let html = `<section class="settings-section"><h2 class="settings-section-title">${esc(cat.label)}</h2>` +
+            `<p class="settings-blurb">${esc(cat.blurb)}</p>`;
+        groups.forEach(g => {
+            if (g.name) html += `<div class="settings-subhead">${esc(g.name)}</div>`;
+            html += g.items.map(row).join('');
+        });
+        html += '</section>';
+        if (mine.some(s => (s.store || '').startsWith('prefs:'))) html += defaultsBar();
+        body.innerHTML = html;
+        body.querySelectorAll('.settings-custom').forEach(host => {
+            const block = $(host.dataset.block);
+            if (block) { host.appendChild(block); block.hidden = false; }
+        });
+        body.scrollTop = 0;
+    }
+
+    function defaultsBar() {
+        return '<div class="settings-save-bar"><span class="settings-save-status" id="settings-save-status"></span>' +
+            '<span class="settings-defaults-bar">' +
+            '<button class="settings-btn" id="pref-save-defaults" type="button" title="Make what this browser shows the default for every browser on this rig">Save as rig defaults</button>' +
+            '<button class="settings-btn" id="pref-reset" type="button" title="Forget this browser\'s choices and use the rig\'s">Reset to defaults</button>' +
+            '<button class="settings-btn" id="pref-export" type="button">Export</button>' +
+            '<button class="settings-btn" id="pref-import" type="button">Import</button>' +
+            '<input type="file" id="pref-import-file" accept="application/json" hidden></span></div>';
+    }
+
+    function say(msg) {
+        const el = $('settings-save-status');
+        if (!el) return;
+        el.textContent = msg;
+        el.classList.add('visible');
+        setTimeout(() => el.classList.remove('visible'), 2500);
+    }
+
+    function show(category) {
+        if (_schema && _schema.categories.some(c => c.id === category)) _category = category;
+        renderNav();
+        renderBody();
+    }
+
+    // ── changes ─────────────────────────────────────────────────────────────
+    function valueOf(s, input) {
+        if (s.type === 'bool') return !!input.checked;
+        if (s.type === 'multichoice') {
+            return Array.from(document.querySelectorAll(`#settings-body [data-set="${CSS.escape(s.key)}"]`))
+                .filter(i => i.checked).map(i => i.value);
+        }
+        if (s.type === 'int') return parseInt(input.value, 10);
+        if (s.type === 'float') return parseFloat(input.value);
+        if (s.type === 'choice') {
+            const hit = (s.choices || []).find(c => String(c.value) === String(input.value));
+            return hit ? hit.value : input.value;
+        }
+        return input.value;
+    }
+
+    function within(s, v) {
+        if (s.type !== 'int' && s.type !== 'float') return true;
+        if (!Number.isFinite(v)) return false;
+        if (s.min != null && v < s.min) return false;
+        if (s.max != null && v > s.max) return false;
+        return true;
+    }
+
+    async function onChange(e) {
+        const input = e.target.closest('[data-set]');
+        if (!input || !_schema) return;
+        const s = _schema.settings.find(x => x.key === input.dataset.set);
+        if (!s) return;
+        const rowEl = input.closest('.settings-row');
+        const status = rowEl ? rowEl.querySelector('.settings-row-status') : null;
+        const tell = (msg, bad) => {
+            if (!status) return;
+            status.textContent = msg;
+            status.classList.toggle('is-err', !!bad);
+        };
+        const value = valueOf(s, input);
+        if (!within(s, value)) {
+            tell(`Between ${s.min} and ${s.max}`, true);
+            return;
+        }
+        try {
+            tell(await writeValue(s, value), false);
+        } catch (err) {
+            tell(err.message, true);
+            // Put the control back: what is on screen is what is in effect.
+            if (input.type === 'checkbox' && !input.dataset.multi) input.checked = !input.checked;
+        }
+    }
+
+    function onClick(e) {
+        const nav = e.target.closest('[data-category]');
+        if (nav) { e.preventDefault(); show(nav.dataset.category); return; }
+        const go = e.target.closest('[data-go]');
+        if (go) { if (typeof switchTab === 'function') switchTab(go.dataset.go); return; }
+        const id = e.target.id;
+        if (id === 'pref-save-defaults') saveRigDefaults();
+        else if (id === 'pref-reset') resetPrefs();
+        else if (id === 'pref-export') exportPrefs();
+        else if (id === 'pref-import') { const f = $('pref-import-file'); if (f) f.click(); }
+    }
+
+    async function saveRigDefaults() {
+        try {
+            const prefs = SettingsStore.merged({});
+            await postJSON('/api/config/dashboard-defaults', 'PUT', prefs);
+            SettingsStore.setRigDefaults(prefs);
+            say('Saved as this rig\'s defaults');
+        } catch (err) { say(err.message); }
+    }
+
+    function resetPrefs() {
+        if (!window.confirm('Forget this browser\'s choices and use the rig\'s defaults?')) return;
+        report('views.reset', SettingsStore.local(), {});
+        SettingsStore.clear();
+        renderBody();
+        say('Reset');
+    }
+
+    function exportPrefs() {
+        const blob = new Blob([JSON.stringify(SettingsStore.merged({}), null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'gently-preferences.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    async function importPrefs(file) {
+        try {
+            const obj = JSON.parse(await file.text());
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('not an object');
+            report('views.import', SettingsStore.local(), obj);
+            SettingsStore.replaceAll(obj);
+            renderBody();
+            say('Imported');
+        } catch (_) { say('Import failed: that is not a preferences file'); }
+    }
+
+    // ── start ───────────────────────────────────────────────────────────────
+    async function load() {
+        const res = await fetch('/api/settings/schema');
+        if (!res.ok) throw new Error(`schema ${res.status}`);
+        _schema = await res.json();
+        SettingsStore.setRigDefaults(_schema.rig_defaults || {});
+    }
+
+    async function init(category) {
+        const host = $('settings-content');
+        if (!host) return;
+        if (!_inited) {
+            _inited = true;
+            host.addEventListener('click', onClick);
+            host.addEventListener('change', e => {
+                if (e.target.id === 'pref-import-file') {
+                    const f = e.target.files[0];
+                    if (f) importPrefs(f);
+                    e.target.value = '';
+                    return;
+                }
+                onChange(e);
+            });
+            ThermalizerSettings.init();
+            DeviceLayerSettings.init();
+            JoystickSetting.init();
+        }
+        try {
+            await load();
+        } catch (err) {
+            const body = $('settings-body');
+            if (body) body.innerHTML = `<div class="settings-hint">Settings could not be loaded (${esc(err.message)}).</div>`;
+            return;
+        }
+        show(category || _category);
+        RecordingInfo.load();
+        EffectiveConfig.load();
+        SettingsHistory.load();
+    }
+
+    return { init, show, badge, schema: () => _schema };
+})();
 
 
 /**
- * ThermalizerSettings — server-backed hardware config, isolated from the
- * localStorage SettingsManager above. Reads/writes the ACUITYnano connection
- * via /api/devices/temperature/config{,/test}. Mock backend is dev-only
- * (revealed via ?dev=1 or localStorage 'gently-dev').
+ * ThermalizerSettings — the ACUITYnano's connection, kept on the device layer.
+ * Reads and writes /api/devices/temperature/config{,/test}. The mock backend
+ * is for development (?dev=1, or localStorage 'gently-dev').
  */
 const ThermalizerSettings = {
     el(id) { return document.getElementById(id); },
@@ -316,25 +374,23 @@ const ThermalizerSettings = {
     },
 
     async init() {
-        if (!this.el('section-thermalizer')) return;
+        if (!this.el('settings-block-thermalizer')) return;
         if (this.devMode()) {
             const m = document.querySelector('.th-mock-opt');
-            if (m) m.style.display = '';
+            if (m) m.hidden = false;
         }
-        // backend radio toggles the field groups
         document.querySelectorAll('input[name="th-backend"]').forEach(r =>
             r.addEventListener('change', () => this.applyBackendVisibility(r.value)));
         const test = this.el('th-test'), apply = this.el('th-apply');
         if (test) test.addEventListener('click', () => this.test());
         if (apply) apply.addEventListener('click', () => this.apply());
         await this.load();
-        await this.loadEffective();
     },
 
     applyBackendVisibility(backend) {
         const s = this.el('th-serial'), m = this.el('th-mqtt');
-        if (s) s.style.display = backend === 'serial' ? '' : 'none';
-        if (m) m.style.display = backend === 'mqtt' ? '' : 'none';
+        if (s) s.hidden = backend !== 'serial';
+        if (m) m.hidden = backend !== 'mqtt';
     },
 
     setForm(cfg) {
@@ -348,7 +404,7 @@ const ThermalizerSettings = {
         set('th-broker', cfg.broker); set('th-port', cfg.port); set('th-user', cfg.user);
         set('th-stabilize', cfg.stabilize_timeout);
         const pel = this.el('th-peltier'); if (pel) pel.checked = !!cfg.feedback_peltier;
-        // password intentionally left blank (write-only)
+        // The password is write-only: it is never sent back, so never shown.
     },
 
     readForm() {
@@ -364,7 +420,7 @@ const ThermalizerSettings = {
             if (num('th-port') != null) cfg.port = num('th-port');
             if (str('th-user')) cfg.user = str('th-user');
             const pw = this.el('th-pass') && this.el('th-pass').value;
-            if (pw) cfg.password = pw;  // blank = keep stored (server preserves)
+            if (pw) cfg.password = pw;  // blank keeps the stored one
         }
         if (num('th-stabilize') != null) cfg.stabilize_timeout = num('th-stabilize');
         cfg.feedback_peltier = !!(this.el('th-peltier') && this.el('th-peltier').checked);
@@ -373,7 +429,7 @@ const ThermalizerSettings = {
 
     renderStatus(d) {
         const el = this.el('th-status'); if (!el) return;
-        if (!d || d.available === false) { el.textContent = 'Controller not available (device layer offline or no thermalizer configured).'; return; }
+        if (!d || d.available === false) { el.textContent = 'Controller not available (device layer offline, or no thermalizer configured).'; return; }
         const st = d.state || {};
         const parts = [];
         if (d.live_backend) parts.push(`backend: ${d.live_backend}`);
@@ -425,121 +481,161 @@ const ThermalizerSettings = {
             });
             if (res.status === 401 || res.status === 403) { this.result('Need control to apply.', false); return; }
             const d = await res.json();
-            // The device-layer 409 (run/ramp active) is flattened to 200 by the
-            // proxy, so detect it via the body flag, not the HTTP status.
-            if (d.blocked) { this.result(`Blocked: ${d.error || 'a run/ramp is active'}`, false); return; }
+            // The device layer's 409 (a run or a ramp is active) reaches here as
+            // a 200, so it is read from the body.
+            if (d.blocked) { this.result(`Blocked: ${d.error || 'a run or ramp is active'}`, false); return; }
             if (d.success && d.applied) { this.result('Applied live.', true); await this.load(); }
             else if (d.restart_required) { this.result(`Saved — restart the device layer to apply. (${d.error || ''})`, false); }
             else { this.result(`Failed: ${d.error || (d.detail || res.status)}`, false); }
         } catch (e) { this.result(`Error: ${e.message}`, false); }
         finally { btn.disabled = false; btn.textContent = old; }
     },
+};
 
-    async loadEffective() {
-        const el = this.el('effective-config'); if (!el) return;
+
+/** The device layer's port, and what SAM runs on. Applies at its next start. */
+const DeviceLayerSettings = {
+    init() {
+        const port = document.getElementById('dl-port');
+        const detected = document.getElementById('dl-sam-detected');
+        const status = document.getElementById('dl-status');
+        if (!port) return;
+        let loaded = false;
+        fetch('/api/launch/prefs').then(r => (r.ok ? r.json() : null)).then(p => {
+            if (!p) return;
+            port.value = (p.port != null ? p.port : '');
+            const sam = p.sam_device_raw || 'auto';
+            const radio = document.querySelector(`#dl-sam input[value="${sam}"]`)
+                || document.querySelector('#dl-sam input[value="auto"]');
+            if (radio) radio.checked = true;
+            if (detected) {
+                detected.textContent = 'Detected: ' + (p.sam_detected === 'cuda'
+                    ? 'GPU (CUDA)'
+                    : 'CPU — no GPU found, so image analysis will be slower');
+            }
+            loaded = true;
+        }).catch(() => { /* offline: the block says nothing */ });
+        const save = async () => {
+            if (!loaded) return;
+            const sam = (document.querySelector('#dl-sam input:checked') || {}).value || 'auto';
+            const body = { sam_device: sam };
+            const pv = parseInt(port.value, 10);
+            if (pv) body.port = pv;
+            try {
+                const r = await fetch('/api/launch/prefs', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (status) status.textContent = r.ok
+                    ? 'Saved — applies the next time the device layer starts'
+                    : (r.status === 403 ? 'Sign in with control to change this' : 'Failed to save');
+            } catch (e) { if (status) status.textContent = 'Failed to save'; }
+        };
+        port.addEventListener('change', save);
+        document.querySelectorAll('#dl-sam input').forEach(r => r.addEventListener('change', save));
+    },
+};
+
+
+/** The joystick lock: written to the controller and read back from it. */
+const JoystickSetting = {
+    init() {
+        const cb = document.getElementById('hw-joystick-lock');
+        const status = document.getElementById('hw-joystick-status');
+        if (!cb) return;
+        const show = (enabled) => {
+            cb.checked = !enabled;
+            status.textContent = enabled ? 'Joystick enabled at the controller' : 'Joystick LOCKED at the controller';
+        };
+        const offline = () => { cb.disabled = true; status.textContent = 'Microscope not connected'; };
+        fetch('/api/devices/stage/joystick').then(r => r.ok ? r.json() : null).then(d => {
+            if (d && d.success !== false) show(!!d.enabled);
+            else offline();
+        }).catch(offline);
+        cb.addEventListener('change', async () => {
+            const enabled = !cb.checked;
+            cb.disabled = true; status.textContent = 'Writing to the controller…';
+            try {
+                const r = await fetch('/api/devices/stage/joystick', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok) show(!!d.enabled);
+                else { cb.checked = !cb.checked; status.textContent = r.status === 403 ? 'Sign in with control to change this' : (d.detail || `Failed (${r.status})`); }
+            } catch (e) { cb.checked = !cb.checked; status.textContent = 'Failed: ' + e.message; }
+            finally { cb.disabled = false; }
+        });
+    },
+};
+
+
+/** How much has been recorded, and where to watch it. */
+const RecordingInfo = {
+    async load() {
+        const el = document.getElementById('rec-usage');
+        if (!el) return;
+        try {
+            const res = await fetch('/replay/api/recordings');
+            const d = res.ok ? await res.json() : null;
+            const recs = (d && d.recordings) || [];
+            const bytes = recs.reduce((n, r) => n + (r.bytes || 0), 0);
+            el.textContent = recs.length
+                ? `${recs.length} recording${recs.length === 1 ? '' : 's'} on disk, ${(bytes / 1048576).toFixed(0)} MB together.`
+                : 'Nothing has been recorded yet.';
+        } catch (_) { el.textContent = 'Could not read the recordings.'; }
+    },
+};
+
+
+/** Every change to a setting, newest first. The file is kept for good. */
+const SettingsHistory = {
+    esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    },
+    say(v) {
+        if (v === null || v === undefined || v === '') return '—';
+        if (typeof v === 'object') return JSON.stringify(v);
+        return String(v);
+    },
+    async load() {
+        const host = document.getElementById('settings-history');
+        const where = document.getElementById('settings-history-file');
+        if (!host) return;
+        try {
+            const res = await fetch('/api/settings/history?limit=200');
+            const d = res.ok ? await res.json() : null;
+            const rows = (d && d.changes) || [];
+            if (where && d) {
+                where.textContent = `${d.total} change${d.total === 1 ? '' : 's'} kept in ${d.file}`;
+            }
+            if (!rows.length) { host.innerHTML = '<div class="settings-hint">No setting has been changed yet.</div>'; return; }
+            host.innerHTML = '<table class="settings-history"><thead><tr>' +
+                '<th>When</th><th>Setting</th><th>From</th><th>To</th><th>Reach</th><th>By</th></tr></thead><tbody>' +
+                rows.map(r => {
+                    const when = r.at ? new Date(r.at) : null;
+                    const t = when && !isNaN(when) ? when.toLocaleString() : this.say(r.at);
+                    const who = [r.by, r.client].filter(Boolean).join(' · ');
+                    return `<tr title="${this.esc(r.via || '')}"><td>${this.esc(t)}</td>` +
+                        `<td>${this.esc(r.label || r.key)}<div class="settings-history-key">${this.esc(r.key)}</div></td>` +
+                        `<td>${this.esc(this.say(r.old))}</td><td>${this.esc(this.say(r.new))}</td>` +
+                        `<td>${this.esc(r.reach === 'rig' ? 'this rig' : 'a browser')}</td>` +
+                        `<td>${this.esc(who || '—')}</td></tr>`;
+                }).join('') + '</tbody></table>';
+        } catch (_) { host.innerHTML = '<div class="settings-hint">The history could not be read.</div>'; }
+    },
+};
+
+
+/** Everything the server has in effect, secrets left out. Read-only. */
+const EffectiveConfig = {
+    async load() {
+        const el = document.getElementById('effective-config');
+        if (!el) return;
         try {
             const res = await fetch('/api/config/effective');
-            if (!res.ok) { el.textContent = 'Unavailable.'; return; }
-            const d = await res.json();
-            el.textContent = JSON.stringify(d, null, 2);
+            el.textContent = res.ok ? JSON.stringify(await res.json(), null, 2) : 'Unavailable.';
         } catch (e) { el.textContent = 'Unavailable.'; }
     },
 };
-
-document.addEventListener('DOMContentLoaded', () => ThermalizerSettings.init());
-
-
-/**
- * AdvancedSettings — restart-required settings.py editors, persisted to
- * config/settings.local.yml via /api/config/settings-overrides. Renders an
- * allowlisted set of tunables; saving does NOT apply live (needs a restart).
- */
-const AdvancedSettings = {
-    el(id) { return document.getElementById(id); },
-
-    async init() {
-        if (!this.el('section-advanced')) return;
-        const save = this.el('adv-save');
-        if (save) save.addEventListener('click', () => this.save());
-        await this.load();
-    },
-
-    renderField(it) {
-        const field = document.createElement('div');
-        field.className = 'settings-field';
-        const tag = it.overridden ? ' <span class="th-ro">(override set)</span>' : '';
-        if (it.type === 'bool') {
-            const lab = document.createElement('label');
-            lab.className = 'settings-checkbox';
-            lab.innerHTML = `<input type="checkbox" data-env="${it.env}"> ${it.label}${tag}`;
-            lab.querySelector('input').checked = !!it.current;
-            field.appendChild(lab);
-        } else {
-            const lab = document.createElement('label');
-            lab.className = 'settings-label';
-            lab.innerHTML = it.label + tag;
-            const inp = document.createElement('input');
-            inp.className = 'settings-input';
-            inp.dataset.env = it.env;
-            inp.type = it.type === 'str' ? 'text' : 'number';
-            if (it.type === 'float') inp.step = 'any';
-            if (it.current != null) inp.value = it.current;
-            field.appendChild(lab); field.appendChild(inp);
-        }
-        return field;
-    },
-
-    async load() {
-        const wrap = this.el('adv-fields'); if (!wrap) return;
-        try {
-            const res = await fetch('/api/config/settings-overrides');
-            if (!res.ok) { wrap.textContent = 'Unavailable.'; return; }
-            const d = await res.json();
-            const items = d.items || [];
-            wrap.innerHTML = '';
-            // Group items by their `group`, preserving first-seen order.
-            const groups = [];
-            const byName = {};
-            items.forEach(it => {
-                const g = it.group || 'Other';
-                if (!byName[g]) { byName[g] = []; groups.push(g); }
-                byName[g].push(it);
-            });
-            groups.forEach(g => {
-                const head = document.createElement('div');
-                head.className = 'settings-subhead';
-                head.textContent = g;
-                wrap.appendChild(head);
-                byName[g].forEach(it => wrap.appendChild(this.renderField(it)));
-            });
-        } catch (e) { wrap.textContent = 'Unavailable.'; }
-    },
-
-    result(msg, ok) {
-        const el = this.el('adv-result'); if (!el) return;
-        el.textContent = msg;
-        el.className = 'settings-result ' + (ok ? 'is-ok' : 'is-err');
-    },
-
-    async save() {
-        const payload = {};
-        document.querySelectorAll('#adv-fields [data-env]').forEach(inp => {
-            if (inp.type === 'checkbox') payload[inp.dataset.env] = inp.checked;
-            else if (inp.value !== '') payload[inp.dataset.env] = inp.value;
-        });
-        const btn = this.el('adv-save'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Saving…';
-        try {
-            const res = await fetch('/api/config/settings-overrides', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            if (res.status === 401 || res.status === 403) { this.result('Need control to save.', false); return; }
-            const d = await res.json();
-            if (res.ok) { this.result(`Saved ${(d.saved || []).length} setting(s) — restart the server to apply.`, true); await this.load(); }
-            else { this.result(`Failed: ${d.detail || res.status}`, false); }
-        } catch (e) { this.result(`Error: ${e.message}`, false); }
-        finally { btn.disabled = false; btn.textContent = old; }
-    },
-};
-
-document.addEventListener('DOMContentLoaded', () => AdvancedSettings.init());
