@@ -119,6 +119,10 @@ class StorageSettings:
     """File paths for data storage."""
 
     base_path: Path = field(default_factory=lambda: _env("STORAGE_PATH", Path("D:/Gently3")))
+    # What a calibration keeps of what it looked at: "all" (every exposure and
+    # every plot), "plots" (the curves, the montage and the summary), or
+    # "none". A run is sixty to eighty exposures, so "all" costs disk.
+    calibration_images: str = field(default_factory=lambda: _env("CALIBRATION_IMAGES", "all"))
 
     @property
     def sessions_dir(self) -> Path:

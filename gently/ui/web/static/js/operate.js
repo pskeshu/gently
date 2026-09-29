@@ -1458,6 +1458,78 @@ const OperateManager = (function () {
         } else {
             out.textContent = 'not calibrated';
         }
+        renderCalKept(emb);
+    }
+
+    // ── what the calibration looked at ──────────────────────────────────────
+    // The exposures and plots of each run are kept with the embryo. The latest
+    // run's plots are shown here; every image of it opens behind a click.
+    let _calKept = null;     // {embryoId, run, images} as last shown
+
+    async function renderCalKept(emb) {
+        const host = $('op-cal-kept');
+        if (!host) return;
+        if (!emb) { host.hidden = true; return; }
+        const id = emb.id;
+        let runs = [];
+        try {
+            const d = await getJSON(`/api/calibration/records?embryo_id=${encodeURIComponent(id)}`);
+            runs = (d && d.records) || [];
+        } catch (_) { runs = []; }
+        if (_selected !== id) return;            // the selection moved on while we asked
+        if (!runs.length) { host.hidden = true; _calKept = null; return; }
+        const last = runs[runs.length - 1];
+        let images = [];
+        try {
+            const d = await getJSON(`/api/calibration/records/${encodeURIComponent(id)}/${encodeURIComponent(last.run)}`);
+            images = (d && d.images) || [];
+        } catch (_) { images = []; }
+        if (_selected !== id) return;
+        _calKept = { embryoId: id, run: last.run, images };
+        const when = last.started_at ? new Date(last.started_at) : null;
+        const t = when && !isNaN(when) ? when.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : last.run;
+        const say = $('op-cal-kept-say');
+        if (say) {
+            say.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'} kept · latest ${t}, ` +
+                `${last.outcome || 'unknown'}: ${last.frames || 0} exposure${last.frames === 1 ? '' : 's'}, ` +
+                `${last.plots || 0} plot${last.plots === 1 ? '' : 's'}`;
+        }
+        const strip = $('op-cal-kept-strip');
+        if (strip) {
+            const plots = images.filter(i => (i.file || '').startsWith('plots/'));
+            const shown = plots.length ? plots : images.slice(-6);
+            strip.innerHTML = shown.map(i =>
+                `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
+                `<img loading="lazy" src="${escapeHtml(i.url)}?max=256" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
+        }
+        host.hidden = false;
+    }
+
+    function calImageTitle(i) {
+        const bits = [String(i.kind || 'image').replace(/_/g, ' ')];
+        if (i.galvo_name) bits.push(i.galvo_name);
+        if (typeof i.piezo === 'number') bits.push(`piezo ${i.piezo.toFixed(1)} µm`);
+        if (typeof i.galvo === 'number') bits.push(`galvo ${i.galvo.toFixed(3)}°`);
+        if (typeof i.score === 'number') bits.push(`score ${i.score.toExponential(2)}`);
+        if (typeof i.r_squared === 'number') bits.push(`R² ${i.r_squared.toFixed(2)}`);
+        return bits.join(' · ');
+    }
+
+    function openCalImage(index) {
+        if (!_calKept || typeof Lightbox === 'undefined') return;
+        Lightbox.open(_calKept.images.map(i => ({
+            url: i.url,
+            data_type: calImageTitle(i),
+            metadata: { embryo_id: _calKept.embryoId },
+        })), Math.max(0, index), 'calibration');
+    }
+
+    async function openCalFolder() {
+        if (!_calKept) return;
+        try {
+            const d = await postJSON(`/api/calibration/records/${encodeURIComponent(_calKept.embryoId)}/${encodeURIComponent(_calKept.run)}/open-folder`, {});
+            toast(`Opened ${d.path}`);
+        } catch (e) { toastFail(`Could not open the folder (${why(e)})`); }
     }
 
     // ── borrowing a fit ─────────────────────────────────────────────────────
@@ -2758,6 +2830,13 @@ const OperateManager = (function () {
             b.addEventListener('click', backOff));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
+        const keptStrip = $('op-cal-kept-strip');
+        if (keptStrip) keptStrip.addEventListener('click', e => {
+            const b = e.target.closest('[data-cal-img]');
+            if (b) openCalImage(Number(b.dataset.calImg));
+        });
+        const keptOpen = $('op-cal-kept-open');
+        if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
         const raise = $('op-fd-raise');
         if (raise) raise.addEventListener('click', raiseHead);
 

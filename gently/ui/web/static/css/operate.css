@@ -1661,3 +1661,20 @@
 /* A restored run's rows: there, but nothing is imaging them yet. */
 .op-runrow.is-waiting { opacity: 0.75; }
 .op-runrow.is-waiting .op-runrow-state { color: var(--text-muted, #888); font-style: italic; }
+
+
+/* What the calibration looked at: the latest run's plots, kept with the embryo. */
+.op-cal-kept { margin: 8px 0 12px; }
+.op-cal-kept[hidden] { display: none; }
+.op-cal-kept-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.op-cal-kept-strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 6px; scrollbar-width: thin; }
+.op-cal-kept-img {
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid var(--op-line, var(--border));
+    border-radius: 4px;
+    background: #000;
+    cursor: pointer;
+}
+.op-cal-kept-img:hover, .op-cal-kept-img:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
+.op-cal-kept-img img { display: block; height: 84px; width: auto; border-radius: 3px; }

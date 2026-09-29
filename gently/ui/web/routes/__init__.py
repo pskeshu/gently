@@ -8,6 +8,7 @@ a FastAPI ``APIRouter`` bound to the server instance.
 
 from .agent_ws import create_router as create_agent_ws_router
 from .auth_routes import create_router as create_auth_router
+from .calibration_records import create_router as create_calibration_records_router
 from .campaigns import create_router as create_campaigns_router
 from .chat import create_router as create_chat_router
 from .context import create_router as create_context_router
@@ -52,6 +53,7 @@ def register_all_routes(server):
         create_roles_router,
         create_tactic_library_router,
         create_dic_router,
+        create_calibration_records_router,
         create_replay_router,
     ):
         router = factory(server)

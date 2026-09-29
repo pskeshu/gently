@@ -23,6 +23,12 @@ of SQLite.  All state lives under a single root directory (e.g.
         embryos/
           {embryo_id}/
             embryo.yaml
+            calibration/
+              {YYYYMMDD_HHMMSS}/            # one calibration run's evidence
+                calibration.yaml
+                frames.jsonl
+                frames/NNN_{kind}_....tif
+                plots/NNN_{kind}.png
             predictions.jsonl
             ground_truth.yaml
             timelapse.mp4
@@ -346,6 +352,75 @@ class FileStore:
     def _embryo_dir_for_session(self, session_dir: Path, embryo_id: str) -> Path:
         """Resolve session_dir/embryos/<embryo_id>, rejecting traversal."""
         return _safe_child_path(session_dir / "embryos", embryo_id, "embryo_id")
+
+    # ==================================================================
+    # Calibration records
+    # ==================================================================
+
+    def calibration_dir(self, session_id: str, embryo_id: str) -> Path:
+        """embryos/<embryo_id>/calibration, not created."""
+        return self._embryo_dir(session_id, embryo_id) / "calibration"
+
+    def open_calibration_record(
+        self, session_id: str, embryo_id: str, requested: dict | None = None
+    ):
+        """A new folder for one calibration run, and the record that fills it.
+
+        The folder is named for when the run started. Two runs in one second
+        get distinct folders rather than sharing one.
+        """
+        from gently.core.calibration_record import CalibrationRecord, keep_policy
+
+        base = self.calibration_dir(session_id, embryo_id)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = base / stamp
+        n = 1
+        while folder.exists():
+            n += 1
+            folder = base / f"{stamp}_{n}"
+        return CalibrationRecord(
+            folder,
+            session_id=session_id,
+            embryo_id=embryo_id,
+            requested=requested,
+            keep=keep_policy(),
+        )
+
+    def list_calibration_records(
+        self, session_id: str, embryo_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Every calibration run recorded in the session, oldest first."""
+        from gently.core.calibration_record import read_record
+
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        root = sd / "embryos"
+        if not root.exists():
+            return []
+        if embryo_id is not None:
+            embryo_dirs = [self._embryo_dir_for_session(sd, embryo_id)]
+        else:
+            embryo_dirs = sorted(p for p in root.iterdir() if p.is_dir())
+        out: list[dict[str, Any]] = []
+        for ed in embryo_dirs:
+            cal = ed / "calibration"
+            if not cal.is_dir():
+                continue
+            for run in sorted(p for p in cal.iterdir() if p.is_dir()):
+                rec = read_record(run)
+                if rec is not None:
+                    out.append(rec)
+        out.sort(key=lambda r: str(r.get("started_at") or ""))
+        return out
+
+    def calibration_record_dir(self, session_id: str, embryo_id: str, run: str) -> Path | None:
+        """The folder of one recorded run, or None. ``run`` is matched against
+        the folders that exist, never joined into a path."""
+        base = self.calibration_dir(session_id, embryo_id)
+        if not base.is_dir():
+            return None
+        return next((p for p in base.iterdir() if p.is_dir() and p.name == run), None)
 
     def _volume_dir(self, session_id: str, embryo_id: str) -> Path:
         d = self._embryo_dir(session_id, embryo_id) / "volumes"

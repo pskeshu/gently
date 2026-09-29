@@ -107,6 +107,11 @@ D:/Gently3/
       snapshots/{source}_{stem}.tif
       embryos/{embryo_id}/
         embryo.yaml                        # position, calibration, uid
+        calibration/{YYYYMMDD_HHMMSS}/     # one calibration run's evidence
+          calibration.yaml                 # what was asked, the outcome, the fit
+          frames.jsonl                     # one line per image, with its score
+          frames/NNN_{kind}_....tif        # the exposures, unscaled
+          plots/NNN_{kind}.png             # focus curves, montage, summary
         predictions.jsonl                  # per-timepoint summary
         ground_truth.yaml                  # human annotations
         timelapse.mp4
