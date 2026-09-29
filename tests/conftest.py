@@ -2,9 +2,27 @@
 Shared fixtures for gently tests.
 """
 
+import importlib
+
 import pytest
 
 from gently.core.event_bus import EventBus
+
+# The hardware packages, for real, before any test module is collected.
+#
+# Four test modules stub these at import time with
+# `if name not in sys.modules: sys.modules[name] = MagicMock()`. Collection
+# imports every test module before running any test, so in a full run those
+# empty stand-ins were in place for the whole session — and the device-safety
+# tests, which check that a stage refuses a move past its limits, were checking
+# a MagicMock that refuses nothing. Thirteen of them passed alone and failed in
+# the suite (#143). Imported here first, the real packages are what the guards
+# find; on a machine without the `device` group the stubs still apply.
+for _name in ("pymmcore", "ophyd", "ophyd.status", "bluesky", "bluesky.run_engine"):
+    try:
+        importlib.import_module(_name)
+    except Exception:  # not installed here: the modules' own stubs stand in
+        pass
 
 
 @pytest.fixture(autouse=True)

@@ -810,7 +810,15 @@ class TestVolumeScannerErrorCleanup:
 
 
 class TestBottomCameraLEDCleanup:
-    """Bottom camera must turn LED off even when capture fails."""
+    """The bottom camera never drives the LED.
+
+    It used to switch the LED on for a capture and off after. Since 0d01229
+    (2026-06-16) it does neither: imaging is under room light only, and
+    ``use_led`` is kept for API compatibility and ignored, so that no caller
+    can flash the LED at a sample. Two tests here still asserted the old
+    behaviour and had been failing ever since, unseen, because nothing ran
+    them (#143).
+    """
 
     def _make_bottom_camera(self, snap_fails=False):
         core = make_core()
@@ -831,28 +839,23 @@ class TestBottomCameraLEDCleanup:
         cam.use_led = True
         return cam, core
 
-    def test_led_on_before_capture(self):
+    def test_the_led_is_never_touched_even_when_asked_for(self):
         cam, core = self._make_bottom_camera()
+        assert cam.use_led is True
         status = cam.trigger()
         status.wait(timeout=5)
 
-        # LED should have been opened then closed
-        config_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
-        configs_set = [c[2] for c in config_calls]
-        assert "Open" in configs_set, "LED must be turned on before capture"
-        assert "Closed" in configs_set, "LED must be turned off after capture"
+        led_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
+        assert led_calls == [], "a capture drove the LED"
 
-    def test_led_off_on_capture_error(self):
-        """LED MUST be turned off even if snapImage fails."""
+    def test_a_failed_capture_is_reported_and_leaves_the_led_alone(self):
         cam, core = self._make_bottom_camera(snap_fails=True)
         status = cam.trigger()
         with pytest.raises(RuntimeError):
             status.wait(timeout=5)
 
-        # Despite error, LED must have been closed
-        config_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
-        closed_calls = [c for c in config_calls if c[2] == "Closed"]
-        assert len(closed_calls) >= 1, "LED must be turned off even on capture error"
+        led_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
+        assert led_calls == [], "a failed capture drove the LED"
 
     def test_led_not_used_when_disabled(self):
         """When use_led=False, LED should not be touched."""
