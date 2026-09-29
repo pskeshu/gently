@@ -6,7 +6,22 @@ Read-only here; authoring/curation come in a later increment.
 
 from fastapi import APIRouter, Body, HTTPException
 
-from gently.harness.memory.notebook import Author, NoteKind, NoteStatus, note_to_dict
+from gently.harness.memory.notebook import (
+    Author,
+    Note,
+    NoteKind,
+    NoteStatus,
+    embryo_refs,
+    note_to_dict,
+)
+
+
+def _for_view(note: Note) -> dict:
+    """A note as the page draws it: what is on disk, and each embryo with the
+    session it belongs to. The page is handed the label; it does not build it."""
+    out = note_to_dict(note)
+    out["embryo_refs"] = embryo_refs(note)
+    return out
 
 
 def _coerce(enum_cls, value):
@@ -49,7 +64,7 @@ def create_router(server) -> APIRouter:
         )
         if limit is not None and limit >= 0:
             notes = notes[:limit]
-        return {"available": True, "notes": [note_to_dict(n) for n in notes]}
+        return {"available": True, "notes": [_for_view(n) for n in notes]}
 
     @router.get("/api/notebook/notes/{note_id}")
     async def get_note(note_id: str):
@@ -59,7 +74,7 @@ def create_router(server) -> APIRouter:
         note = nb.get_note(note_id)
         if note is None:
             raise HTTPException(status_code=404, detail="note not found")
-        return note_to_dict(note)
+        return _for_view(note)
 
     @router.get("/api/notebook/threads")
     async def list_threads():

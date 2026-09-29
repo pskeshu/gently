@@ -71,9 +71,17 @@ const NotebookApp = (() => {
 
         el.append(head, body);
 
+        // An embryo is named with its session: embryo_1 is a different
+        // embryo in every session. The server builds the label. A note that
+        // names no embryo still says which session it was made in.
+        const embryos = Array.isArray(n.embryo_refs)
+            ? n.embryo_refs.map(r => r.label)
+            : (Array.isArray(n.embryos) ? n.embryos : []);
+        const sessions = embryos.length ? [] : (Array.isArray(n.sessions) ? n.sessions : []);
         const chips = []
             .concat((n.strains || []).map(s => '🧬 ' + s))
-            .concat((n.embryos || []).map(e => '◌ ' + e))
+            .concat(sessions.map(s => 'session ' + s))
+            .concat(embryos.map(e => '◌ ' + e))
             .concat((n.threads || []).map(t => '# ' + t));
         if (chips.length) {
             const row = document.createElement('div');
