@@ -2784,6 +2784,16 @@ const DevicesManager = (function () {
         });
     }
 
+    // Leaving Devices for another tab is leaving every surface in it. The
+    // rail switched tabs without telling Operate, so a camera started here
+    // kept streaming behind Embryos or Home. Coming back re-enters the
+    // surface; it does not start a camera.
+    function onTabChanged(tab) {
+        if (typeof OperateManager === 'undefined') return;
+        if (tab !== 'devices') OperateManager.deactivate();
+        else if (_currentView === 'operate') OperateManager.activate();
+    }
+
     function init() {
         cacheDom();
         setupViewSwitcher();
@@ -2797,6 +2807,7 @@ const DevicesManager = (function () {
         loadEmbryosSnapshot();
         switchView(_currentView);
         if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('TAB_CHANGED', onTabChanged);
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
             ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', handleAvailability);
             ClientEventBus.on('EMBRYOS_UPDATE', handleEmbryosUpdate);

@@ -66,8 +66,12 @@ const OperateManager = (function () {
     let _lastBottom = null;
 
     // ── stream ownership, per pane ──────────────────────────────────────────
-    let _bottomOn = false, _bottomWasOn = false;
-    let _spimOn = false, _spimWasOn = false;
+    // A live view is on only while its surface is, and only because someone
+    // pressed Start. These used to come with a "was on" each, so returning
+    // to a surface restarted its camera — which, fourteen minutes into a
+    // timelapse, started the SPIM camera streaming under the run.
+    let _bottomOn = false;
+    let _spimOn = false;
 
     // ── the interlock latch ─────────────────────────────────────────────────
     // Retract is a RELATIVE move, so there is no absolute "safe height" to
@@ -1021,7 +1025,6 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             done(() => {
                 applyBottomCam(!!d.streaming);
-                _bottomWasOn = _bottomOn;
             });
         } catch (e) { done(); toastFail(`Camera toggle failed (${why(e)})`); }
     }
@@ -1187,7 +1190,6 @@ const OperateManager = (function () {
             const d = await postJSON(ep, {});
             done(() => {
                 applySpim(!!d.streaming);
-                _spimWasOn = _spimOn;
             });
         } catch (e) { done(); toastFail(`SPIM view toggle failed (${why(e)})`); }
     }
@@ -2381,21 +2383,23 @@ const OperateManager = (function () {
 
     const PANES = {
         bottom: {
-            onEnter() { if (_bottomWasOn && !_bottomOn) toggleBottomCam(); drawMarkers(); },
-            onLeave() { _bottomWasOn = _bottomOn; if (_bottomOn) stopBottom(); },
+            // Leaving turns the camera off; coming back does not turn it on.
+            onEnter() { drawMarkers(); },
+            onLeave() { if (_bottomOn) stopBottom(); },
             render() { renderMarkCount(); drawMarkers(); bz.render(); },
         },
         spim: {
-            onEnter() { if (_spimWasOn && !_spimOn) toggleSpim(); },
-            onLeave() { _spimWasOn = _spimOn; if (_spimOn) stopSpim(); forceLedOff(); },
+            onEnter() {},
+            onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
             render() { renderSpimTarget(); fd.render(); },
         },
         cal: {
-            // The light-sheet view is what calibration reads, so entering here
-            // brings it back the same way the SPIM pane does, and leaving closes
-            // the LED — the calibrate path never did (#106).
-            onEnter() { if (_spimWasOn && !_spimOn) toggleSpim(); renderCalTarget(); },
-            onLeave() { _spimWasOn = _spimOn; if (_spimOn) stopSpim(); forceLedOff(); },
+            // Calibration takes its own frames; it never read the live view,
+            // and this pane has no image to show one on. Entering used to
+            // restart the stream anyway, unseen. Leaving closes the LED — the
+            // calibrate path never did (#106).
+            onEnter() { renderCalTarget(); },
+            onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
             render() { renderCalTarget(); },
         },
         acquire: {
@@ -2908,9 +2912,8 @@ const OperateManager = (function () {
     function deactivate() {
         if (!_active) return;
         _active = false;
-        // Remember what was running so returning restores it, but leave nothing
-        // decoding behind a hidden view.
-        _bottomWasOn = _bottomOn; _spimWasOn = _spimOn;
+        // Leave nothing running behind a hidden view, and nothing to come
+        // back on by itself.
         if (_bottomOn) stopBottom();
         if (_spimOn) stopSpim();
         forceLedOff();
