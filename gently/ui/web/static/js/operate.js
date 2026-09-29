@@ -2020,6 +2020,7 @@ const OperateManager = (function () {
         _dicPin = plan.dic.position === 'here' && plan.dic.pin ? plan.dic.pin : null;
         set('op-plan-dic-pos', _dicPin ? 'here' : 'centroid');
         set('op-plan-dic-exposure', plan.dic.exposureMs);
+        set('op-plan-dic-light', plan.dic.light);
         set('op-tl-stop', plan.stop.kind);
         set('op-tl-condval', plan.stop.value);
         set('op-tl-monitor', plan.monitoringMode || 'idle');
@@ -2102,6 +2103,7 @@ const OperateManager = (function () {
             dicPosition: v('op-plan-dic-pos'),
             dicPin: _dicPin,
             dicExposureMs: v('op-plan-dic-exposure'),
+            dicLight: v('op-plan-dic-light'),
             stopKind: v('op-tl-stop'),
             stopValue: v('op-tl-condval'),
             overrides,

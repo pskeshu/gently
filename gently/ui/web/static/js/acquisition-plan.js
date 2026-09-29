@@ -31,6 +31,14 @@ const AcquisitionPlan = (() => {
         all_test_hatched: { label: 'when every test embryo has hatched', needs: null },
     };
 
+    // The light the DIC overview is taken under. The bottom camera drives
+    // none of its own, so the plan has to say.
+    const DIC_LIGHTS = {
+        room: { label: 'room light', says: 'under the room light' },
+        led: { label: 'LED', says: 'under the LED' },
+        none: { label: 'as it is', says: 'in the light as it is' },
+    };
+
     const num = (v, fallback) => {
         const n = Number(v);
         return Number.isFinite(n) ? n : fallback;
@@ -96,6 +104,7 @@ const AcquisitionPlan = (() => {
                 pin: f.dicPin && Number.isFinite(f.dicPin.x) && Number.isFinite(f.dicPin.y)
                     ? { x: f.dicPin.x, y: f.dicPin.y } : null,
                 exposureMs: f.dicExposureMs != null && f.dicExposureMs !== '' ? num(f.dicExposureMs, null) : null,
+                light: DIC_LIGHTS[f.dicLight] ? f.dicLight : 'room',
             },
             stop: { kind: STOP_KINDS[f.stopKind] ? f.stopKind : 'manual', value: f.stopValue == null ? null : f.stopValue },
             overrides,
@@ -144,6 +153,7 @@ const AcquisitionPlan = (() => {
                 position: plan.dic.position === 'here' && plan.dic.pin
                     ? { x: plan.dic.pin.x, y: plan.dic.pin.y } : null,
                 exposure_ms: plan.dic.exposureMs,
+                light: plan.dic.light,
             };
         }
         if (plan.overrides.length) {
@@ -180,7 +190,7 @@ const AcquisitionPlan = (() => {
             const from = plan.dic.position === 'here' && plan.dic.pin
                 ? `from ${plan.dic.pin.x.toFixed(0)}, ${plan.dic.pin.y.toFixed(0)}`
                 : 'from the centroid';
-            s += ` + one DIC overview ${every} ${from}`;
+            s += ` + one DIC overview ${every} ${from}, ${DIC_LIGHTS[plan.dic.light].says}`;
         }
         s += ` · ${stopWords(plan.stop.kind, plan.stop.value)}`;
         if (plan.overrides.length) {
@@ -252,6 +262,7 @@ const AcquisitionPlan = (() => {
             dicPosition: dic && dic.position ? 'here' : 'centroid',
             dicPin: dic && dic.position ? dic.position : null,
             dicExposureMs: dic ? dic.exposure_ms : null,
+            dicLight: dic ? dic.light : 'room',
             stopKind: stop.kind, stopValue: stop.value,
             overrides,
             monitoringMode: st.monitoring_mode,
@@ -259,7 +270,7 @@ const AcquisitionPlan = (() => {
     }
 
     return {
-        STOP_KINDS, stopSpec, stopWords, parseStopSpec, fromForm, fromStructure, toStructure,
+        STOP_KINDS, DIC_LIGHTS, stopSpec, stopWords, parseStopSpec, fromForm, fromStructure, toStructure,
         validate, toPayload, describe, intervalWords,
     };
 })();

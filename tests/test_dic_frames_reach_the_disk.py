@@ -48,6 +48,11 @@ def _rig(capture):
     c.move_to_position = AsyncMock(return_value={"success": True})
     c.acquire_volume = AsyncMock(return_value={"success": True, "volume": None})
     c.capture_bottom_image = AsyncMock(side_effect=capture)
+    # The overview's light: already on, so these tests are about the frame and
+    # not about switching (tests/test_dic_light.py is about switching).
+    c.get_room_light_status = AsyncMock(return_value={"success": True, "state": "on"})
+    c.set_room_light = AsyncMock(return_value={"success": True})
+    c.set_led = AsyncMock(return_value={"success": True})
     return c
 
 

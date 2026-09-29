@@ -320,7 +320,7 @@ def test_dic_channel_is_forwarded_validated():
         "every_seconds": 600.0,
         "position": {"x": -500.0, "y": -400.0},
         "exposure_ms": 8.0,
-        "use_led": True,
+        "light": "room",
     }
     assert r.json()["dic"] == dic
 

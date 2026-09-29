@@ -43,7 +43,7 @@ test('minutes are the unit the biologist thinks in; seconds are what is sent', (
 test('the DIC channel rides on its own clock, in rounds', () => {
     const plan = P.fromForm({ interval: 5, intervalUnit: 'min', dic: true, dicEveryRounds: 3, dicExposureMs: 8 });
     const body = P.toPayload(plan, IDS);
-    assert.deepEqual(body.dic, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8 });
+    assert.deepEqual(body.dic, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'room' });
     assert.match(P.describe(plan, SUBJECTS), /\+ one DIC overview every 3 rounds from the centroid/);
     assert.match(P.describe(P.fromForm({ dic: true }), SUBJECTS), /one DIC overview per round from the centroid/);
 });
@@ -129,7 +129,7 @@ test('a plan survives being saved and reloaded', () => {
     const st = P.toStructure(plan);
     assert.equal(st.cadence_s, 300);
     assert.equal(st.stop_condition, 'duration:12h');
-    assert.deepEqual(st.dic, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8 });
+    assert.deepEqual(st.dic, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8, light: 'room' });
     assert.deepEqual(st.stop_conditions, { embryo_2: 'hatching', embryo_3: 'timepoints:3' });
 
     const back = P.fromStructure(st);
@@ -168,4 +168,23 @@ test('the agent’s stage-based ending reads back as the pane’s own', () => {
     assert.deepEqual(P.parseStopSpec('stages(comma)'), { kind: 'comma', value: null });
     assert.deepEqual(P.parseStopSpec('stages(twofold)'), { kind: 'manual', value: null });
     assert.equal(P.fromStructure({ stop_condition: 'stages(hatched,hatching)' }).stop.kind, 'hatching');
+});
+
+test('the plan says which light the overview is taken under', () => {
+    // The bottom camera drives no light of its own. A night of overview
+    // frames came out dark because nothing said which light to use.
+    const room = P.fromForm({ dic: true });
+    assert.equal(room.dic.light, 'room', 'the room light is what this rig usually uses');
+    assert.match(P.describe(room, SUBJECTS), /from the centroid, under the room light/);
+    const led = P.fromForm({ dic: true, dicLight: 'led' });
+    assert.equal(P.toPayload(led, IDS).dic.light, 'led');
+    assert.match(P.describe(led, SUBJECTS), /under the LED/);
+    const asIs = P.fromForm({ dic: true, dicLight: 'none' });
+    assert.match(P.describe(asIs, SUBJECTS), /in the light as it is/);
+    assert.equal(P.fromForm({ dic: true, dicLight: 'sunlight' }).dic.light, 'room');
+    // saved and reloaded, the light comes back
+    assert.equal(P.fromStructure(P.toStructure(led)).dic.light, 'led');
+    // a plan saved before the light existed is taken under the room light
+    assert.equal(P.fromStructure({ dic: { enabled: true, use_led: true } }).dic.light, 'room');
+    assert.deepEqual(Object.keys(P.DIC_LIGHTS), ['room', 'led', 'none']);
 });
