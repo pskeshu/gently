@@ -33,7 +33,7 @@ def test_the_strip_redraws_live_only_while_home_is_on_screen():
 
 
 def test_a_tile_is_a_button_that_opens_the_lightbox():
-    tiles = HOME[HOME.index("_recent = recent.map(") :][:1800]
+    tiles = HOME[HOME.index("_recent = recent.map(") :][:3600]
     assert '<button type="button" class="home-image" data-home-image=' in tiles
     assert "openRecent(Number(b.dataset.homeImage))" in tiles
     opener = HOME[HOME.index("function openRecent(index)") :][:700]

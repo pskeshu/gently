@@ -167,7 +167,7 @@ def create_router(server) -> APIRouter:
         return {"sessions": sessions, "active": active}
 
     @router.get("/api/home/recent-images")
-    async def recent_images(limit: int = 8, scan: int = 200):
+    async def recent_images(limit: int = 8, scan: int = 200, sessions: int = 0):
         """Latest projection per embryo, aggregated across recent sessions.
 
         Unlike /api/snapshots (in-memory, current session only), this walks the
@@ -184,12 +184,20 @@ def create_router(server) -> APIRouter:
         sessions that actually hold projections. Both bounds are clamped so a
         crafted ?scan=/?limit= can't turn this unauthenticated read into an
         unbounded scan. Returns components; the client builds the (encoded) URL.
+
+        `sessions` stops the walk after that many sessions have contributed,
+        so Home can show the last few sessions whole, embryo by embryo,
+        instead of the first eight images wherever they fall. Each image
+        says which session it is from and when that session was, and how
+        many timepoints its embryo has.
         """
         store = _file_store()
         if store is None:
             return {"images": []}
         limit = max(1, min(int(limit), 48))
         scan = max(1, min(int(scan), 500))
+        sessions = max(0, min(int(sessions), 12))
+        contributed = 0
         out = []
         try:
             for sid in store.recent_session_ids(scan) or []:
@@ -198,6 +206,9 @@ def create_router(server) -> APIRouter:
                 except Exception:
                     eids = []
                 sname = None  # parsed lazily, only if this session contributes
+                screated = None
+                if sessions and contributed >= sessions:
+                    break
                 for eid in eids:
                     try:
                         tps = store.list_projection_timepoints(sid, eid) or []
@@ -211,12 +222,16 @@ def create_router(server) -> APIRouter:
                         except Exception:
                             info = None
                         sname = (info.get("name") if info else None) or sid
+                        screated = (info.get("created_at") if info else None) or None
+                        contributed += 1
                     out.append(
                         {
                             "session_id": sid,
                             "session_name": sname,
+                            "session_created_at": screated,
                             "embryo_id": eid,
                             "timepoint": int(max(tps)),
+                            "timepoints": len(tps),
                         }
                     )
                     if len(out) >= limit:

@@ -168,6 +168,14 @@ const Lightbox = {
         if (this.els.thumbnails) this.els.thumbnails.style.display = imageList.length > 1 ? '' : 'none';
     },
 
+    /** The embryo, with its session where the image says which: embryo_1
+     *  is a different embryo in every session. */
+    embryoOf(img) {
+        const md = (img && img.metadata) || {};
+        if (!md.embryo_id) return '-';
+        return md.session_id ? `${md.session_id}/${md.embryo_id}` : md.embryo_id;
+    },
+
     /** Where this image is on disk, and Fiji, when it is on disk at all. */
     showReveal(img) {
         const host = document.getElementById('lightbox-reveal');
@@ -198,7 +206,7 @@ const Lightbox = {
 
         // Update info panel
         if (this.els.infoType) this.els.infoType.textContent = img.data_type || '-';
-        if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = img.metadata?.embryo_id || '-';
+        if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = this.embryoOf(img);
         if (this.els.infoShape) {
             const shape = img.shape || img.metadata?.shape;
             this.els.infoShape.textContent = Array.isArray(shape) ? shape.join(' x ') : (shape || '-');
@@ -467,7 +475,7 @@ const Lightbox = {
         if (this.els.title) this.els.title.textContent = tp !== undefined && tp !== null ? `T${tp}` : (img.data_type || 'Image');
         if (this.els.position) this.els.position.textContent = `${index + 1} of ${this.imageList.length}`;
         if (this.els.infoType) this.els.infoType.textContent = img.data_type || '-';
-        if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = img.metadata?.embryo_id || '-';
+        if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = this.embryoOf(img);
         if (this.els.infoShape) this.els.infoShape.textContent = img.shape ? img.shape.join(' x ') : '-';
         if (this.els.infoTime) {
             this.els.infoTime.textContent = img.timestamp ? new Date(img.timestamp).toLocaleTimeString()

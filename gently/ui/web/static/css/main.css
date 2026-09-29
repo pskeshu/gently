@@ -11495,6 +11495,31 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
     pointer-events: none;
 }
 
+/* Home's recent images, under their sessions. */
+.home-image-group + .home-image-group { margin-top: 14px; }
+.home-image-group-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-bottom: 6px;
+    font-size: 0.8rem;
+}
+.home-image-session { font-weight: 600; color: var(--text, #0f172a); }
+.home-image-session-id { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-muted, #64748b); }
+.home-image-group-count { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.home-image-live {
+    padding: 0 7px;
+    border: 1px solid var(--accent-green, #4ade80);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent-green, #16a34a);
+}
+.home-image-group-head .reveal-btn { margin-left: auto; align-self: center; }
+
 /* ── Film: the DIC overview is the first row, on the same timeline ───────── */
 .filmstrip-dic-row { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
 .filmstrip-dic-row .filmstrip-label { background: var(--bg-hover); }
