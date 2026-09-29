@@ -85,15 +85,14 @@ def create_router(server) -> APIRouter:
             import tifffile
             from PIL import Image
 
-            from gently.core.imaging import normalize_to_uint8
+            from gently.core.imaging import downsample_mean, normalize_to_uint8
 
             arr = tifffile.imread(str(path))
             if arr.ndim > 2:  # a stack or a colour plane: the first 2D frame
                 arr = arr.reshape(-1, *arr.shape[-2:])[0]
             if max and max > 0:
-                step = -(-int(builtins_max(arr.shape[:2])) // int(max))
-                if step > 1:
-                    arr = arr[::step, ::step]
+                # Averaged, not sampled: see downsample_mean.
+                arr = downsample_mean(arr, int(max))
             png = io.BytesIO()
             Image.fromarray(normalize_to_uint8(arr)).save(png, format="PNG")
         except HTTPException:
@@ -110,4 +109,3 @@ def create_router(server) -> APIRouter:
 
 # ``max`` is shadowed by the query parameter above, on purpose — it is the
 # name the URL uses. The builtin is kept under its own name for the arithmetic.
-builtins_max = max

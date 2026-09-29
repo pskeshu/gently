@@ -90,6 +90,27 @@ def normalize_to_uint8(
     return (img * 255).astype(np.uint8)
 
 
+def downsample_mean(image: np.ndarray, max_dim: int) -> np.ndarray:
+    """Shrink a 2D image so its longer side is at most ``max_dim``, by
+    averaging blocks rather than keeping one pixel in N.
+
+    Keeping every Nth pixel keeps every Nth pixel's noise, at full strength,
+    in a picture N times smaller: a dim 2048 px frame shrunk that way to a
+    thumbnail is mostly grain. The mean of an 8x8 block has an eighth of it.
+    """
+    if image.ndim != 2 or max_dim <= 0:
+        return image
+    h, w = image.shape
+    step = -(-max(h, w) // int(max_dim))
+    if step <= 1:
+        return image
+    hh, ww = (h // step) * step, (w // step) * step
+    if hh == 0 or ww == 0:
+        return image
+    blocks = image[:hh, :ww].astype(np.float32).reshape(hh // step, step, ww // step, step)
+    return blocks.mean(axis=(1, 3))
+
+
 def image_to_base64(
     image: np.ndarray,
     format: str = "JPEG",
