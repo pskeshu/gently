@@ -938,6 +938,16 @@
                             <div class="op-cap" id="op-plan-dic-pin" hidden></div>
                             <div class="op-field"><label class="op-label" for="op-plan-dic-exposure">Exposure (ms)</label>
                               <input class="op-num-in" id="op-plan-dic-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
+                            {# The bottom camera drives no light of its own, so the
+                               plan says which one the frame is taken under. It is
+                               switched on for the frame and off again before the
+                               volumes; a light that was already on is left on. #}
+                            <div class="op-field"><label class="op-label" for="op-plan-dic-light">Light</label>
+                              <select class="op-sel" id="op-plan-dic-light">
+                                <option value="room" selected>room light</option>
+                                <option value="led">LED</option>
+                                <option value="none">as it is</option>
+                              </select></div>
                           </div>
                         </div>
 

@@ -144,6 +144,9 @@ class TimelapseOrchestrator:
         # The DIC overview channel (see DicOverview). A subject of its own in
         # the due-loop: one frame of the whole field on its own clock.
         self._dic: DicOverview | None = None
+        # A light needs a moment to be a light: the room light is a relay and a
+        # tube, the LED a shutter. Short, and the tests set it to nothing.
+        self._dic_light_settle_s: float = 1.0
         self._dic_next_due_at: datetime | None = None
         self._dic_frames = 0
         self._dic_last_at: datetime | None = None
@@ -609,12 +612,20 @@ class TimelapseOrchestrator:
             return
         frame = self._dic_frames + 1
         pos = dic.position
+        lit: str | None = None
         try:
             if pos:
                 await self.client.move_to_position(float(pos["x"]), float(pos["y"]))
-            result = await self.client.capture_bottom_image(
-                use_led=dic.use_led, exposure_ms=dic.exposure_ms
-            )
+            lit = await self._dic_light_on(dic.light, frame)
+            try:
+                result = await self.client.capture_bottom_image(
+                    use_led=False, exposure_ms=dic.exposure_ms
+                )
+            finally:
+                # Before anything else: the volumes that follow this frame are
+                # fluorescence, and a light left on is in every one of them.
+                await self._dic_light_off(lit, frame)
+                lit = None
             captured_at = datetime.now()
             image_path = (result or {}).get("image_path")
             # A thumbnail rides on the event so the Embryos tab can show the
@@ -683,6 +694,74 @@ class TimelapseOrchestrator:
             logger.warning("DIC overview frame %d failed: %s", frame, exc)
         finally:
             self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+
+    async def _dic_light_on(self, light: str, frame: int) -> str | None:
+        """Put the overview's light on. Returns what THIS call switched on, so
+        only that is switched off again: a room light the operator had on
+        stays on."""
+        try:
+            if light == "room":
+                status = await self.client.get_room_light_status()
+                if isinstance(status, dict) and status.get("state") == "on":
+                    return None
+                res = await self.client.set_room_light("on")
+                if isinstance(res, dict) and res.get("success") is False:
+                    logger.warning(
+                        "DIC overview frame %d: the room light did not come on (%s); "
+                        "taking the frame as it is",
+                        frame,
+                        res.get("error") or res,
+                    )
+                    return None
+                await asyncio.sleep(self._dic_light_settle_s)
+                return "room"
+            if light == "led":
+                await self.client.set_led("Open")
+                await asyncio.sleep(self._dic_light_settle_s)
+                return "led"
+        except Exception as exc:
+            logger.warning(
+                "DIC overview frame %d: could not switch the %s light on: %s", frame, light, exc
+            )
+        return None
+
+    async def _dic_light_off(self, lit: str | None, frame: int) -> None:
+        """Put out what _dic_light_on lit. Tried twice, and loud if it fails:
+        the next thing the run does is image fluorescence."""
+        if lit is None:
+            return
+        for attempt in (1, 2):
+            try:
+                if lit == "room":
+                    res = await self.client.set_room_light("off")
+                else:
+                    res = await self.client.set_led("Closed")
+                if not (isinstance(res, dict) and res.get("success") is False):
+                    return
+                why: Any = res.get("error") or res
+            except Exception as exc:
+                why = exc
+            logger.warning(
+                "DIC overview frame %d: the %s light did not go off (attempt %d): %s",
+                frame,
+                lit,
+                attempt,
+                why,
+            )
+        logger.error(
+            "DIC overview frame %d: the %s light is STILL ON. The volumes that follow "
+            "are being imaged with it on.",
+            frame,
+            lit,
+        )
+        self._emit_event(
+            EventType.ERROR_OCCURRED,
+            {
+                "source": "dic",
+                "message": f"The {lit} light did not switch off after the DIC overview",
+                "frame": frame,
+            },
+        )
 
     def _dic_status(self) -> dict[str, Any] | None:
         if self._dic is None:

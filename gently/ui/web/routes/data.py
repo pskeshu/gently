@@ -91,7 +91,10 @@ def _parse_dic_config(raw) -> dict | None:
         raise HTTPException(status_code=400, detail="dic must be an object")
     if not raw.get("enabled"):
         return None
-    out: dict = {"enabled": True, "use_led": bool(raw.get("use_led", True))}
+    light = raw.get("light", "room")
+    if light not in ("room", "led", "none"):
+        raise HTTPException(status_code=400, detail="dic.light must be room, led or none")
+    out: dict = {"enabled": True, "light": light}
     every = raw.get("every_seconds")
     if every is not None:
         try:

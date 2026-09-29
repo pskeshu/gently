@@ -366,7 +366,14 @@ class DicOverview:
     every_seconds: float | None = None
     position: dict[str, float] | None = None
     exposure_ms: float | None = None
-    use_led: bool = True
+    # The light the frame is taken under. The bottom camera drives no light
+    # of its own, so without this the overview was whatever the room happened
+    # to be: in the dark, a dark frame. "room" is what this rig usually uses;
+    # "led" is the transmitted-light LED, open for the capture only; "none"
+    # leaves the lights exactly as they are.
+    light: str = "room"
+
+    LIGHTS = ("room", "led", "none")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -374,7 +381,7 @@ class DicOverview:
             "every_seconds": self.every_seconds,
             "position": dict(self.position) if self.position else None,
             "exposure_ms": self.exposure_ms,
-            "use_led": bool(self.use_led),
+            "light": self.light,
         }
 
     @classmethod
@@ -394,7 +401,9 @@ class DicOverview:
             every_seconds=float(every) if every is not None else None,
             position=position,
             exposure_ms=float(exposure) if exposure is not None else None,
-            use_led=bool(d.get("use_led", True)),
+            # `use_led` in an older plan or checkpoint never did anything (the
+            # camera ignored it), so it does not choose the LED now either.
+            light=str(d.get("light")) if d.get("light") in cls.LIGHTS else "room",
         )
 
 
