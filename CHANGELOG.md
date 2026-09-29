@@ -502,7 +502,7 @@ readout, two-point calibration, and the SPIM laser/exposure controls. The
 
 The first build in which a biologist can take an experiment from a dish to a
 running multi-embryo timelapse without leaving Devices › Operate, and get it
-back after a restart. Seventy-six pull requests since `v1.0.0.dev1`, nearly all
+back after a restart. Seventy-seven pull requests since `v1.0.0.dev1`, nearly all
 of them started as a sentence somebody said at the microscope.
 
 A release candidate: everything below is merged, and the list under **Known**
@@ -687,6 +687,11 @@ and walk to it.
 - The build id copies in one click and says how old the build is (#172, #188).
 - A button beside the session id opens the session's folder in the file
   manager (#205).
+- **A projection shows the left channel** (#224). The camera's frame carries
+  two channels side by side, and a projection of all of it was mostly empty
+  field. Which channel is shown is a setting of the rig; the volume on disk
+  is the whole frame. Projections already drawn keep what they were drawn
+  with.
 - Home's recent images update as volumes land, and open (#202). They are
   under their sessions, embryo by embryo (#223).
 - A note's embryos are named with their session, `6f090787/embryo_1`. A note
@@ -721,6 +726,10 @@ acquisition plan end to end, the DIC overview's light, calibration abort,
 keeping a calibration's images, Raise head over its full traverse,
 resuming a run after a restart, and resuming a session from the gate with
 the microscope on.
+
+Perception, the detectors and calibration each still take their own part of
+the camera's frame, by three different rules. Only the projection follows
+the new setting.
 
 The folder and Fiji buttons have been checked up to the click. Opening
 Explorer and starting Fiji were not exercised, because a run was going on
