@@ -42,6 +42,61 @@ class NoteStatus(str, Enum):
     SUPERSEDED = "superseded"  # replaced by a newer note
 
 
+_TAG_SEPARATORS = re.compile(r"[,;\n]")
+
+
+def as_tags(value: Any) -> list[str]:
+    """A facet (embryos, strains, sessions, threads) as a list of tags.
+
+    A model hands over ``"embryo_1, embryo_2"`` as often as
+    ``["embryo_1", "embryo_2"]``, and ``list()`` of a string is its
+    characters: a note was saved with twenty-eight one-letter embryos, and
+    drawn as twenty-eight tags. So a string is split on its separators, and a
+    list that is plainly a string taken apart is put back together first,
+    which mends the notes already on disk when they are read.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        pieces = _TAG_SEPARATORS.split(value)
+    else:
+        items = [str(v) for v in value if v is not None]
+        if len(items) >= 3 and all(len(i) == 1 for i in items):
+            pieces = _TAG_SEPARATORS.split("".join(items))
+        else:
+            pieces = [p for i in items for p in _TAG_SEPARATORS.split(i)]
+    tags: list[str] = []
+    for piece in pieces:
+        tag = piece.strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def embryo_refs(n: Note) -> list[dict[str, Any]]:
+    """Each embryo of a note, with the session it belongs to.
+
+    ``embryo_1`` names a different embryo in every session, so on its own it
+    says nothing. A note made in one session qualifies its embryos with it. A
+    tag that already carries its session (``6a4a3d9b/embryo_1``) keeps it. A
+    note that spans sessions cannot say which one a bare embryo is from, and
+    does not guess.
+    """
+    only = n.sessions[0] if len(n.sessions) == 1 else None
+    refs: list[dict[str, Any]] = []
+    for tag in n.embryos:
+        named, _, embryo = tag.rpartition("/")
+        session = named or only
+        refs.append(
+            {
+                "session": session,
+                "embryo": embryo,
+                "label": f"{session}/{embryo}" if session else embryo,
+            }
+        )
+    return refs
+
+
 @dataclass
 class Note:
     id: str
@@ -61,6 +116,13 @@ class Note:
     superseded_by: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+
+    def __post_init__(self) -> None:
+        # Whoever builds a Note, a facet is a list of tags by the time it is one.
+        self.strains = as_tags(self.strains)
+        self.embryos = as_tags(self.embryos)
+        self.sessions = as_tags(self.sessions)
+        self.threads = as_tags(self.threads)
 
 
 def note_to_dict(n: Note) -> dict[str, Any]:
@@ -95,10 +157,10 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         title=d.get("title"),
         status=NoteStatus(d.get("status", "confirmed")),
         confidence=Confidence(conf) if conf else None,
-        strains=list(d.get("strains") or []),
-        embryos=list(d.get("embryos") or []),
-        sessions=list(d.get("sessions") or []),
-        threads=list(d.get("threads") or []),
+        strains=as_tags(d.get("strains")),
+        embryos=as_tags(d.get("embryos")),
+        sessions=as_tags(d.get("sessions")),
+        threads=as_tags(d.get("threads")),
         basis=list(d.get("basis") or []),
         links=list(d.get("links") or []),
         artifacts=list(d.get("artifacts") or []),

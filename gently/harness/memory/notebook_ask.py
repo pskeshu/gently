@@ -5,7 +5,7 @@ later increment). See docs/superpowers/specs/2026-06-16-shared-lab-notebook-desi
 
 from __future__ import annotations
 
-from .notebook import Note, NotebookStore
+from .notebook import Note, NotebookStore, embryo_refs
 
 
 def select_notes(
@@ -74,7 +74,7 @@ def _render_notes(notes: list[Note]) -> str:
         if n.strains:
             scope.append("strains=" + ",".join(n.strains))
         if n.embryos:
-            scope.append("embryos=" + ",".join(n.embryos))
+            scope.append("embryos=" + ",".join(r["label"] for r in embryo_refs(n)))
         tag = f" [{'; '.join(scope)}]" if scope else ""
         lines.append(f"[{n.id}] ({n.kind.value}){tag} {n.body}")
     return "\n".join(lines)

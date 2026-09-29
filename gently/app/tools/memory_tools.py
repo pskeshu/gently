@@ -152,16 +152,20 @@ async def recall_context(
 )
 async def record_note(
     text: str,
-    embryos: list[str] | None = None,
-    strains: list[str] | None = None,
+    embryos: list[str] | str | None = None,
+    strains: list[str] | str | None = None,
     context: dict | None = None,
 ) -> str:
-    """Write a human-authored note into the notebook, tagged to the current session."""
+    """Write a human-authored note into the notebook, tagged to the current session.
+
+    ``embryos`` and ``strains`` arrive as a list or as one comma-separated
+    string, whichever the model chose. The Note makes tags of either.
+    """
     agent = context.get("agent") if context else None
     cs = getattr(agent, "context_store", None) if agent else None
     if cs is None:
         return "No notebook available (context store not connected)"
-    from gently.harness.memory.notebook import Author, Note, NoteKind
+    from gently.harness.memory.notebook import Author, Note, NoteKind, as_tags
 
     session_id = getattr(agent, "session_id", None)
     note = Note(
@@ -170,8 +174,8 @@ async def record_note(
         body=text,
         author=Author.HUMAN,
         sessions=[session_id] if session_id else [],
-        embryos=embryos or [],
-        strains=strains or [],
+        embryos=as_tags(embryos),
+        strains=as_tags(strains),
     )
     note_id = cs.notebook.write_note(note)
     # Refresh the Notebook tab + Agent's-view live edge (both ride CONTEXT_UPDATED).
