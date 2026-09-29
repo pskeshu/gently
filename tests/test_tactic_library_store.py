@@ -135,6 +135,31 @@ class TestListTactics:
         names = [r["name"] for r in result]
         assert names[0] == "Second"
 
+    def test_newest_first_when_the_clock_has_not_moved(self, file_context_store, monkeypatch):
+        # Windows' clock moves in steps; two saves in a row can land on one.
+        monkeypatch.setattr(file_context_store, "_now", lambda: "2026-09-29T05:51:00.123000")
+        for name in ("First", "Second", "Third"):
+            file_context_store.save_tactic(_fresh_tactic(), name=name)
+        result = file_context_store.list_tactics()
+        assert [r["name"] for r in result] == ["Third", "Second", "First"]
+        assert len({r["created_at"] for r in result}) == 3
+
+    def test_a_name_used_twice_means_the_newer(self, file_context_store, monkeypatch):
+        monkeypatch.setattr(file_context_store, "_now", lambda: "2026-09-29T05:51:00.123000")
+        file_context_store.save_tactic(_fresh_tactic(), name="Overnight")
+        newer = file_context_store.save_tactic(_fresh_tactic(), name="Overnight")
+        assert file_context_store.get_tactic("Overnight")["id"] == newer
+
+    def test_a_clock_that_has_moved_is_left_alone(self, file_context_store, monkeypatch):
+        times = iter(["2026-09-29T05:51:00.100000", "2026-09-29T05:51:07.000000"])
+        monkeypatch.setattr(file_context_store, "_now", lambda: next(times))
+        file_context_store.save_tactic(_fresh_tactic(), name="First")
+        file_context_store.save_tactic(_fresh_tactic(), name="Second")
+        assert [r["created_at"] for r in file_context_store.list_tactics()] == [
+            "2026-09-29T05:51:07.000000",
+            "2026-09-29T05:51:00.100000",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # get_tactic

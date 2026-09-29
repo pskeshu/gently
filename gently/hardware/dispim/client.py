@@ -1138,6 +1138,13 @@ class DiSPIMMicroscope(Microscope):
             },
         )
 
+    async def restore_stage_region(self, applied_at: str, session_id: str | None = None) -> dict:
+        """Bring an earlier XY region back, by when it was applied."""
+        return await self._api_post(
+            "/api/stage/region/restore",
+            {"applied_at": str(applied_at), "session_id": session_id},
+        )
+
     async def set_envelope_enforced(self, enforced: bool) -> dict:
         """Turn the Tiger's XY soft limits on or off.
 

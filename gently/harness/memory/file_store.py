@@ -36,7 +36,7 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1851,7 +1851,7 @@ class FileContextStore:
         name = name or tactic.get("name") or "unnamed"
         slug = self._slugify(name)
         tid = self._gen_id()
-        now = self._now()
+        now = self._later_than_the_last_tactic(self._now())
 
         template = {
             "id": tid,
@@ -1874,6 +1874,24 @@ class FileContextStore:
         self._notify_context_change("tactic_library")
         logger.info(f"Saved tactic template '{name}' ({tid})")
         return tid
+
+    def _later_than_the_last_tactic(self, now: str) -> str:
+        """``now``, or a microsecond after the newest saved tactic if the
+        clock has not moved since.
+
+        The library is ordered by when a tactic was saved, and a name that
+        is used twice means the newer one. On Windows the clock moves in
+        steps of a millisecond or more, so two tactics saved one after the
+        other were given the same time, and which came first was decided by
+        their random ids.
+        """
+        newest = max((str(t.get("created_at") or "") for t in self.list_tactics()), default="")
+        if not newest or now > newest:
+            return now
+        try:
+            return (datetime.fromisoformat(newest) + timedelta(microseconds=1)).isoformat()
+        except ValueError:
+            return now
 
     def list_tactics(self) -> list[dict]:
         """List all saved tactic templates, ordered by created_at descending."""

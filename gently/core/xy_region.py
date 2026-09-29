@@ -156,6 +156,15 @@ def apply(
     return record
 
 
+def find(applied_at: str):
+    """A past region, by when it was applied, or None. Changes nothing.
+
+    For whoever has to write the region to the controller before it is
+    recorded as restored: look first, write, then ``restore``.
+    """
+    return next((h for h in load().history if h.applied_at == applied_at), None)
+
+
 def restore(applied_at: str, *, session_id: str | None = None) -> RegionRecord | None:
     """Bring a past region back as the current one.
 
