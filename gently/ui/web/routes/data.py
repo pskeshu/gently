@@ -59,6 +59,11 @@ async def _run_cancellable_calibration(agent, coro, what: str):
 
     A CancelledError that is OURS — the HTTP client went away — is re-raised
     unchanged, so a closed tab still cancels the way it always did.
+
+    Which of the two it was is recorded, not inferred. The abort route names
+    the task it is cancelling before it cancels it. This used to ask
+    ``Task.cancelling()``, which arrived in Python 3.11; on 3.10, which the
+    project supports, every cancellation read as an operator's abort.
     """
     task = asyncio.create_task(coro)
     agent._calibration_task = task
@@ -66,17 +71,16 @@ async def _run_cancellable_calibration(agent, coro, what: str):
     try:
         return await task
     except asyncio.CancelledError:
-        # Task.cancelling() is 3.11+; the deps-less mypy run types against an
-        # older stdlib, so it is reached for by name.
-        current = asyncio.current_task()
-        cancelling = getattr(current, "cancelling", None)
-        if callable(cancelling) and cancelling():
-            raise
-        raise CalibrationAborted(what) from None
+        if getattr(agent, "_calibration_aborting", None) is task:
+            raise CalibrationAborted(what) from None
+        task.cancel()  # ours: the routine must not outlive the request
+        raise
     finally:
         if getattr(agent, "_calibration_task", None) is task:
             agent._calibration_task = None
             agent._calibration_what = None
+        if getattr(agent, "_calibration_aborting", None) is task:
+            agent._calibration_aborting = None
 
 
 def _parse_dic_config(raw) -> dict | None:
@@ -1602,6 +1606,7 @@ def create_router(server) -> APIRouter:
         what = getattr(agent, "_calibration_what", None)
         if task is None or task.done():
             return {"success": True, "aborted": False, "detail": "No calibration running"}
+        agent._calibration_aborting = task  # said before it is done: see the wrapper
         task.cancel()
         halted = None
         client = _resolve_client()

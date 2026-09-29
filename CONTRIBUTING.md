@@ -68,6 +68,11 @@ request, and it changes — read it rather than trusting a summary here.
 `mypy .` locally, but **not** the deps-installed run; reproduce that with
 `uv run mypy .` after `uv sync`.
 
+The test suite gates a pull request too: `uv run pytest` and the JavaScript
+unit tests (`node --test tests/js/<file>.test.mjs`, one file at a time). Run
+both before pushing. The suite is expected to be fully green; a test that fails
+only when run with the others is a bug in the tests, not a known failure.
+
 ## Releasing
 
 Feedback is only actionable if it names a build. Keep that true.

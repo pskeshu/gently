@@ -34,7 +34,8 @@ def test_the_date_is_iso_8601_with_an_offset_or_absent():
     stamp = build_date()
     if stamp is None:
         return
-    parsed = datetime.fromisoformat(stamp)
+    # git writes UTC as "Z"; datetime.fromisoformat reads that from 3.11 on.
+    parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     assert parsed.tzinfo is not None, (
         f"{stamp!r} has no offset, so it means a different moment to every reader"
     )

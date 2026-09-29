@@ -67,3 +67,50 @@ jobs:
 
       - name: mypy (deps-installed)
         run: uv run mypy .
+
+  # The test suite, and the JavaScript unit tests beside it.
+  #
+  # Until this job nothing ran either. A pull request could merge with its own
+  # tests failing, and one did (#198, fixed by #199); sixteen tests failed for
+  # months without anyone seeing them (#143). The browser is still not driven
+  # here: a change to what the UI looks like or does is verified by running the
+  # app, as CLAUDE.md says.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone gently-perception sibling
+        run: git clone --depth 1 https://github.com/gently-project/gently-perception.git ../gently-perception
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+          enable-cache: true
+
+      - name: uv sync
+        run: uv sync
+
+      - name: pytest
+        # No key: no test may call the API. The storage root is redirected per
+        # test by tests/conftest.py; this is the belt to that pair of braces.
+        env:
+          ANTHROPIC_API_KEY: ""
+          GENTLY_STORAGE_PATH: ${{ runner.temp }}/gently-storage
+        run: uv run pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JavaScript unit tests
+        # One file per invocation: `node --test <dir>` does not find .mjs
+        # files on every Node version (see tests/js/operate-math.test.mjs).
+        run: |
+          for f in tests/js/*.test.mjs; do
+            echo "::group::$f"
+            node --test "$f"
+            echo "::endgroup::"
+          done
+

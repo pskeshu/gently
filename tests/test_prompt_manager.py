@@ -32,8 +32,22 @@ class TestToolSelection:
         assert len(plan_tools) <= len(run_tools)
 
     def test_plan_mode_only_plan_tools(self, mgr):
+        # The registry fills as tool modules are imported. Alone, this test
+        # saw whatever had been imported so far and passed on a subset; in the
+        # suite it saw everything and failed on three tools its list had never
+        # heard of (#143). Import them all, so it checks the same thing in any
+        # order.
+        import importlib
+        import pkgutil
+
+        import gently.app.tools as tools_pkg
+
+        for mod in pkgutil.iter_modules(tools_pkg.__path__):
+            importlib.import_module(f"gently.app.tools.{mod.name}")
+
         plan_tools = mgr.get_tools_for_mode("plan", has_microscope=False)
         plan_tool_names = {t["name"] for t in plan_tools}
+        assert "create_campaign" in plan_tool_names, "plan mode offered nothing to check"
         allowed = {
             "create_campaign",
             "create_plan_item",
@@ -55,6 +69,9 @@ class TestToolSelection:
             "validate_plan",
             "batch_update_status",
             "batch_update_spec",
+            "snapshot_plan",
+            "list_plan_versions",
+            "restore_plan_version",
             "save_plan_template",
             "list_templates",
             "apply_template",
