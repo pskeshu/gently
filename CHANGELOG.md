@@ -498,6 +498,254 @@ readout, two-point calibration, and the SPIM laser/exposure controls. The
 
 ---
 
+## v1.0.0rc1
+
+The first build in which a biologist can take an experiment from a dish to a
+running multi-embryo timelapse without leaving Devices › Operate, and get it
+back after a restart. Seventy-seven pull requests since `v1.0.0.dev1`, nearly all
+of them started as a sentence somebody said at the microscope.
+
+A release candidate: everything below is merged, and the list under **Known**
+is what has not yet been exercised on the microscope.
+
+**The acquisition plan**
+
+Operate's last pane was the one nobody had touched. It is now a configurator in
+the shape of a classical multi-dimensional acquisition, minus what the
+instrument already knows: positions are the roster and z is each embryo's
+calibration, so what is asked is what is left. Cadence, two channels, and how
+it ends (#194, #195).
+
+- **Two channels.** SPIM volumes of every embryo every round, and a DIC
+  overview: one bottom-camera frame of the whole field, on its own clock,
+  taken from the centroid of the embryos or from a position you pin.
+- **The overview says which light it is taken under** (#212): the room light,
+  the LED, or the light as it is. The light goes on for the frame and off
+  again before the volumes; a light that was already on is left on.
+- **Endings per embryo.** The run has a default ending; any embryo can have
+  its own. "Embryo 2 at hatching, the rest after twelve timepoints."
+- **A duration ending is measured on the embryo's clock.** "After six hours"
+  means six hours after the run began, whatever the software was doing in
+  between. A pause or a restart does not stop an embryo developing, so it
+  does not stop the clock.
+- **The plan is said back as one sentence** beside Start, and that sentence is
+  exactly what goes on the wire.
+- **The run, embryo by embryo** (#196). Each embryo has a row with its count,
+  its next time, its ending, and its own Stop. The Embryos tab shows the DIC
+  frames as a strip you can open and step through (#200), and in the film
+  they are the film's first row, on the same timeline as the embryos (#210).
+- **Templates** (#197). A plan saves under a name and runs later as the
+  sentence it was saved as.
+- **A subset of embryos** can be targeted for a run (#161). Role decides what
+  an embryo is for; selection decides which ones this run images. With
+  several selected, each highlighted row says which it is, "selected" or
+  "target", instead of being a lighter or a darker blue (#220).
+- **Start is not offered while a run is going** (#217). The button went on
+  saying "Run tactic" over a tactic that was running.
+
+Three things that were quietly wrong are fixed on the way. The laser preset
+chosen on the pane was collected and never applied. Slices and exposure were
+validated and dropped, so every timepoint ran at the defaults. And Start was
+four different verbs behind one label (#156). A run on an uncalibrated embryo
+is now refused rather than warned about (#154).
+
+**A session survives a restart**
+
+The orchestrator wrote a checkpoint every round and nothing ever read it
+back. A resumed run took its counts from the conversation snapshot, which on
+the rig said t1 while the checkpoint said t15, so a restarted run would have
+numbered from t2 over the volumes on disk.
+
+- The checkpoint is applied on resume, and the plan a run was started with is
+  kept in the session as `acquisition.yaml` (#203).
+- A restored run can be carried on: **Resume run** images every embryo still
+  going, continues the numbering, and keeps the DIC clock (#204).
+- The pane comes back on what the session was running: the plan, the selected
+  embryos, and the mode (#208).
+- The snapshot now follows the run and is written at shutdown (#206).
+
+**Removing an embryo deletes nothing** (#219)
+
+The × beside an embryo is for a false positive, and it sits one row from the
+embryo that has been imaged all night. It asked nothing, and it deleted the
+embryo's folder from disk: volumes, projections, traces, calibration.
+
+- A removed embryo's folder is moved, whole, to the session's `removed`
+  folder. Undo is on the toast, and after that the roster lists the removed
+  embryos, each with Restore. It still does after a restart.
+- An embryo that holds timepoints or a calibration is asked about first.
+- An embryo the run is imaging is refused, with where to stop it.
+
+**Calibration**
+
+Calibration has its own pane (#158) and shows its sweep where the operator
+started it (#145). It looks once before spending sixty exposures: on an empty
+field it used to succeed, fitting a slope and a scan cuboid to noise (#176).
+A running calibration can be aborted, which cancels the routine and halts the
+axes including the piezo (#201).
+
+**What a calibration looked at is kept** (#214). Its conclusion was stored, a
+slope and an offset; its evidence was not. Every exposure, focus curve and
+montage went to the browser's memory and was gone at the next restart. Each
+run now leaves a folder under its embryo, whether it calibrated, was refused,
+failed or was aborted, and the pane shows the latest run's plots.
+
+The plots can be read (#220). They were drawn 600 px wide with 9 pt type and
+shown 126 px wide, where that type is three pixels tall.
+
+**The SPIM head, and stopping things**
+
+- **HALT** stops every positioner, and is always enabled (#168). A HALT the
+  controller refused now says which axis did not stop instead of reporting
+  success (#173).
+- **Raise head** sits beside it and takes the head to the F-drive's own top
+  limit, the load height (#207).
+- The light-sheet exposure the operator sets now sticks (#167).
+- Where the head looks is measured instead of assumed, with every past centre
+  kept on disk and restorable (#177, #178).
+- A live view is off once you leave its surface and stays off. It used to
+  restart on return, which started the SPIM camera streaming under a running
+  timelapse (#209).
+
+**The stage's fences**
+
+The map's region is the XY safety envelope, and it was four constants pushed
+into the controller at boot. It is now walked from the map, two corners at a
+time, with the box following the stage (#170, #191, #192), and every edit is
+kept (#186).
+
+There are two fences and only one of them binds other people (#185). The
+controller's own soft limits are enforced against every client, Micro-Manager
+included; Gently's envelope binds only Gently. The controller's fence can be
+taken down and stays down (#183), and "off" means the controller's own limits
+rather than a conservative box of ours (#193). The green region on the map is
+the one you edit, not whatever the controller happens to hold (#189).
+
+**Settings**
+
+Gently has about a hundred configurable things, kept in seven places. The
+Settings page showed a third of them, and eight of its nineteen view settings
+were read by nothing (#213).
+
+- **A registry.** Each setting is declared once: what it is about, how far it
+  reaches, when a change takes effect, where it is kept, and who reads it. A
+  test fails if a declared reader does not read it.
+- **Seven categories**, by subject, and a badge on every setting for its
+  reach: this browser, this rig, needs restart.
+- **A tab of the app**, not a page beside it. A view setting changes the view
+  at once.
+- **Recording** has its switch. It was on by default with five knobs and none
+  of them in the UI. The section says what is kept, typed text included.
+- **A history.** Every change to a setting is appended to
+  `config/settings_history.jsonl` under the data folder and never pruned. A
+  secret is never written.
+
+**Light, and what a panel is**
+
+`docs/architecture/PANELS.md` sets the policy: panels are standard surfaces
+mounted in many places and reading one shared state, and they read back
+rather than rendering a command as a fact (#148, #152). The Light panel is
+the first. Illumination mode is its root, because LED and laser are the two
+ways this instrument lights a sample and the workflow alternates between them
+(#164). The laser's settings appear once a line is routed (#163). Device
+properties can be read out, and the display range is a histogram panel (#153).
+
+**Detection**
+
+Bottom-camera detection produced seventeen false positives for sixteen
+embryos, and the cause was not SAM but the candidate finder in front of it.
+That is now a flat-field and blob finder (#165), and Claude classifies each
+candidate crop, which is what removes the bright out-of-focus edges of
+bubbles (#166). The boot banner says when SAM cannot run instead of promising
+it (#147), and a failed detect says which failure it was (#198).
+
+**Finding the files** (#221)
+
+Everything Gently keeps is a file, and the way to one was to know the layout
+and walk to it.
+
+- **Show file** and **Open in Fiji** in both image viewers, for the image on
+  screen. A timepoint is its volume: the viewer shows a projection, and what
+  opens in Fiji is the stack.
+- **Folder** on every session, on an embryo, on a calibration run, and for
+  the logs, the recordings, the config and the settings history.
+- Fiji is found where it is usually unpacked, or where Settings says it is.
+  Micro-Manager's ImageJ is never used: starting it starts Micro-Manager,
+  which takes the microscope's ports.
+- The window opens on the computer Gently runs on. A browser on another
+  computer is handed the path instead.
+
+**The chrome**
+
+- **The gate leads into the workspace** (#215). There was a page between
+  them, and the only thing anyone pressed on it was Skip.
+- **The gate offers the last sessions to carry on from** (#222). A new
+  session is what is chosen, every time; carrying on is decided.
+- The rig moved into the header: device-layer state, start and stop, the log,
+  water and room light are reachable from every tab (#174).
+- A boot is a notification, not a bar to dismiss (#180).
+- The build id copies in one click and says how old the build is (#172, #188).
+- A button beside the session id opens the session's folder in the file
+  manager (#205).
+- **A projection shows the left channel** (#224). The camera's frame carries
+  two channels side by side, and a projection of all of it was mostly empty
+  field. Which channel is shown is a setting of the rig; the volume on disk
+  is the whole frame. Projections already drawn keep what they were drawn
+  with.
+- Home's recent images update as volumes land, and open (#202). They are
+  under their sessions, embryo by embryo (#223).
+- A note's embryos are named with their session, `6f090787/embryo_1`. A note
+  was drawn with twenty-eight one-letter tags: its embryos had been given as
+  one string, and taken apart letter by letter (#218).
+- A failure toast says why, not just which number (#146).
+- `hidden` actually hides (#181).
+
+**Under the floor**
+
+- **The DIC overview was never saved on the real microscope** (#210). A
+  night's run logged 24 frames acquired and none were on disk: the capture
+  reported no file path, and the run skipped filing without a word. The
+  tests had passed because their camera was kinder than the real one. Frames
+  are now filed, and a frame that cannot be is a warning in the log.
+- **CI runs the tests** (#211). Nothing did before, so a pull request could
+  merge with its own tests failing, and sixteen tests had failed unseen for
+  months. Thirteen of those were device-safety tests checking a mock. The
+  suite is green, and its first run on CI found a real bug: on Python 3.10 a
+  closed browser tab was reported as an operator aborting a calibration.
+- The test suite cannot reach the microscope's own data. It had written a
+  fixture's region into the rig's config eighteen times (#190).
+- `mypy` is clean in both runs. The last error was real: the GPU probe read
+  an attribute torch does not have, so the node never listed its GPU (#206).
+- One roster component and one marking surface where there were two of each
+  (#157, #162).
+
+**Known**
+
+Merged and tested against fakes, not yet exercised on the microscope: the
+acquisition plan end to end, the DIC overview's light, calibration abort,
+keeping a calibration's images, Raise head over its full traverse,
+resuming a run after a restart, and resuming a session from the gate with
+the microscope on.
+
+Perception, the detectors and calibration each still take their own part of
+the camera's frame, by three different rules. Only the projection follows
+the new setting.
+
+The folder and Fiji buttons have been checked up to the click. Opening
+Explorer and starting Fiji were not exercised, because a run was going on
+the microscope computer.
+
+Two milestone issues need the microscope and are not done: the camera ROI
+readout (#125) and the two-point calibration's beam (#106).
+
+A plan derived for a session that predates `acquisition.yaml` shows its DIC
+position as pinned rather than "centroid", because the checkpoint stores the
+resolved position.
+
+CI drives no browser. What the UI looks like and does is verified by hand.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:

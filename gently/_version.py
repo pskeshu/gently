@@ -14,7 +14,7 @@ wheel. A file with one literal in it can always be parsed.
 
 from __future__ import annotations
 
-__version__ = "1.0.0.dev1"
+__version__ = "1.0.0rc1"
 
 
 def build_id() -> str:
