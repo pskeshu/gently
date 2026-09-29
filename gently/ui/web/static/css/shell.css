@@ -263,3 +263,8 @@ body.rail-collapsed[data-run] .v2-nav-item::after { right: 6px; top: 8px; margin
 @media (prefers-reduced-motion: reduce) {
     body[data-run] .v2-strip-dot, body[data-run] .v2-nav-item::after { animation: none; }
 }
+
+/* Home's greeting is for the older dashboard; under the shell the rail and
+   the strip already say where you are. This lived in the landing page's
+   stylesheet, and outlived the page. */
+body.ux-v2 .home-hero { display: none; }

@@ -41,8 +41,8 @@ fan-out user-story audit + live browser walkthroughs).
 
 | Cluster | Stories |
 |---|---|
-| 1 Onboarding | first-run landing · skip & resume · return to planning |
-| 2 Planning (guided) | design with agent · review & commit |
+| 1 Onboarding | the launch gate leads into the workspace (the landing page between them was removed: nobody pressed anything on it but Skip) |
+| 2 Planning (guided) | was hosted in the landing page, and went with it; plan from the Plans tab or by asking the assistant |
 | 3 Planning (access) | **new plan from workspace** ⚠ · edit plan · delete plan |
 | 4 Standalone | quick-look scope · one-off acquire · promote to session |
 | 5 Operate (mark) | mark embryos · center embryo · import embryos |
