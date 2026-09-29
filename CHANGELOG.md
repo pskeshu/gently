@@ -502,7 +502,7 @@ readout, two-point calibration, and the SPIM laser/exposure controls. The
 
 The first build in which a biologist can take an experiment from a dish to a
 running multi-embryo timelapse without leaving Devices › Operate, and get it
-back after a restart. Seventy-seven pull requests since `v1.0.0.dev1`, nearly all
+back after a restart. Seventy-eight pull requests since `v1.0.0.dev1`, nearly all
 of them started as a sentence somebody said at the microscope.
 
 A release candidate: everything below is merged, and the list under **Known**
@@ -702,6 +702,14 @@ and walk to it.
 
 **Under the floor**
 
+- **Before the tag, the whole app was walked** (#225): every tab, view and
+  viewer, in both themes, with every refused request written down. Two were
+  refused on every rig, always. The Light panel read the LED's state from an
+  address with no route, so its mode was "unknown" whatever the hardware was
+  doing. And Restore in the Map's region history had a button and a handler
+  with nothing between them. A test now checks that whatever a page asks
+  for, something answers.
+
 - **The DIC overview was never saved on the real microscope** (#210). A
   night's run logged 24 frames acquired and none were on disk: the capture
   reported no file path, and the run skipped filing without a word. The
@@ -730,6 +738,10 @@ the microscope on.
 Perception, the detectors and calibration each still take their own part of
 the camera's frame, by three different rules. Only the projection follows
 the new setting.
+
+Restoring an earlier XY region has never run on the microscope. It writes
+the controller's limits when they are enforced, through the same calls as
+applying a region.
 
 The folder and Fiji buttons have been checked up to the click. Opening
 Explorer and starting Fiji were not exercised, because a run was going on
