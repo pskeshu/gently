@@ -1860,9 +1860,18 @@ const OperateManager = (function () {
         agent: 'Brief the agent',
     };
 
+    // A run is running or paused: nothing else may start. The button used to
+    // go on offering "Run tactic" over a tactic that was running, and pressing
+    // it got a refusal from the orchestrator, said as a failure.
+    let _runBusy = false;
+    let _starting = false;      // a start is in flight: "Working…" is on the button
+
     function renderRunButton() {
         const b = $('op-run-start');
-        if (b && !b.disabled) b.textContent = RUN_VERB[_mode] || 'Start';
+        if (!b || _starting) return;
+        b.disabled = _runBusy;
+        b.textContent = _runBusy ? 'A run is going' : (RUN_VERB[_mode] || 'Start');
+        b.title = _runBusy ? 'Stop the run before starting another' : '';
     }
 
     function setMode(m) {
@@ -1986,7 +1995,9 @@ const OperateManager = (function () {
 
     async function startRun() {
         const b = $('op-run-start');
-        const done = () => { if (b) { b.disabled = false; renderRunButton(); } };
+        if (_runBusy) { toastFail('A run is already going. Stop it before starting another.'); return; }
+        const done = () => { _starting = false; renderRunButton(); renderRun(); };
+        _starting = true;
         if (b) { b.disabled = true; b.textContent = 'Working…'; }
         try {
             if (_mode === 'single') {
@@ -2354,6 +2365,8 @@ const OperateManager = (function () {
         } catch (_) { /* leave empty */ }
 
         const running = st && (st.status === 'running' || st.status === 'paused');
+        _runBusy = !!running;
+        renderRunButton();
         const rows = (st && st.embryos) || {};
         const ids = Object.keys(rows);
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
