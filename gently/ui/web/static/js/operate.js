@@ -1500,7 +1500,7 @@ const OperateManager = (function () {
             const shown = plots.length ? plots : images.slice(-6);
             strip.innerHTML = shown.map(i =>
                 `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
-                `<img loading="lazy" src="${escapeHtml(i.url)}?max=256" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
+                `<img loading="lazy" src="${escapeHtml(i.url)}?max=720" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
         }
         host.hidden = false;
     }
