@@ -168,9 +168,17 @@ const Lightbox = {
         if (this.els.thumbnails) this.els.thumbnails.style.display = imageList.length > 1 ? '' : 'none';
     },
 
+    /** Where this image is on disk, and Fiji, when it is on disk at all. */
+    showReveal(img) {
+        const host = document.getElementById('lightbox-reveal');
+        if (!host || typeof Reveal === 'undefined') return;
+        Reveal.fill(host, Reveal.describe(img));
+    },
+
     showImageByUid(index) {
         const img = this.imageList[index];
         if (!img) return;
+        this.showReveal(img);
 
         // Load image from API by UID — or by a URL the caller already has
         // (Home's projections are served per session, and carry no store uid).
@@ -424,6 +432,7 @@ const Lightbox = {
     showImage(index) {
         const img = this.imageList[index];
         if (!img) return;
+        this.showReveal(img);
 
         // Animate image transition
         if (this.els.image) {

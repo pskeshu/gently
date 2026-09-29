@@ -1526,6 +1526,10 @@ const OperateManager = (function () {
 
     async function openCalFolder() {
         if (!_calKept) return;
+        if (typeof Reveal !== 'undefined') {
+            Reveal.run({ what: 'calibration_run', embryo_id: _calKept.embryoId, run: _calKept.run }, 'show');
+            return;
+        }
         try {
             const d = await postJSON(`/api/calibration/records/${encodeURIComponent(_calKept.embryoId)}/${encodeURIComponent(_calKept.run)}/open-folder`, {});
             toast(`Opened ${d.path}`);

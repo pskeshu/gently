@@ -176,6 +176,12 @@ async function openSessionFolder() {
     const sessionLink = document.getElementById('session-id-link');
     const sessionId = sessionLink ? sessionLink.textContent.trim() : '';
     if (!sessionId) return;
+    // One way of opening a folder, where it is loaded (static/js/reveal.js):
+    // it knows a browser on another computer is handed the path instead.
+    if (typeof Reveal !== 'undefined') {
+        Reveal.run({ what: 'session', session_id: sessionId }, 'show');
+        return;
+    }
     const say = (msg, level) => {
         if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 5000, level || 'success');
     };

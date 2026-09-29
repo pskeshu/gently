@@ -22,6 +22,7 @@
     <link rel="stylesheet" href="/static/css/notebook.css">
     <link rel="stylesheet" href="/static/css/operate.css">
     <link rel="stylesheet" href="/static/css/atrium.css">
+    <link rel="stylesheet" href="/static/css/reveal.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% include '_header.html' %}
@@ -183,6 +184,7 @@
                     <button class="view-btn" data-view="timeline" title="Timeline (2)">Timeline</button>
                     <button class="view-btn" data-view="summary" title="Summary (3)">Summary</button>
                 </div>
+                <button type="button" class="reveal-btn" data-reveal='{"what":"logs"}' data-reveal-action="show" title="Open the folder the log files are in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>Log files</span></button>
                 <div class="events-toolbar-filters" id="events-toolbar-filters">
                     <div class="search-container">
                         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -297,6 +299,7 @@
                     <figure class="dic-viewer-fig">
                         <img id="dic-viewer-img" alt="DIC overview frame">
                         <figcaption id="dic-viewer-cap"></figcaption>
+                        <div class="dic-viewer-reveal" id="dic-viewer-reveal"></div>
                     </figure>
                     <button class="dic-viewer-nav dic-viewer-next" id="dic-viewer-next" type="button" aria-label="Next frame">›</button>
                     <button class="dic-viewer-close" id="dic-viewer-close" type="button" aria-label="Close">×</button>
@@ -1591,7 +1594,8 @@
             <li><b>Not kept:</b> the live camera images. Stored images replay from the session.</li>
           </ul>
           <p class="settings-hint" id="rec-usage">Reading…</p>
-          <p><a class="settings-btn" href="/replay" target="_blank" rel="noopener">Open the recordings</a></p>
+          <p class="settings-reveal-row"><a class="settings-btn" href="/replay" target="_blank" rel="noopener">Open the recordings</a>
+            <button type="button" class="reveal-btn" data-reveal='{"what":"recordings"}' data-reveal-action="show" title="Open the folder this session's recordings are in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>This session's recordings</span></button></p>
         </div>
 
         <div class="settings-block" id="settings-block-history" hidden>
@@ -1602,6 +1606,11 @@
 
         <div class="settings-block" id="settings-block-effective" hidden>
           <div class="settings-hint th-note">What the server is running with, secrets left out. Read-only.</div>
+          <p class="settings-reveal-row">
+            <button type="button" class="reveal-btn" data-reveal='{"what":"storage"}' data-reveal-action="show" title="Open the data folder: sessions, logs and the agent’s notes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>Data folder</span></button>
+            <button type="button" class="reveal-btn" data-reveal='{"what":"config"}' data-reveal-action="show" title="Open the folder the rig’s settings files are in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>Config folder</span></button>
+            <button type="button" class="reveal-btn" data-reveal='{"what":"agent"}' data-reveal-action="show" title="Open the folder plans, the notebook and saved tactics are in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>Plans and notes</span></button>
+          </p>
           <pre class="settings-pre" id="effective-config">Loading…</pre>
         </div>
       </div>
@@ -1640,6 +1649,10 @@
         <div class="lightbox-container">
             <div class="lightbox-header">
                 <span class="lightbox-title" id="lightbox-title">Image</span>
+                {# Where this image is on disk, and Fiji. Filled by
+                   Lightbox.showReveal, and empty for an image that is only
+                   in memory. #}
+                <span class="lightbox-reveal" id="lightbox-reveal"></span>
                 <button class="lightbox-close" id="lightbox-close" aria-label="Close lightbox">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -1736,6 +1749,7 @@
     <script src="/static/js/status-store.js"></script>
     <script src="/static/js/websocket.js"></script>
     <script src="/static/js/zoom-pan.js"></script>
+    <script src="/static/js/reveal.js"></script>
     <script src="/static/js/lightbox.js"></script>
     <script src="/static/js/timepoint-player.js"></script>
     <script src="/static/js/viewer.js"></script>

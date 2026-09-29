@@ -207,7 +207,10 @@ const RosterPanel = (() => {
                     </div>`;
         }).join('');
         return `<div class="rp-removed" data-removed>
-                  <div class="rp-removed-head">Removed · nothing deleted</div>${rows}
+                  <div class="rp-removed-head"><span>Removed · nothing deleted</span>${
+    typeof Reveal !== 'undefined'
+        ? Reveal.button({ what: 'removed' }, 'show', { title: 'Open the folder the removed embryos are kept in' })
+        : ''}</div>${rows}
                 </div>`;
     }
 

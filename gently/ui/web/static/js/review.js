@@ -94,6 +94,9 @@ const ReviewApp = {
                 </div>
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
                 ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')">Resume in agent</button>`}
+                ${typeof Reveal !== 'undefined' ? Reveal.button(
+                    { what: 'session', session_id: s.session_id }, 'show',
+                    { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
             </div>
         `).join('');
     },

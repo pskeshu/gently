@@ -299,6 +299,10 @@ const EmbryosManager = {
         if (cap) cap.textContent = `DIC overview · frame ${f.frame} of ${all.length}` +
             (when && !isNaN(when) ? ` · ${when.toLocaleString()}` : '') + pos;
         v.hidden = false;
+        if (typeof Reveal !== 'undefined') {
+            Reveal.fill(document.getElementById('dic-viewer-reveal'),
+                f.stem ? { what: 'dic', stem: f.stem } : null);
+        }
         const prev = document.getElementById('dic-viewer-prev'), next = document.getElementById('dic-viewer-next');
         if (prev) prev.disabled = this._dicViewerAt === 0;
         if (next) next.disabled = this._dicViewerAt === all.length - 1;
@@ -2150,6 +2154,9 @@ const EmbryosManager = {
                     <span class="stat" style="margin-left: 0.5rem;">${transitionsText}</span>
                     <span class="stat">${totalEvaluations} evals</span>
                     <span class="stat">${embryo.timepoints} tp</span>
+                    ${typeof Reveal !== 'undefined' ? Reveal.button(
+                        { what: 'embryo', embryo_id: embryo.embryoId }, 'show',
+                        { label: 'Folder', title: 'Open this embryo’s folder: volumes, projections, calibration' }) : ''}
                 </div>
                 <div class="detection-quick-jumps" style="display:flex;gap:0.35rem;flex-wrap:nowrap;overflow-x:auto;">
                     ${quickJumpsHtml}
@@ -2500,6 +2507,12 @@ const EmbryosManager = {
                         data-tooltip="View all projection types from the 3D volume">
                     Projections
                 </button>
+                ${typeof Reveal !== 'undefined' ? Reveal.button(
+                    { what: 'timepoint', embryo_id: this.selectedEmbryoId, timepoint: item.timepoint }, 'show',
+                    { label: 'Show file', title: 'Show this timepoint’s volume in its folder' })
+                    + Reveal.button(
+                        { what: 'timepoint', embryo_id: this.selectedEmbryoId, timepoint: item.timepoint }, 'fiji',
+                        { label: 'Open in Fiji', title: 'Open this timepoint’s volume in Fiji' }) : ''}
                 <button class="detail-close" onclick="EmbryosManager.closeDetailPanel()">&times;</button>
             </div>
             <div class="detail-split">

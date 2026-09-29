@@ -82,9 +82,14 @@ def test_the_route_needs_control():
 
 
 def test_the_opener_speaks_each_os():
-    src = Path(sessions_routes.__file__).read_text(encoding="utf-8")
-    fn = src[src.index("def _open_in_file_manager") :][:700]
+    # The opening is done in one place now, for every button that opens.
+    from gently.core import reveal
+
+    src = Path(reveal.__file__).read_text(encoding="utf-8")
+    fn = src[src.index("def open_folder") :][:500]
     assert "os.startfile" in fn and '"open"' in fn and '"xdg-open"' in fn
+    here = Path(sessions_routes.__file__).read_text(encoding="utf-8")
+    assert "reveal.open_folder(path)" in here
 
 
 def test_the_header_has_the_button_beside_copy():
