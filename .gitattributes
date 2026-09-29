@@ -1,0 +1,5 @@
+# The Tauri CLI rewrites these two on every build, with LF line endings. On
+# Windows a checkout gives them CRLF, so every build left them looking
+# modified with nothing in them changed. Kept LF in the working copy too.
+desktop/src-tauri/Cargo.toml text eol=lf
+desktop/src-tauri/Cargo.lock text eol=lf
