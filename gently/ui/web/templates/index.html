@@ -831,23 +831,37 @@
                           </span></div>
 
                         <div class="op-plan-sec">Channels</div>
+                        {# A channel like the other, so it can be switched off.
+                           Off, what is left is a brightfield run: the bottom
+                           camera's frame on the cadence and nothing of the SPIM
+                           head — no volumes, no lasers, no calibration asked for. #}
                         <div class="op-plan-chan">
-                          <div class="op-plan-chan-head"><span class="op-plan-chan-name">SPIM volume</span>
-                            <span class="op-cap">every embryo, every round</span></div>
-                          <div class="op-field"><label class="op-label" for="op-plan-slices">Slices</label>
-                            <input class="op-num-in" id="op-plan-slices" type="number" min="1" max="500" value="50"></div>
-                          <div class="op-field"><label class="op-label" for="op-plan-exposure">Exposure (ms)</label>
-                            <input class="op-num-in" id="op-plan-exposure" type="number" min="1" max="500" value="10"></div>
-                          <div class="op-field"><label class="op-label" for="op-plan-laser">Lasers</label>
-                            <select class="op-sel" id="op-plan-laser"><option value="">current preset</option></select></div>
+                          <div class="op-plan-chan-head">
+                            <label class="op-plan-chan-name op-plan-check">
+                              <input type="checkbox" id="op-plan-spim" checked> SPIM volume</label>
+                            <span class="op-cap" id="op-plan-spim-cap">every embryo, every round</span></div>
+                          <div class="op-plan-spim-body" id="op-plan-spim-body">
+                            <div class="op-field"><label class="op-label" for="op-plan-slices">Slices</label>
+                              <input class="op-num-in" id="op-plan-slices" type="number" min="1" max="500" value="50"></div>
+                            <div class="op-field"><label class="op-label" for="op-plan-exposure">Exposure (ms)</label>
+                              <input class="op-num-in" id="op-plan-exposure" type="number" min="1" max="500" value="10"></div>
+                            <div class="op-field"><label class="op-label" for="op-plan-laser">Lasers</label>
+                              <select class="op-sel" id="op-plan-laser"><option value="">current preset</option></select></div>
+                            {# One row per line the preset routes, drawn by
+                               operate.js: which lines there are follows the
+                               select above, and what each may be set to is the
+                               device layer's to say. Empty keeps the power the
+                               line has. #}
+                            <div class="op-plan-powers" id="op-plan-powers"></div>
+                          </div>
                         </div>
                         <div class="op-plan-chan">
                           <div class="op-plan-chan-head">
                             <label class="op-plan-chan-name op-plan-check">
-                              <input type="checkbox" id="op-plan-dic"> DIC overview</label>
+                              <input type="checkbox" id="op-plan-dic"> <span id="op-plan-dic-name">DIC overview</span></label>
                             <span class="op-cap">one bottom-camera frame of the whole field</span></div>
                           <div class="op-plan-dic-body" id="op-plan-dic-body" hidden>
-                            <div class="op-field"><label class="op-label" for="op-plan-dic-every">Every</label>
+                            <div class="op-field" id="op-plan-dic-every-field"><label class="op-label" for="op-plan-dic-every">Every</label>
                               <span class="op-plan-pair">
                                 <input class="op-num-in" id="op-plan-dic-every" type="number" min="1" value="1">
                                 <span class="op-cap">round(s)</span></span></div>
@@ -869,6 +883,12 @@
                                 <option value="led">LED</option>
                                 <option value="none">as it is</option>
                               </select></div>
+                            {# Set before every frame, so the series is lit the
+                               same whatever the Light panel was moved to between
+                               them. Empty leaves the LED as it is. #}
+                            <div class="op-field" id="op-plan-dic-led-field" hidden>
+                              <label class="op-label" for="op-plan-dic-led">LED brightness (%)</label>
+                              <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" placeholder="as it is"></div>
                           </div>
                         </div>
 
@@ -882,8 +902,8 @@
                            means no override, which is what most rows say. #}
                         <div class="op-plan-ovr" id="op-plan-overrides"></div>
 
-                        <div class="op-plan-sec">Watching</div>
-                        <div class="op-field"><label class="op-label" for="op-tl-monitor">Monitoring</label>
+                        <div class="op-plan-sec" id="op-plan-watch-sec">Watching</div>
+                        <div class="op-field" id="op-plan-watch-field"><label class="op-label" for="op-tl-monitor">Monitoring</label>
                           <select class="op-sel" id="op-tl-monitor">
                             <option value="idle">idle</option>
                             <option value="expression_monitoring">expression</option>

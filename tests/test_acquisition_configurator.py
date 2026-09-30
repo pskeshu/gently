@@ -58,7 +58,11 @@ def test_start_sends_exactly_what_was_said():
     assert "AcquisitionPlan.toPayload(plan, ids)" in branch, (
         "Start builds its own request beside the sentence"
     )
-    assert "AcquisitionPlan.validate(plan, ids)" in branch, "an invalid plan can be started"
+    # With the device layer's power limits, so a laser power the hardware
+    # would refuse is refused here and not at the first volume.
+    assert "AcquisitionPlan.validate(plan, ids, _laserLimits)" in branch, (
+        "an invalid plan can be started"
+    )
     assert "landOnRun(" in branch, "Start does not land on the run"
     assert "op-tl-condval" not in branch, "the old hand-built stop string is back"
 

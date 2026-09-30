@@ -2082,17 +2082,19 @@ const OperateManager = (function () {
                 return;
             }
             if (_mode === 'adaptive') {
-                if (!haveSubjects()) return;
                 const plan = readPlan();
+                // A brightfield frame is of the field. It is taken with no
+                // embryo registered, so the run is not refused for having none.
+                if (plan.spim.enabled && !haveSubjects()) return;
                 const ids = subjectIds();
-                const problems = AcquisitionPlan.validate(plan, ids);
+                const problems = AcquisitionPlan.validate(plan, ids, _laserLimits);
                 if (problems.length) { toastFail(problems[0]); return; }
                 // One object: the sentence the operator just read is exactly
                 // what goes on the wire, and what the run view says back.
                 const payload = AcquisitionPlan.toPayload(plan, ids);
                 payload.scope = _targetScope;   // "what to run", kept with the plan
                 await postJSON('/api/devices/timelapse/start', payload);
-                toast('Timelapse started');
+                toast(plan.spim.enabled ? 'Timelapse started' : 'Brightfield timelapse started');
                 landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
                 return;
             }
@@ -2131,6 +2133,10 @@ const OperateManager = (function () {
     // input re-reads it and re-says it; Start sends exactly what was said.
     let _dicPin = null;          // the stage position captured for "taken from here"
     let _laserPresetsLoaded = false;
+    // Per-line power bounds, from the device layer ({488: {min, max}}). Null
+    // until read: the fields are then unbounded on the pane, and the start
+    // route is what refuses a power the hardware would.
+    let _laserLimits = null;
 
     /** The embryos this run will image, with the labels the sentence uses. */
     function planSubjects() {
@@ -2149,6 +2155,8 @@ const OperateManager = (function () {
         const secs = plan.intervalSeconds;
         if (secs % 60 === 0 && secs >= 60) { set('op-tl-interval', secs / 60); set('op-plan-unit', 'min'); }
         else { set('op-tl-interval', secs); set('op-plan-unit', 's'); }
+        const spim = $('op-plan-spim');
+        if (spim) spim.checked = plan.spim.enabled !== false;
         set('op-plan-slices', plan.spim.slices);
         set('op-plan-exposure', plan.spim.exposureMs);
         const laser = $('op-plan-laser');
@@ -2159,6 +2167,14 @@ const OperateManager = (function () {
             }
             laser.value = want;
         }
+        // After the select: which rows exist follows the preset. Every row is
+        // written, so a line the plan leaves alone is cleared of the last
+        // plan's number.
+        renderPowerRows();
+        document.querySelectorAll('#op-plan-powers [data-plan-power]').forEach(inp => {
+            const pct = (plan.spim.laserPowers || {})[inp.dataset.planPower];
+            inp.value = pct != null ? pct : '';
+        });
         const dic = $('op-plan-dic');
         if (dic) dic.checked = !!plan.dic.enabled;
         set('op-plan-dic-every', plan.dic.everyRounds);
@@ -2166,6 +2182,10 @@ const OperateManager = (function () {
         set('op-plan-dic-pos', _dicPin ? 'here' : 'centroid');
         set('op-plan-dic-exposure', plan.dic.exposureMs);
         set('op-plan-dic-light', plan.dic.light);
+        // Not through set(): an absent brightness has to CLEAR the field, or
+        // the last plan's 40 % is sent with this one.
+        const led = $('op-plan-dic-led');
+        if (led) led.value = plan.dic.ledPct != null ? plan.dic.ledPct : '';
         set('op-tl-stop', plan.stop.kind);
         set('op-tl-condval', plan.stop.value);
         set('op-tl-monitor', plan.monitoringMode || 'idle');
@@ -2237,9 +2257,17 @@ const OperateManager = (function () {
             const val = (row.querySelector('input') || {}).value;
             overrides.push({ embryoId: row.dataset.embryo, kind, value: val });
         });
+        const laserPowers = {};
+        document.querySelectorAll('#op-plan-powers [data-plan-power]').forEach(inp => {
+            laserPowers[inp.dataset.planPower] = inp.value;
+        });
         return AcquisitionPlan.fromForm({
+            laserPowers,
             interval: v('op-tl-interval'),
             intervalUnit: v('op-plan-unit'),
+            // Absent from the page (an older template) is a volume run.
+            volumes: !($('op-plan-spim') && !$('op-plan-spim').checked),
+            dicLedPct: v('op-plan-dic-led'),
             slices: v('op-plan-slices'),
             exposureMs: v('op-plan-exposure'),
             laserConfig: v('op-plan-laser'),
@@ -2292,11 +2320,19 @@ const OperateManager = (function () {
         const say = $('op-plan-say');
         if (!say) return;
         renderOverrideRows();
-        const plan = readPlan();
+        renderPowerRows();
+        let plan = readPlan();
+        const volumes = plan.spim.enabled !== false;
+        renderChannels(volumes);
+        // The endings on offer follow the channels, so re-read: an ending
+        // the run can no longer have has just been taken off the select.
+        plan = readPlan();
         const condval = $('op-tl-condval');
         if (condval) condval.hidden = !(AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
         const dicBody = $('op-plan-dic-body');
         if (dicBody) dicBody.hidden = !plan.dic.enabled;
+        const ledField = $('op-plan-dic-led-field');
+        if (ledField) ledField.hidden = plan.dic.light !== 'led';
         const pin = $('op-plan-dic-pin');
         if (pin) {
             const here = plan.dic.position === 'here';
@@ -2307,9 +2343,80 @@ const OperateManager = (function () {
                 : '';
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
-        const problems = AcquisitionPlan.validate(plan, subjectIds());
+        const problems = AcquisitionPlan.validate(plan, subjectIds(), _laserLimits);
         say.dataset.bad = problems.length ? '1' : '0';
         say.title = problems.join(' ');
+    }
+
+    /**
+     * A power field for each line the chosen preset routes.
+     *
+     * Redrawn only when the set of lines changes, so typing in one is never
+     * interrupted, and a value typed for a line survives a change of preset
+     * that still routes it. The bounds are the device layer's; the field is
+     * not clamped to them, because a number silently changed under the
+     * operator's hand is worse than one the plan refuses by name.
+     */
+    function renderPowerRows() {
+        const host = $('op-plan-powers');
+        if (!host) return;
+        const lines = AcquisitionPlan.linesOf(($('op-plan-laser') || {}).value);
+        const key = lines.join(',') + '|' + (_laserLimits ? 'l' : '');
+        if (host.dataset.lines === key) return;
+        const typed = {};
+        host.querySelectorAll('[data-plan-power]').forEach(inp => {
+            typed[inp.dataset.planPower] = inp.value;
+        });
+        host.dataset.lines = key;
+        host.innerHTML = lines.map(wl => {
+            const lim = (_laserLimits && _laserLimits[wl]) || null;
+            const range = lim ? `${lim.min}–${lim.max} %` : '%';
+            return `<div class="op-field"><label class="op-label" for="op-plan-power-${wl}">` +
+                `${wl} nm power <span class="op-cap">${range}</span></label>` +
+                `<input class="op-num-in" id="op-plan-power-${wl}" data-plan-power="${wl}" ` +
+                `type="number" step="0.1"${lim ? ` min="${lim.min}" max="${lim.max}"` : ''} ` +
+                `value="${escapeHtml(typed[wl] || '')}" placeholder="as it is"></div>`;
+        }).join('');
+    }
+
+    /**
+     * What the form offers, given whether the run takes volumes.
+     *
+     * Without them the overview is the run: its box is ticked and cannot be
+     * unticked, "every N rounds" goes (a round is a frame), and so does
+     * everything that is about volumes — per-embryo endings, stage-watching,
+     * and the endings read from a stage.
+     */
+    let _planWasVolumes = true;
+    function renderChannels(volumes) {
+        const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
+        show('op-plan-spim-body', volumes);
+        show('op-plan-dic-every-field', volumes);
+        show('op-plan-overrides', volumes);
+        show('op-plan-watch-sec', volumes);
+        show('op-plan-watch-field', volumes);
+        const cap = $('op-plan-spim-cap');
+        if (cap) cap.textContent = volumes ? 'every embryo, every round' : 'off — a brightfield run';
+        const name = $('op-plan-dic-name');
+        if (name) name.textContent = volumes ? 'DIC overview' : 'Brightfield';
+        const dic = $('op-plan-dic');
+        if (dic) {
+            if (!volumes) dic.checked = true;
+            dic.disabled = !volumes;
+        }
+        // On the way INTO a brightfield run, once: the LED is what it is lit
+        // by. Afterwards the select is the operator's, room light included.
+        if (!volumes && _planWasVolumes) {
+            const light = $('op-plan-dic-light');
+            if (light && light.value === 'room') light.value = 'led';
+        }
+        _planWasVolumes = volumes;
+        const stop = $('op-tl-stop');
+        if (stop) {
+            const ok = k => volumes || AcquisitionPlan.BRIGHTFIELD_STOPS.includes(k);
+            [...stop.options].forEach(o => { o.hidden = !ok(o.value); o.disabled = !ok(o.value); });
+            if (!ok(stop.value)) stop.value = 'manual';
+        }
     }
 
     async function loadLaserPresets() {
@@ -2324,6 +2431,12 @@ const OperateManager = (function () {
                 configs.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
             _laserPresetsLoaded = true;
         } catch (_) { /* offline: "current preset" stands */ }
+        // Class constants on the server, so this answers with the device
+        // layer down. Separate from the presets: either can fail alone.
+        try {
+            const d = await getJSON('/api/devices/laser/limits');
+            if (d && d.limits) { _laserLimits = d.limits; renderPlan(); }
+        } catch (_) { /* the start route still refuses what the hardware would */ }
     }
 
     /** The plan as a template, under a name the operator gives it. */
@@ -2444,17 +2557,25 @@ const OperateManager = (function () {
         if (stopb) stopb.hidden = !running && live.length === 0;
 
         const parts = [];
-        if (running || ids.length) {
+        // A brightfield run has no embryo rows to be seen by.
+        const brightfield = !!(st && st.volumes === false && st.dic);
+        if (running || ids.length || (brightfield && (resumable || st.dic.frames))) {
             // Idle with embryos still going is one of two things. A run
             // somebody stopped is not one that was interrupted.
             const idle = st.ended === 'stopped'
                 ? 'stopped — Resume run carries it on'
                 : 'interrupted — press Resume run to carry on';
             const bits = [resumable ? idle : (st.ended && !running ? st.ended : st.status)];
-            if (st.current_round != null && st.current_round >= 0) bits.push(`${st.total_timepoints || 0} volumes`);
+            if (brightfield) {
+                const n = st.dic.frames || 0;
+                bits.push('brightfield, no SPIM volumes');
+                bits.push(`${n} frame${n === 1 ? '' : 's'}`);
+            } else if (st.current_round != null && st.current_round >= 0) {
+                bits.push(`${st.total_timepoints || 0} volumes`);
+            }
             if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
             if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);
-            if (st.dic) {
+            if (st.dic && !brightfield) {
                 bits.push(`DIC ${st.dic.frames || 0} frame${st.dic.frames === 1 ? '' : 's'}` +
                     (st.dic.seconds_until_next != null && running ? `, next ${fmtWhen(st.dic.seconds_until_next)}` : ''));
             }

@@ -127,6 +127,8 @@ def _plan_from_checkpoint(store: Any, session_id: str) -> dict[str, Any] | None:
         "exposure_ms": params.get("exposure_ms"),
         "laser_config": None,
         "dic": dic if dic and dic.get("enabled") else None,
+        # Absent in a checkpoint from before brightfield-only runs: a volume run.
+        "volumes": doc.get("volumes") is not False,
         "stop_conditions": overrides,
         "embryo_ids": list(embryos.keys()),
     }
