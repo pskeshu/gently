@@ -2195,6 +2195,9 @@ const OperateManager = (function () {
         const now = $('op-plan-spim-now');
         if (!targets.length || !$('op-plan-slices')) { if (now) now.hidden = true; return; }
         const notes = [];
+        // What the operator has typed that the embryos do not hold — what an
+        // Apply would write. Only a number: a blank field asks for nothing.
+        const pending = {};
         PLAN_FIELDS.forEach(f => {
             const held = heldAcross(targets, f.key);
             const el = $(f.id);
@@ -2212,14 +2215,53 @@ const OperateManager = (function () {
                 const have = held.value != null ? `${held.value}` : `${held.min}–${held.max}`;
                 const by = held.by.length ? ` (set by ${held.by.join(', ')})` : '';
                 notes.push(`${have} ${f.unit}${by}`);
+                if (typed != null && Number.isFinite(typed)) pending[f.key] = typed;
             }
         });
-        if (now) {
-            now.hidden = !notes.length;
-            now.textContent = notes.length
-                ? `Embryos now hold ${notes.join('; ')} — the field applies at Start.`
-                : '';
+        if (!now) return;
+        now.hidden = !notes.length;
+        if (!notes.length) { now.textContent = ''; return; }
+        // The button exists in one scenario: a run is going, and the field
+        // holds something the embryos do not. Then "at Start" is not an
+        // answer — a restart is not what the operator wants — and applying
+        // now, to the next acquisition, is what the agent can already do.
+        // Otherwise there is no button: the form is vanilla, and Start is
+        // the apply.
+        const applicable = _runBusy && Object.keys(pending).length > 0;
+        const held = `Embryos now hold ${notes.join('; ')}`;
+        now.textContent = applicable ? `${held}. ` : `${held} — the field applies at Start.`;
+        if (applicable) {
+            const n = targets.length;
+            const what = Object.entries(pending)
+                .map(([k, v]) => `${v} ${(PLAN_FIELDS.find(f => f.key === k) || {}).unit}`).join(', ');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'op-btn op-btn-quiet op-plan-apply';
+            b.dataset.planApply = '1';
+            b.textContent = `Apply ${what} to ${n === 1 ? 'the embryo' : `${n} embryos`} now`;
+            b.title = 'Takes effect at their next acquisition, like a change made by the agent';
+            b.onclick = () => applyPendingToEmbryos(pending, targets.map(e => e.id));
+            now.appendChild(b);
         }
+    }
+
+    /**
+     * The operator's mid-run change, through the same door as the agent's:
+     * recorded as the operator's, announced, in effect at the next
+     * acquisition. The broadcast that follows re-syncs the form, so the
+     * button goes with the difference it was for.
+     */
+    async function applyPendingToEmbryos(pending, ids) {
+        const b = document.querySelector('[data-plan-apply]');
+        if (b) { b.disabled = true; b.textContent = 'Applying…'; }
+        try {
+            await postJSON('/api/embryos/params', { embryo_ids: ids, changes: pending });
+            _planDirty = false;
+            toast(`Applied to ${ids.length} embryo${ids.length === 1 ? '' : 's'}`);
+        } catch (e) {
+            toastFail(`Apply failed (${why(e)})`);
+        }
+        renderPlan();
     }
 
     /** Put a plan into the form. The inverse of readPlan(). */
@@ -2636,8 +2678,12 @@ const OperateManager = (function () {
         } catch (_) { /* leave empty */ }
 
         const running = st && (st.status === 'running' || st.status === 'paused');
+        const wasBusy = _runBusy;
         _runBusy = !!running;
         renderRunButton();
+        // Whether a run is going decides whether a draft in the SPIM fields
+        // gets an Apply button; the plan line has to hear when that changes.
+        if (wasBusy !== _runBusy && _pane === 'acquire') renderPlan();
         const rows = (st && st.embryos) || {};
         const ids = Object.keys(rows);
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');

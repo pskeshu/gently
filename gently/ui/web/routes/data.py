@@ -393,6 +393,85 @@ def create_router(server) -> APIRouter:
         if missing:
             raise HTTPException(status_code=409, detail=calibration_gate.refusal_detail(missing))
 
+    # What the Acquisition pane may apply to embryos mid-run: the SPIM
+    # channel's per-embryo settings. Cadence and endings have routes of their
+    # own; roles and positions are not acquisition parameters.
+    _PANE_PARAMS = (
+        "num_slices",
+        "exposure_ms",
+        "laser_power_405_pct",
+        "laser_power_488_pct",
+        "laser_power_561_pct",
+        "laser_power_637_pct",
+    )
+
+    @router.post("/api/embryos/params", dependencies=[Depends(require_control)])
+    async def set_embryo_params(payload: dict = Body(...)):  # noqa: B008
+        """Apply acquisition parameters to embryos now, for their next acquisition.
+
+        Body: {"embryo_ids": [...] | null, "changes": {"num_slices": 40,
+        "exposure_ms": 12, "laser_power_488_pct": 4}}. Null ids means every
+        active embryo. Only the keys sent are written; each is checked the way
+        the start route checks it, and a value the hardware would refuse is
+        refused here. Written through ExperimentState.set_params, so it is
+        recorded as the operator's and announced — the agent's next look, and
+        every other surface, sees it (docs/architecture/PANELS.md rule 8).
+
+        This is the operator's counterpart to the agent's `modify_parameters`:
+        the change takes effect at the embryo's next acquisition, not at the
+        next Start.
+        """
+        raw = payload.get("changes")
+        if not isinstance(raw, dict) or not raw:
+            raise HTTPException(status_code=400, detail="changes (object) required")
+        unknown = sorted(k for k in raw if k not in _PANE_PARAMS)
+        if unknown:
+            raise HTTPException(
+                status_code=400, detail=f"not parameters this route sets: {unknown}"
+            )
+        changes: dict = {}
+        if "num_slices" in raw:
+            try:
+                slices = int(raw["num_slices"])
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="num_slices must be an integer"
+                ) from None
+            if not 1 <= slices <= 500:
+                raise HTTPException(status_code=400, detail="num_slices must be in [1, 500]")
+            changes["num_slices"] = slices
+        if "exposure_ms" in raw:
+            try:
+                exposure = float(raw["exposure_ms"])
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="exposure_ms must be a number"
+                ) from None
+            if not 0 < exposure <= 10000:
+                raise HTTPException(status_code=400, detail="exposure_ms must be in (0, 10000]")
+            changes["exposure_ms"] = exposure
+        powers = {k.split("_")[2]: v for k, v in raw.items() if k.startswith("laser_power_")}
+        for wl, pct in _parse_laser_powers(powers).items():
+            changes[f"laser_power_{wl}_pct"] = pct
+
+        experiment = _require_agent_with_experiment().experiment
+        ids = payload.get("embryo_ids") or None
+        if ids is not None and not isinstance(ids, list):
+            raise HTTPException(status_code=400, detail="embryo_ids must be a list or null")
+        targets = (
+            [str(i) for i in ids]
+            if ids
+            else [e.id for e in experiment.embryos.values() if not e.should_skip]
+        )
+        missing = [eid for eid in targets if eid not in experiment.embryos]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"no such embryo: {missing}")
+        applied = {}
+        for eid in targets:
+            done = experiment.set_params(eid, changes, by="operator", reason="Acquisition pane")
+            applied[eid] = {k: list(v) for k, v in done.items()}
+        return {"success": True, "changes": changes, "applied": applied}
+
     @router.put("/api/embryos/{embryo_id}/position", dependencies=[Depends(require_control)])
     async def update_embryo_position(
         embryo_id: str,

@@ -75,7 +75,12 @@ set to 30. The other half is rule 2 applied to a form: the pane's Slices
 field is read back from the embryos on every broadcast, says "varies 30–50"
 when they disagree, and names who set what when it is not what the field
 says. A value the operator has typed and not yet started is the one thing
-the broadcast does not overwrite.
+the broadcast does not overwrite: it is a draft, applied at Start, and a
+reload returns the field to what the embryos hold. While a run is going, a
+draft that differs is the one case where "at Start" is no answer, and only
+then does an Apply button appear beside the line — writing through the same
+door as the agent's tool, in effect at the next acquisition. On a vanilla
+form there is no button.
 
 ## Design language
 

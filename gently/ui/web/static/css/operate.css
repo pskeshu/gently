@@ -1719,6 +1719,7 @@
 .op-runrow-params { font-size: 0.66rem; }
 /* What the embryos hold when it is not what the field says. */
 .op-plan-now { color: var(--op-ink-dim); margin: 2px 0 6px; }
+.op-plan-apply { margin-left: 6px; font-size: 0.66rem; }
 .op-plan-now[hidden] { display: none; }
 .op-runrow-state { text-transform: lowercase; color: var(--op-ink-dim); }
 .op-runrow-stop { min-width: 0; font-size: 0.66rem; }
