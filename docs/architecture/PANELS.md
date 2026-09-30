@@ -120,7 +120,7 @@ constraint.
 
 | Panel | Subject | Mounted in | Notes |
 |---|---|---|---|
-| Light | LED, beam, routed lines, per-line power | SPIM head | read-back; derives EMITTING |
+| Light | LED state and brightness, beam, routed lines, per-line power | SPIM head; bottom camera (`only: 'led'`) | read-back; derives EMITTING; the LED-only mount reads only the LED |
 | ImageView | zoom, pan, contrast, brightness | both camera surfaces | view state, stays local |
 | Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
 | Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |

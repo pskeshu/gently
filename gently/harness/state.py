@@ -160,6 +160,11 @@ class EmbryoState:
     # change at acquire time). Float values are hard-limited at the device
     # layer by DiSPIMLightSource.POWER_LIMITS_PCT[488] (default 2-6%).
     laser_power_488_pct: float | None = None
+    # The other lines, the same way: None leaves the setpoint as it is, and a
+    # value is hard-limited by POWER_LIMITS_PCT for its wavelength.
+    laser_power_561_pct: float | None = None
+    laser_power_405_pct: float | None = None
+    laser_power_637_pct: float | None = None
 
     # Status
     last_imaged: datetime | None = None
@@ -786,8 +791,10 @@ class EmbryoState:
         # Current params
         status_parts.append(f"interval={self.interval_seconds}s")
         status_parts.append(f"slices={self.num_slices}")
-        if self.laser_power_488_pct is not None:
-            status_parts.append(f"488={self.laser_power_488_pct}%")
+        for wl in (405, 488, 561, 637):
+            pct = getattr(self, f"laser_power_{wl}_pct", None)
+            if pct is not None:
+                status_parts.append(f"{wl}={pct}%")
         status_parts.append(f"priority={self.priority}")
 
         return " | ".join(status_parts)
@@ -876,6 +883,9 @@ class EmbryoState:
             "priority": self.priority,
             "acquisition_mode": self.acquisition_mode,
             "laser_power_488_pct": self.laser_power_488_pct,
+            "laser_power_561_pct": self.laser_power_561_pct,
+            "laser_power_405_pct": self.laser_power_405_pct,
+            "laser_power_637_pct": self.laser_power_637_pct,
             "last_imaged": self.last_imaged.isoformat() if self.last_imaged else None,
             "timepoints_acquired": self.timepoints_acquired,
             "should_skip": self.should_skip,

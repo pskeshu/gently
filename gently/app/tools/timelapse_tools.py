@@ -134,6 +134,96 @@ async def start_adaptive_timelapse(
 
 
 @tool(
+    name="start_brightfield_timelapse",
+    description="""Start a brightfield-only timelapse: one 2D bottom-camera frame of the whole
+field per interval, and no SPIM volumes. Runs in the background.
+
+Use when the experiment is to be followed in transmitted light with no fluorescence: no laser
+is routed (the lasers are set to ALL OFF), no embryo needs calibrating, and none needs to be
+registered. Registered embryos only decide where the frame is taken from (their centroid);
+with none, the frame is taken where the stage already is.
+
+`light` is what the frame is lit by: 'led' (default; opened for the frame and closed after),
+'room', or 'none' to leave the lights as they are. `led_intensity_pct` (1-100) is set before
+every frame; leave it out to use the LED at its current brightness.
+
+It ends on 'manual', 'timepoints' (frames, with condition_value) or 'duration' (hours, with
+condition_value). It cannot end on a developmental stage such as 'hatching': those are read
+from perception of SPIM volumes, and this run takes none. For a run with volumes, use
+start_adaptive_timelapse.""",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+    examples=[
+        ToolExample(
+            "Brightfield every 5 minutes for 12 hours, LED at 40 percent",
+            {
+                "interval_seconds": 300,
+                "stop_condition": "duration",
+                "condition_value": 12,
+                "led_intensity_pct": 40,
+            },
+        ),
+        ToolExample(
+            "Take 60 brightfield frames a minute apart",
+            {"interval_seconds": 60, "stop_condition": "timepoints", "condition_value": 60},
+        ),
+    ],
+)
+async def start_brightfield_timelapse(
+    interval_seconds: float = 300.0,
+    stop_condition: str = "manual",
+    condition_value: float | None = None,
+    light: str = "led",
+    led_intensity_pct: int | None = None,
+    exposure_ms: float | None = None,
+    context: dict | None = None,
+) -> str:
+    """Start a bottom-camera brightfield timelapse in the background."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+
+    # Said here and not left to the parser, which is forgiving because it also
+    # reads checkpoints: a light or a brightness it does not know becomes the
+    # default, and the run would start lit by something nobody asked for.
+    if light not in ("led", "room", "none"):
+        return f"Error: light must be 'led', 'room' or 'none', not '{light}'."
+    if led_intensity_pct is not None:
+        if isinstance(led_intensity_pct, bool) or not (
+            float(led_intensity_pct) == int(led_intensity_pct) and 1 <= led_intensity_pct <= 100
+        ):
+            return (
+                f"Error: led_intensity_pct must be a whole percent from 1 to 100, "
+                f"not {led_intensity_pct}."
+            )
+        if light != "led":
+            return f"Error: led_intensity_pct only applies under light='led', not '{light}'."
+    if interval_seconds <= 0:
+        return "Error: interval_seconds must be positive."
+
+    dic = {
+        "enabled": True,
+        "light": light,
+        "exposure_ms": exposure_ms,
+        "led_intensity_pct": int(led_intensity_pct) if led_intensity_pct is not None else None,
+    }
+    try:
+        return await orchestrator.start(
+            stop_condition=stop_condition,
+            base_interval_seconds=interval_seconds,
+            condition_value=condition_value,
+            dic=dic,
+            volumes=False,
+        )
+    except Exception as e:
+        return f"Error starting brightfield timelapse: {str(e)}"
+
+
+@tool(
     name="get_timelapse_status",
     description="Get current status of the running timelapse including per-embryo progress",
     category=ToolCategory.EXPERIMENT,
@@ -153,15 +243,25 @@ def get_timelapse_status(context: dict | None = None) -> str:
 
     lines = [f"Timelapse Status: {status_dict['status'].upper()}", ""]
 
+    # A brightfield-only run images the field, not embryos: "0 timepoints, 0
+    # active embryos" would read as a run that is doing nothing.
+    brightfield = status_dict.get("volumes") is False
+    overview = status_dict.get("dic") or {}
+
     if status_dict["started_at"]:
         lines.append(f"Started: {status_dict['started_at']}")
         lines.append(f"Duration: {status_dict['duration_minutes']:.1f} minutes")
-        lines.append(f"Total timepoints acquired: {status_dict['total_timepoints']}")
+        if brightfield:
+            lines.append("Brightfield-only run: bottom camera, no SPIM volumes")
+            lines.append(f"Frames acquired: {overview.get('frames', 0)}")
+        else:
+            lines.append(f"Total timepoints acquired: {status_dict['total_timepoints']}")
         lines.append("")
 
-    lines.append(f"Active embryos: {status_dict['active_embryos']}")
-    lines.append(f"Completed embryos: {status_dict['completed_embryos']}")
-    lines.append("")
+    if not brightfield:
+        lines.append(f"Active embryos: {status_dict['active_embryos']}")
+        lines.append(f"Completed embryos: {status_dict['completed_embryos']}")
+        lines.append("")
 
     if status_dict.get("seconds_until_next_round") is not None:
         lines.append(f"Next acquisition in {status_dict['seconds_until_next_round']:.0f}s")

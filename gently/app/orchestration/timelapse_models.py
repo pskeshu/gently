@@ -372,8 +372,12 @@ class DicOverview:
     # "led" is the transmitted-light LED, open for the capture only; "none"
     # leaves the lights exactly as they are.
     light: str = "room"
+    # How bright the LED is for the frame, in whole percent. Only means
+    # anything under "led". None leaves the LED at whatever it was last set to.
+    led_intensity_pct: int | None = None
 
     LIGHTS = ("room", "led", "none")
+    LED_INTENSITY_LIMITS_PCT = (1, 100)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -382,7 +386,23 @@ class DicOverview:
             "position": dict(self.position) if self.position else None,
             "exposure_ms": self.exposure_ms,
             "light": self.light,
+            "led_intensity_pct": self.led_intensity_pct,
         }
+
+    @classmethod
+    def _led_intensity(cls, raw: Any) -> int | None:
+        """A whole percent within the LED's range, or None. A checkpoint is
+        read here too, so a value that is not one is dropped, not raised on."""
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        lo, hi = cls.LED_INTENSITY_LIMITS_PCT
+        if value != int(value) or not (lo <= value <= hi):
+            return None
+        return int(value)
 
     @classmethod
     def from_dict(cls, d: Any) -> "DicOverview":
@@ -404,6 +424,7 @@ class DicOverview:
             # `use_led` in an older plan or checkpoint never did anything (the
             # camera ignored it), so it does not choose the LED now either.
             light=str(d.get("light")) if d.get("light") in cls.LIGHTS else "room",
+            led_intensity_pct=cls._led_intensity(d.get("led_intensity_pct")),
         )
 
 
@@ -434,6 +455,9 @@ class TimelapseState:
     error_message: str | None = None
     # The DIC overview channel, when the run has one: frames taken, next due.
     dic: dict[str, Any] | None = None
+    # False for a brightfield-only run: the overview channel is the run, and
+    # no embryo is imaged by the SPIM head.
+    volumes: bool = True
 
     def to_dict(self) -> dict:
         """Serialize for display"""
@@ -463,4 +487,5 @@ class TimelapseState:
             },
             "error": self.error_message,
             "dic": self.dic,
+            "volumes": self.volumes,
         }

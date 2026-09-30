@@ -1632,6 +1632,9 @@ class MicroscopyAgent:
                     "interval_seconds": embryo.interval_seconds,
                     "acquisition_mode": embryo.acquisition_mode,
                     "laser_power_488_pct": embryo.laser_power_488_pct,
+                    "laser_power_561_pct": getattr(embryo, "laser_power_561_pct", None),
+                    "laser_power_405_pct": getattr(embryo, "laser_power_405_pct", None),
+                    "laser_power_637_pct": getattr(embryo, "laser_power_637_pct", None),
                     "role": embryo.role,
                     "calibration": embryo.calibration,
                 }

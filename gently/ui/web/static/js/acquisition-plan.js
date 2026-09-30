@@ -13,6 +13,18 @@
  *   + one DIC overview per round from the centroid · until stopped; embryo 2
  *   at hatching.
  *
+ * The SPIM volume is a channel like the other, and can be switched off. What
+ * is left is a brightfield run: the bottom camera's frame of the field on the
+ * cadence, and nothing else —
+ *
+ *   Every 5 min: one brightfield frame of the field on the bottom camera,
+ *   from the centroid, under the LED at 40 % · after 12 frames. No SPIM
+ *   volumes.
+ *
+ * — which asks for less than a volume run does: no embryos, because the
+ * frame is of the field; no calibration, because nothing is scanned; and no
+ * ending read from a stage, because there is no volume to read one from.
+ *
  * Pure. Nothing here touches the DOM or the network: operate.js reads the
  * form into a plan, this module says it and turns it into the start
  * request, and the same object is what a saved tactic will store and the
@@ -31,6 +43,32 @@ const AcquisitionPlan = (() => {
         all_test_hatched: { label: 'when every test embryo has hatched', needs: null },
     };
 
+    // The laser lines this instrument has. What each may be set to is the
+    // device layer's to say (488 is held to 2-6 %), so the limits are passed
+    // in by whoever fetched them and are never written down here.
+    const LASER_LINES = [405, 488, 561, 637];
+
+    /**
+     * The lines a preset routes: "488 and 561" → [488, 561].
+     *
+     * No preset chosen is every line: the run then routes whatever the volume
+     * plan routes, which this module cannot see, so no line is ruled out. A
+     * preset that names none ("ALL OFF") routes none.
+     */
+    function linesOf(laserConfig) {
+        if (!laserConfig) return LASER_LINES.slice();
+        const found = String(laserConfig).match(/\d{3}/g) || [];
+        return LASER_LINES.filter(wl => found.includes(String(wl)));
+    }
+
+    // How a run with no SPIM volumes can end. The rest of STOP_KINDS are read
+    // from perception of a volume, and a brightfield run takes none.
+    const BRIGHTFIELD_STOPS = ['manual', 'timepoints', 'duration'];
+
+    // The LED's brightness, in whole percent. The ASI Tiger's own range: 0 is
+    // not a brightness, it is the LED closed.
+    const LED_PCT = { min: 1, max: 100 };
+
     // The light the DIC overview is taken under. The bottom camera drives
     // none of its own, so the plan has to say.
     const DIC_LIGHTS = {
@@ -40,6 +78,10 @@ const AcquisitionPlan = (() => {
     };
 
     const num = (v, fallback) => {
+        // Nothing is not zero. `Number(null)` and `Number('')` are both 0, so
+        // a plan saved without a slice count came back asking for 1 slice at
+        // 1 ms — the floor, not the default.
+        if (v == null || v === '') return fallback;
         const n = Number(v);
         return Number.isFinite(n) ? n : fallback;
     };
@@ -52,12 +94,13 @@ const AcquisitionPlan = (() => {
         return k;
     }
 
-    /** The same stop, in words. */
-    function stopWords(kind, value) {
+    /** The same stop, in words. `unit` is what is counted: a brightfield run counts frames. */
+    function stopWords(kind, value, unit) {
         const k = STOP_KINDS[kind] ? kind : 'manual';
         if (k === 'timepoints') {
             const n = Math.max(1, Math.round(num(value, 1)));
-            return `after ${n} timepoint${n === 1 ? '' : 's'}`;
+            const what = unit || 'timepoint';
+            return `after ${n} ${what}${n === 1 ? '' : 's'}`;
         }
         if (k === 'duration') {
             const h = Math.max(0.1, num(value, 1));
@@ -73,8 +116,12 @@ const AcquisitionPlan = (() => {
      * @param {object} f
      *   interval        number, in `intervalUnit`
      *   intervalUnit    's' | 'min'
+     *   volumes         bool — false is a brightfield run; absent is true
      *   slices, exposureMs, laserConfig
+     *   laserPowers     {wavelength: percent} — per-line power; an empty or
+     *                   absent line keeps the power it has
      *   dic             bool
+     *   dicLedPct       whole percent | null — the LED's brightness under 'led'
      *   dicEveryRounds  integer ≥ 1
      *   dicPosition     'centroid' | 'here'
      *   dicPin          {x, y} | null — the stage position captured for 'here'
@@ -90,38 +137,82 @@ const AcquisitionPlan = (() => {
         const overrides = (f.overrides || [])
             .filter(o => o && o.embryoId && o.kind && o.kind !== 'default')
             .map(o => ({ embryoId: String(o.embryoId), kind: o.kind, value: o.value == null ? null : o.value }));
+        const volumes = f.volumes !== false;
+        // Only the lines the preset routes, and only the ones given a value.
+        // NaN is kept so validate() can say which line is wrong.
+        const laserPowers = {};
+        linesOf(f.laserConfig).forEach(wl => {
+            const raw = (f.laserPowers || {})[wl];
+            if (raw == null || raw === '') return;
+            laserPowers[wl] = num(raw, NaN);
+        });
+        const light = DIC_LIGHTS[f.dicLight] ? f.dicLight : 'room';
+        const pct = f.dicLedPct != null && f.dicLedPct !== '' ? Math.round(num(f.dicLedPct, NaN)) : null;
         return {
             intervalSeconds,
             spim: {
+                enabled: volumes,
                 slices: Math.max(1, Math.round(num(f.slices, 50))),
                 exposureMs: Math.max(1, num(f.exposureMs, 10)),
                 laserConfig: f.laserConfig || null,
+                laserPowers: volumes ? laserPowers : {},
             },
             dic: {
-                enabled: !!f.dic,
-                everyRounds: Math.max(1, Math.round(num(f.dicEveryRounds, 1))),
+                // With no volumes the overview is the run: it is on, and a
+                // round is a frame.
+                enabled: volumes ? !!f.dic : true,
+                everyRounds: volumes ? Math.max(1, Math.round(num(f.dicEveryRounds, 1))) : 1,
                 position: f.dicPosition === 'here' ? 'here' : 'centroid',
                 pin: f.dicPin && Number.isFinite(f.dicPin.x) && Number.isFinite(f.dicPin.y)
                     ? { x: f.dicPin.x, y: f.dicPin.y } : null,
                 exposureMs: f.dicExposureMs != null && f.dicExposureMs !== '' ? num(f.dicExposureMs, null) : null,
-                light: DIC_LIGHTS[f.dicLight] ? f.dicLight : 'room',
+                light,
+                // Kept only under the LED, and only when it is a number: NaN
+                // stays in the plan so validate() can say what is wrong.
+                ledPct: light === 'led' ? pct : null,
             },
             stop: { kind: STOP_KINDS[f.stopKind] ? f.stopKind : 'manual', value: f.stopValue == null ? null : f.stopValue },
-            overrides,
+            // An embryo's own ending is the ending of its volumes.
+            overrides: volumes ? overrides : [],
             monitoringMode: f.monitoringMode || 'idle',
         };
     }
 
-    /** What is wrong with a plan, in the operator's words. Empty when nothing. */
-    function validate(plan, subjectIds) {
+    /**
+     * What is wrong with a plan, in the operator's words. Empty when nothing.
+     *
+     * `limits` is the device layer's per-line power bounds, {488: {min, max}},
+     * as /api/devices/laser/limits gives them. Without them a power is only
+     * checked for being a percentage; the start route checks it properly.
+     */
+    function validate(plan, subjectIds, limits) {
         const problems = [];
-        if (!subjectIds || !subjectIds.length) problems.push('No embryos to image — mark some first.');
+        const volumes = plan.spim.enabled !== false;
+        Object.entries(plan.spim.laserPowers || {}).forEach(([wl, pct]) => {
+            const lim = (limits && limits[wl]) || { min: 0, max: 100 };
+            if (!(Number.isFinite(pct) && pct >= lim.min && pct <= lim.max)) {
+                problems.push(`${wl} nm power must be from ${lim.min} to ${lim.max} %.`);
+            }
+        });
+        // A brightfield frame is of the field, so it needs no embryo.
+        if (volumes && (!subjectIds || !subjectIds.length)) {
+            problems.push('No embryos to image — mark some first.');
+        }
         if (!(plan.intervalSeconds > 0)) problems.push('The interval must be positive.');
+        if (!volumes && !BRIGHTFIELD_STOPS.includes(plan.stop.kind)) {
+            problems.push('A brightfield run takes no volumes to read a stage from — ' +
+                'end it after a count, after a duration, or by hand.');
+        }
+        if (plan.dic.enabled && plan.dic.ledPct != null
+            && !(Number.isInteger(plan.dic.ledPct)
+                && plan.dic.ledPct >= LED_PCT.min && plan.dic.ledPct <= LED_PCT.max)) {
+            problems.push(`LED brightness must be a whole percent from ${LED_PCT.min} to ${LED_PCT.max}.`);
+        }
         if (plan.dic.enabled && plan.dic.position === 'here' && !plan.dic.pin) {
             problems.push('DIC overview: no stage position captured for "here" yet.');
         }
         if (plan.stop.kind === 'timepoints' && !(num(plan.stop.value, 0) >= 1)) {
-            problems.push('Stop after how many timepoints?');
+            problems.push(volumes ? 'Stop after how many timepoints?' : 'Stop after how many frames?');
         }
         if (plan.stop.kind === 'duration' && !(num(plan.stop.value, 0) > 0)) {
             problems.push('Stop after how many hours?');
@@ -135,15 +226,29 @@ const AcquisitionPlan = (() => {
 
     /** The start request. Only what the plan says goes on the wire. */
     function toPayload(plan, subjectIds) {
+        const volumes = plan.spim.enabled !== false;
         const body = {
+            // Still sent for a brightfield run: the embryos are not imaged,
+            // but their centroid is where the frame is taken from.
             embryo_ids: subjectIds.slice(),
             interval_seconds: plan.intervalSeconds,
             stop_condition: stopSpec(plan.stop.kind, plan.stop.value),
-            monitoring_mode: plan.monitoringMode || 'idle',
-            num_slices: plan.spim.slices,
-            exposure_ms: plan.spim.exposureMs,
         };
-        if (plan.spim.laserConfig) body.laser_config = plan.spim.laserConfig;
+        if (volumes) {
+            body.monitoring_mode = plan.monitoringMode || 'idle';
+            body.num_slices = plan.spim.slices;
+            body.exposure_ms = plan.spim.exposureMs;
+            if (plan.spim.laserConfig) body.laser_config = plan.spim.laserConfig;
+            const powers = plan.spim.laserPowers || {};
+            if (Object.keys(powers).length) {
+                body.laser_powers = {};
+                Object.keys(powers).forEach(wl => { body.laser_powers[wl] = powers[wl]; });
+            }
+        } else {
+            // Nothing of the volume goes on the wire: no slices, no exposure,
+            // and above all no laser preset.
+            body.volumes = false;
+        }
         if (plan.dic.enabled) {
             body.dic = {
                 enabled: true,
@@ -155,8 +260,11 @@ const AcquisitionPlan = (() => {
                 exposure_ms: plan.dic.exposureMs,
                 light: plan.dic.light,
             };
+            if (plan.dic.light === 'led' && plan.dic.ledPct != null) {
+                body.dic.led_intensity_pct = plan.dic.ledPct;
+            }
         }
-        if (plan.overrides.length) {
+        if (volumes && plan.overrides.length) {
             body.stop_conditions = {};
             plan.overrides.forEach(o => { body.stop_conditions[o.embryoId] = stopSpec(o.kind, o.value); });
         }
@@ -181,8 +289,23 @@ const AcquisitionPlan = (() => {
             const s = (subjects || []).find(e => e.id === id);
             return s ? s.label : id;
         };
+        const lit = () => DIC_LIGHTS[plan.dic.light].says
+            + (plan.dic.light === 'led' && plan.dic.ledPct != null ? ` at ${plan.dic.ledPct} %` : '');
+        if (plan.spim.enabled === false) {
+            // Where the frame is taken from. With no embryo placed there is
+            // no centroid, and the stage is simply left where it is.
+            const from = plan.dic.position === 'here' && plan.dic.pin
+                ? `from ${plan.dic.pin.x.toFixed(0)}, ${plan.dic.pin.y.toFixed(0)}`
+                : n ? 'from the centroid' : 'from where the stage is';
+            const exp = plan.dic.exposureMs != null ? ` (${plan.dic.exposureMs} ms)` : '';
+            return `Every ${intervalWords(plan.intervalSeconds)}: one brightfield frame of the field ` +
+                `on the bottom camera${exp}, ${from}, ${lit()} · ` +
+                `${stopWords(plan.stop.kind, plan.stop.value, 'frame')}. No SPIM volumes.`;
+        }
         const spimBits = [`${plan.spim.slices} slices`, `${plan.spim.exposureMs} ms`];
         if (plan.spim.laserConfig) spimBits.push(plan.spim.laserConfig);
+        Object.entries(plan.spim.laserPowers || {})
+            .forEach(([wl, pct]) => spimBits.push(`${wl} at ${pct} %`));
         const who = n === 0 ? 'no embryos' : n === 1 ? `embryo ${labelOf(subjects[0].id)}` : `${n} embryos`;
         let s = `Every ${intervalWords(plan.intervalSeconds)}: SPIM volumes (${spimBits.join(' · ')}) of ${who}`;
         if (plan.dic.enabled) {
@@ -190,7 +313,7 @@ const AcquisitionPlan = (() => {
             const from = plan.dic.position === 'here' && plan.dic.pin
                 ? `from ${plan.dic.pin.x.toFixed(0)}, ${plan.dic.pin.y.toFixed(0)}`
                 : 'from the centroid';
-            s += ` + one DIC overview ${every} ${from}, ${DIC_LIGHTS[plan.dic.light].says}`;
+            s += ` + one DIC overview ${every} ${from}, ${lit()}`;
         }
         s += ` · ${stopWords(plan.stop.kind, plan.stop.value)}`;
         if (plan.overrides.length) {
@@ -234,9 +357,22 @@ const AcquisitionPlan = (() => {
             num_slices: plan.spim.slices,
             exposure_ms: plan.spim.exposureMs,
             laser_config: plan.spim.laserConfig || null,
+            laser_powers: Object.keys(plan.spim.laserPowers || {}).length
+                ? { ...plan.spim.laserPowers } : null,
             dic: null,
+            volumes: plan.spim.enabled !== false,
             stop_conditions: null,
         };
+        if (!st.volumes) {
+            // A brightfield plan has no volume settings to save, and a
+            // template that carried some would restore a laser preset into a
+            // run that must not set one.
+            st.num_slices = null;
+            st.exposure_ms = null;
+            st.laser_config = null;
+            st.laser_powers = null;
+            st.monitoring_mode = 'idle';
+        }
         const body = toPayload(plan, []);
         if (body.dic) st.dic = body.dic;
         if (body.stop_conditions) st.stop_conditions = body.stop_conditions;
@@ -256,7 +392,12 @@ const AcquisitionPlan = (() => {
         });
         return fromForm({
             interval, intervalUnit: 's',
+            // Only `false` is a brightfield plan; one saved before the key
+            // existed is a volume plan.
+            volumes: st.volumes !== false,
+            dicLedPct: dic ? dic.led_intensity_pct : null,
             slices: st.num_slices, exposureMs: st.exposure_ms, laserConfig: st.laser_config,
+            laserPowers: st.laser_powers && typeof st.laser_powers === 'object' ? st.laser_powers : {},
             dic: !!(dic && dic.enabled),
             dicEveryRounds: dic && dic.every_seconds ? Math.max(1, Math.round(dic.every_seconds / interval)) : 1,
             dicPosition: dic && dic.position ? 'here' : 'centroid',
@@ -270,7 +411,7 @@ const AcquisitionPlan = (() => {
     }
 
     return {
-        STOP_KINDS, DIC_LIGHTS, stopSpec, stopWords, parseStopSpec, fromForm, fromStructure, toStructure,
+        STOP_KINDS, BRIGHTFIELD_STOPS, LED_PCT, LASER_LINES, linesOf, DIC_LIGHTS, stopSpec, stopWords, parseStopSpec, fromForm, fromStructure, toStructure,
         validate, toPayload, describe, intervalWords,
     };
 })();

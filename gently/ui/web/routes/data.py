@@ -9,6 +9,7 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from gently.app.orchestration.timelapse_models import DicOverview
 from gently.harness import calibration_gate
 from gently.ui.web.auth import require_control
 
@@ -125,7 +126,99 @@ def _parse_dic_config(raw) -> dict | None:
         if not (0 < exposure <= 10000):
             raise HTTPException(status_code=400, detail="dic.exposure_ms must be in (0, 10000]")
     out["exposure_ms"] = exposure
+    # The LED's brightness for the frame. Refused here when it is not one,
+    # rather than dropped: the orchestrator reads a checkpoint through the
+    # same parser and has to be forgiving, and a plan that asked for 150 %
+    # would otherwise run at whatever the LED happened to be.
+    pct = raw.get("led_intensity_pct")
+    if pct is not None:
+        lo, hi = DicOverview.LED_INTENSITY_LIMITS_PCT
+        try:
+            value = float(pct)
+        except (TypeError, ValueError):
+            value = None
+        if isinstance(pct, bool) or value is None or value != int(value) or not lo <= value <= hi:
+            raise HTTPException(
+                status_code=400,
+                detail=f"dic.led_intensity_pct must be a whole percent in [{lo}, {hi}]",
+            )
+        # Only when the plan says one: a plan that does not is the plan this
+        # route has always passed on, key for key.
+        out["led_intensity_pct"] = int(value)
     return out
+
+
+def _parse_laser_powers(raw) -> dict[int, float]:
+    """Per-line laser power of a plan: {wavelength: percent}. Empty when absent.
+
+    Checked against the device layer's own hard limits, here, before the run
+    starts. The device layer would refuse the same value — but at the first
+    volume, as an acquisition error on every embryo, three times over, until
+    each gives up. A plan that cannot run should not start.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="laser_powers must be an object")
+    from gently.hardware.dispim.devices.optical import DiSPIMLightSource
+
+    limits = DiSPIMLightSource.POWER_LIMITS_PCT
+    out: dict[int, float] = {}
+    for key, value in raw.items():
+        if value is None or value == "":
+            continue  # a line left alone
+        try:
+            wavelength = int(key)
+        except (TypeError, ValueError):
+            wavelength = -1
+        if wavelength not in limits:
+            raise HTTPException(
+                status_code=400,
+                detail=f"laser_powers: no {key} nm line (there are {sorted(limits)})",
+            )
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            pct = float("nan")
+        lo, hi = limits[wavelength]
+        if isinstance(value, bool) or not lo <= pct <= hi:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"laser_powers: {wavelength} nm at {value} % is outside the hard limit "
+                    f"of {lo}-{hi} %"
+                ),
+            )
+        out[wavelength] = pct
+    return out
+
+
+# The endings a run with no SPIM volumes can have. The rest are read from
+# perception of a volume (see TimelapseOrchestrator._start_brightfield).
+_BRIGHTFIELD_STOPS = ("manual", "timepoints", "fixed_timepoints", "duration")
+
+
+def _require_brightfield_plan(stop_condition: str, dic_cfg: dict | None) -> None:
+    """Refuse a no-volumes run that has nothing to image or no way to end.
+
+    The orchestrator refuses the same two things, but it answers in a string
+    and the route would report the start as having worked.
+    """
+    if dic_cfg is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Nothing to image: a run without SPIM volumes needs the overview channel on",
+        )
+    for part in str(stop_condition).lower().split("|"):
+        kind = part.strip().split(":")[0].split("+")[0]
+        if kind not in _BRIGHTFIELD_STOPS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"A brightfield-only run cannot end on '{part.strip()}': that ending is "
+                    "read from SPIM volumes. Use manual, timepoints or duration."
+                ),
+            )
 
 
 def _parse_stop_overrides(raw) -> dict:
@@ -1207,6 +1300,26 @@ def create_router(server) -> APIRouter:
         except Exception as exc:
             logger.exception("LED set command failed")
             raise HTTPException(status_code=502, detail=f"led failed: {exc}") from exc
+
+    @router.post("/api/devices/led/intensity", dependencies=[Depends(require_control)])
+    async def led_intensity_set(payload: dict = Body(...)):  # noqa: B008
+        """Set the LED brightness %. Body: {"pct": 1-100}.
+
+        The bound lives in the device layer; an out-of-range value comes back
+        from it as an error, which this forwards rather than clamping.
+        """
+        try:
+            pct = int(payload["pct"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="pct (int) required") from exc
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_led_intensity(pct)
+        except Exception as exc:
+            logger.exception("LED intensity set failed")
+            raise HTTPException(status_code=502, detail=f"led intensity failed: {exc}") from exc
 
     @router.get("/api/devices/led/status")
     async def led_status():
@@ -2594,12 +2707,23 @@ def create_router(server) -> APIRouter:
           galvo_center     (float, default 0.0)
           piezo_amplitude  (float, default 25.0)
           piezo_center     (float, default 50.0)
-          laser_config     (str | null)
+          laser_config     (str | null) — the preset every volume routes
+          laser_powers     (dict | null) — per-line power %, {"488": 4.0,
+                             "561": 10}; each within the device layer's hard
+                             limit for its line, or the start is refused. A
+                             line left out keeps the power it has
           dic              (dict | null) — the DIC overview channel:
                              {enabled: bool, every_seconds: float|null,
-                              position: {x, y}|null, exposure_ms: float|null}
+                              position: {x, y}|null, exposure_ms: float|null,
+                              light: room|led|none,
+                              led_intensity_pct: int 1-100|null}
                              one bottom-camera frame of the whole field per
                              round, on its own clock; null/absent = off
+          volumes          (bool, default true) — false is a brightfield-only
+                             run: the dic channel alone, no SPIM volumes. It
+                             needs no embryos and no calibration, sets no
+                             laser preset, and ends on manual, timepoints or
+                             duration
           stop_conditions  (dict | null) — per-embryo termination overrides,
                              {embryo_id: "timepoints:12" | {stop_condition,
                              condition_value}}; everyone else keeps
@@ -2639,13 +2763,25 @@ def create_router(server) -> APIRouter:
 
         stop_condition = str(payload.get("stop_condition") or "manual")
         embryo_ids = payload.get("embryo_ids") or None
-        # A timelapse is the longest-running thing this UI starts; an invented
-        # scan geometry would be baked into every timepoint of it.
-        _require_calibrated(embryo_ids, payload)
+        # Only the word "false" turns the volumes off. Anything else — absent,
+        # null, a typo — is the run this route has always started.
+        volumes = payload.get("volumes") is not False
         condition_value = payload.get("condition_value")
         monitoring_mode = payload.get("monitoring_mode") or None
         dic_cfg = _parse_dic_config(payload.get("dic"))
         stop_overrides = _parse_stop_overrides(payload.get("stop_conditions"))
+        laser_powers = _parse_laser_powers(payload.get("laser_powers")) if volumes else {}
+        if volumes:
+            # A timelapse is the longest-running thing this UI starts; an
+            # invented scan geometry would be baked into every timepoint of it.
+            _require_calibrated(embryo_ids, payload)
+        else:
+            # Nothing is scanned, so there is no geometry to have measured.
+            _require_brightfield_plan(stop_condition, dic_cfg)
+            # Both are about volumes: stage-watching reads them, and an
+            # embryo's own ending is the ending of its volumes.
+            monitoring_mode = None
+            stop_overrides = {}
 
         # Volume geometry. The galvo/piezo half is context only — the
         # orchestrator derives the scan cuboid from each embryo's own
@@ -2702,6 +2838,12 @@ def create_router(server) -> APIRouter:
         targets = embryo_ids or [e.id for e in experiment.embryos.values() if not e.should_skip]
         sent_exposure = payload.get("exposure_ms") is not None
         sent_slices = raw_slices is not None
+        if not volumes:
+            # Slices, exposure and the laser preset are the volume's. A
+            # brightfield run must not write them onto embryos it never
+            # images, nor route a laser line on its way to not using one.
+            targets = []
+            volume_geometry["laser_config"] = None
         # The laser preset was collected into volume_geometry and never used,
         # so choosing "488 and 561" on the pane changed nothing about the run.
         # It is set on the controller once, before the run starts; a preset
@@ -2727,6 +2869,10 @@ def create_router(server) -> APIRouter:
                 emb.exposure_ms = exposure_ms
             if sent_slices:
                 emb.num_slices = num_slices
+            # Only the lines the plan names: an empty field on the pane is not
+            # a request to forget a power somebody set on this embryo.
+            for wavelength, pct in laser_powers.items():
+                setattr(emb, f"laser_power_{wavelength}_pct", pct)
 
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
@@ -2743,6 +2889,13 @@ def create_router(server) -> APIRouter:
             start_kwargs["dic"] = dic_cfg
         if stop_overrides:
             start_kwargs["stop_conditions"] = stop_overrides
+        if not volumes:
+            start_kwargs["volumes"] = False
+        if preset:
+            # Set on the controller above, and carried by the run: every
+            # volume routes its own lines, so without this the preset chosen
+            # on the pane lasted until the first volume.
+            start_kwargs["laser_config"] = str(preset)
         try:
             result = await orchestrator.start(**start_kwargs)
         except Exception as exc:
@@ -2762,10 +2915,12 @@ def create_router(server) -> APIRouter:
                     "stop_condition": stop_condition,
                     "condition_value": condition_value,
                     "monitoring_mode": monitoring_mode or "idle",
-                    "num_slices": num_slices if sent_slices else None,
-                    "exposure_ms": exposure_ms if sent_exposure else None,
+                    "num_slices": num_slices if sent_slices and volumes else None,
+                    "exposure_ms": exposure_ms if sent_exposure and volumes else None,
                     "laser_config": volume_geometry.get("laser_config"),
+                    "laser_powers": {str(wl): pct for wl, pct in laser_powers.items()} or None,
                     "dic": dic_cfg,
+                    "volumes": volumes,
                     "stop_conditions": stop_overrides or None,
                     "embryo_ids": list(embryo_ids or []),
                     # "What to run": the pane's set and mode, so a resumed
@@ -2808,7 +2963,7 @@ def create_router(server) -> APIRouter:
                 new_tactics: list[dict] = [
                     {
                         "id": st_id,
-                        "name": "Adaptive timelapse",
+                        "name": "Adaptive timelapse" if volumes else "Brightfield timelapse",
                         "kind": "standing_timelapse",
                         "state": "active",
                         "scope": dict(seed_scope),
@@ -2819,6 +2974,11 @@ def create_router(server) -> APIRouter:
                             "condition_value": condition_value,
                             "monitoring_mode": monitoring_mode or "idle",
                             "dic": dic_cfg,
+                            "volumes": volumes,
+                            "laser_config": volume_geometry.get("laser_config"),
+                            "laser_powers": (
+                                {str(wl): pct for wl, pct in laser_powers.items()} or None
+                            ),
                             "stop_conditions": stop_overrides or None,
                         },
                         "rationale": "Started from the Operate Run step.",

@@ -10,6 +10,12 @@
  * lives in SharedState, not in the panel.
  *
  *     LightPanel.mount('op-light-host');
+ *     LightPanel.mount('op-led-host', { only: 'led' });
+ *
+ * `only: 'led'` draws the LED's state and brightness and nothing of the laser —
+ * for the bottom camera, which is lit by the LED and has no use for lines or
+ * a beam. Same panel, same state: it is a narrower window, not a second
+ * control.
  *
  * WHY THIS EXISTS
  *
@@ -56,7 +62,7 @@
 const LightPanel = (() => {
     'use strict';
 
-    const hosts = new Set();
+    const hosts = new Map();   // hostId -> { only }
 
     // Bounds and preset names come from the server (PANELS.md rule 4). 488 is
     // limited to 2-6%, so a control hardcoded 0-100 would offer settings the
@@ -81,20 +87,54 @@ const LightPanel = (() => {
 
     /* ── reading ─────────────────────────────────────────────────────────── */
 
+    /** State and brightness come back in the one status read. */
+    const ledOf = d => ({
+        led: (d && d.current_state) || null,
+        ledPct: d && d.intensity_pct != null ? Number(d.intensity_pct) : null,
+        ledLim: (d && d.intensity_limits_pct) || null,
+    });
+
+    /**
+     * Just the LED, for when that is all anyone is looking at.
+     *
+     * The bottom camera's card shows no beam, config or power, and reading them
+     * every poll to show none of them is traffic this device layer cannot
+     * spare. Stamped `ledReadAt`, not `readAt`: the full panel's age must not
+     * be refreshed by a read that skipped everything else it displays.
+     */
+    async function readLed() {
+        let d = null;
+        try {
+            const r = await fetch('/api/devices/led/status');
+            if (r.ok) d = await r.json();
+        } catch (_) { /* unread is an em dash */ }
+        // Merged into the state as it is NOW: a full read may have landed while
+        // this one was in flight, and its beam and config must survive.
+        SharedState.set('light', { ...state(), ...ledOf(d), ledReadAt: Date.now() });
+    }
+
+    /** Read what the asking surface shows, and no more. */
+    const read = scope => (scope === 'led' ? readLed() : readAll());
+
     async function readAll() {
         const next = { ...state() };
         const get = async (url, key, pick) => {
             try {
                 const r = await fetch(url);
-                if (!r.ok) { next[key] = null; return; }
+                if (!r.ok) { next[key] = null; return null; }
                 const d = await r.json();
                 next[key] = pick(d);
-            } catch (_) { next[key] = null; }
+                return d;
+            } catch (_) { next[key] = null; return null; }
         };
 
         await Promise.all([
             get('/api/devices/beam', 'beam', d => (d && d.beam) || null),
-            get('/api/devices/led/status', 'led', d => (d && d.current_state) || null),
+            // One read answers both questions: the state and the brightness
+            // come back together, and a second request would double the
+            // traffic on a device layer that is already slow to read.
+            get('/api/devices/led/status', 'led', d => (d && d.current_state) || null)
+                .then(d => Object.assign(next, ledOf(d))),
             // The config is read, not remembered. It used to be whatever this
             // panel last wrote, which made the whole laser branch an echo.
             // `read()` yields the string "unknown" when the group cannot be
@@ -114,7 +154,7 @@ const LightPanel = (() => {
             } catch (_) { next.power[wl] = null; }
         }
 
-        next.readAt = Date.now();
+        next.readAt = next.ledReadAt = Date.now();
         SharedState.set('light', next);
     }
 
@@ -192,9 +232,9 @@ const LightPanel = (() => {
 
     // Always re-read after a write. The response is not evidence: that is the
     // assumption that produced #106.
-    async function act(fn) {
+    async function act(fn, scope) {
         try { await fn(); } catch (_) { /* toasted in send() */ }
-        await readAll();
+        await read(scope);
     }
 
     /**
@@ -226,11 +266,11 @@ const LightPanel = (() => {
     function render() {
         const s = state();
         const em = emitting(s);
-        hosts.forEach(host => {
+        hosts.forEach((opts, host) => {
             const el = document.getElementById(host);
             if (!el) return;
-            el.innerHTML = markup(s, em);
-            wire(el);
+            el.innerHTML = opts.only === 'led' ? ledCard(s) : markup(s, em);
+            wire(el, opts.only === 'led' ? 'led' : undefined);
         });
     }
 
@@ -286,9 +326,28 @@ const LightPanel = (() => {
           ${m == null ? '<p class="lp-note">Nothing read from the light path yet.</p>' : ''}`;
     }
 
+    const ageOf = t => (t ? `${Math.round((Date.now() - t) / 1000)}s ago` : 'never');
+
+    /**
+     * The LED on its own, for a surface the laser has no part in.
+     *
+     * No mode selector: this card cannot see the laser, so it must not offer
+     * to choose between the two. It reports the LED and sets its brightness.
+     */
+    function ledCard(s) {
+        return `
+          <div class="lp">
+            <div class="lp-head">
+              <span class="lp-title">LED</span>
+              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${ageOf(s.ledReadAt)}</span>
+            </div>
+            ${ledRows(s)}
+          </div>`;
+    }
+
     function markup(s, em) {
         const armed = s.beam ? Object.values(s.beam).some(v => v === true) : null;
-        const age = s.readAt ? `${Math.round((Date.now() - s.readAt) / 1000)}s ago` : 'never';
+        const age = ageOf(s.readAt);
         const lines = routedLines(s);
         const m = mode(s);
         // The fault outranks the cursor: if both sources are open, the laser
@@ -319,20 +378,45 @@ const LightPanel = (() => {
     }
 
     /**
-     * LED mode has one fact worth stating and no settings: the ASI Tiger LED is
-     * a shutter, Open or Closed, with no intensity control on this rig.
+     * LED mode: the shutter's state, and its brightness.
+     *
+     * The brightness is the ASI Tiger adapter's own `LED Intensity(%)`
+     * property. The adapter only sends it to the controller while the LED is
+     * open, so on a closed LED the slider sets what the next open will use —
+     * which the note says, because a slider that moves with no change in the
+     * image otherwise reads as broken.
      */
     function ledDetail(s) {
         return `
           <div class="lp-sub">
-            <div class="lp-row">
-              <span class="lp-label">LED</span>
-              <span class="lp-val">${dash(s.led)}</span>
-              <span class="lp-lim">shutter — no intensity control</span>
-            </div>
+            ${ledRows(s)}
             <p class="lp-note">Brightfield. Good for finding embryos; nuclei are
                not visible, so calibration and acquisition need the laser.</p>
           </div>`;
+    }
+
+    /** State and brightness — the rows every LED mount shares. */
+    function ledRows(s) {
+        const lim = s.ledLim || { min: 1, max: 100 };
+        const val = s.ledPct;
+        return `
+            <div class="lp-row">
+              <span class="lp-label">State</span>
+              <span class="lp-val">${dash(s.led)}</span>
+            </div>
+            <div class="lp-row">
+              <span class="lp-label" title="LED Intensity(%) on the ASI Tiger LED — the Micro-Manager property name">Intensity</span>
+              <input class="lp-range" type="range" data-led-pct
+                     min="${lim.min}" max="${lim.max}" step="1"
+                     value="${val == null ? lim.min : val}"
+                     ${val == null ? 'disabled' : ''}
+                     title="${lim.min}–${lim.max} %"
+                     aria-label="LED intensity percent">
+              <span class="lp-val">${val == null ? '—' : val} %</span>
+            </div>
+            ${s.led === 'Closed' && val != null
+                ? '<p class="lp-note">The LED is closed — this is the brightness it will open at.</p>'
+                : ''}`;
     }
 
     /** The config select, then the laser's own settings once a line is routed. */
@@ -429,7 +513,7 @@ const LightPanel = (() => {
         return `<span class="lp-lim">${txt}</span>`;
     }
 
-    function wire(el) {
+    function wire(el, scope) {
         const beam = el.querySelector('[data-beam]');
         if (beam) beam.onclick = () => act(() =>
             send('/api/devices/beam', { enabled: beam.dataset.beam === 'on' }));
@@ -447,6 +531,11 @@ const LightPanel = (() => {
             r.onchange = () => act(() => send('/api/devices/laser/power',
                 { wavelength: Number(r.dataset.power), pct: Number(r.value) }));
         });
+
+        const ledPct = el.querySelector('[data-led-pct]');
+        // On release, for the same reason as the power sliders.
+        if (ledPct) ledPct.onchange = () => act(() =>
+            send('/api/devices/led/intensity', { pct: Number(ledPct.value) }), scope);
 
     }
 
@@ -467,23 +556,35 @@ const LightPanel = (() => {
         } catch (_) { /* select shows an em dash */ }
     }
 
-    async function mount(hostId) {
-        hosts.add(hostId);
+    async function mount(hostId, opts) {
+        const only = opts && opts.only === 'led' ? 'led' : null;
+        hosts.set(hostId, { only });
         if (hosts.size === 1) {
             SharedState.on('light', render);
-            timer = setInterval(() => { if (visible()) readAll(); }, POLL_MS);
+            timer = setInterval(() => {
+                const scope = visible();
+                if (scope) read(scope);
+            }, POLL_MS);
         }
-        await loadStatics();
+        // Limits and presets are the laser's; an LED card has no use for them.
+        if (!only) await loadStatics();
         render();
-        await readAll();
+        await read(only);
     }
 
+    /**
+     * What is on screen: 'all' if a full panel is, 'led' if only LED cards
+     * are, null if nothing is. The poll reads no more than that.
+     */
     function visible() {
-        for (const h of hosts) {
+        let scope = null;
+        for (const [h, opts] of hosts) {
             const el = document.getElementById(h);
-            if (el && el.offsetParent !== null) return true;
+            if (!el || el.offsetParent === null) continue;
+            if (!opts.only) return 'all';
+            scope = 'led';
         }
-        return false;
+        return scope;
     }
 
     function unmount(hostId) {

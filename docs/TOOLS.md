@@ -82,6 +82,7 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 | Tool | Description |
 |------|-------------|
 | `set_led` | Set the LED illumination state |
+| `set_led_intensity` | Set the LED brightness in whole percent (1-100) |
 | `get_led_status` | Get current LED illumination status |
 
 ### Plan Execution (`plan_execution_tools.py`)
@@ -117,6 +118,7 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 |------|-------------|
 | `generate_bluesky_plan` | Generate a Bluesky acquisition plan from a scientific goal |
 | `start_adaptive_timelapse` | Start an adaptive timelapse that runs in the background |
+| `start_brightfield_timelapse` | Start a brightfield-only timelapse: bottom-camera frames of the field, no SPIM volumes |
 | `get_timelapse_status` | Get current status of the running timelapse including per-embryo progress |
 | `modify_timelapse_embryo` | Modify parameters for a specific embryo during a running timelapse |
 | `add_embryo_to_timelapse` | Add an embryo to an already running timelapse |
