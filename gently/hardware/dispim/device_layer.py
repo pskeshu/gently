@@ -1894,12 +1894,23 @@ class DeviceLayerServer(Service):
             # Get available configs
             available_configs = led._available_configs
 
+            # Brightness rides along, but never fails the state read: an LED
+            # with no intensity property is still Open or Closed.
+            intensity_pct = None
+            try:
+                intensity_pct = led.get_intensity_pct()
+            except Exception as exc:
+                logger.debug("LED intensity not readable: %s", exc)
+            lo, hi = getattr(led, "INTENSITY_LIMITS_PCT", (1, 100))
+
             return web.json_response(
                 {
                     "success": True,
                     "current_state": led_value,
                     "available_configs": available_configs,
                     "group_name": led.group_name,
+                    "intensity_pct": intensity_pct,
+                    "intensity_limits_pct": {"min": lo, "max": hi},
                 }
             )
         except Exception as e:
@@ -1942,6 +1953,40 @@ class DeviceLayerServer(Service):
                 return web.json_response(
                     {"success": False, "error": f"Failed to set LED to {state}"}
                 )
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+
+    async def handle_set_led_intensity(self, request):
+        """POST /api/led/intensity — set LED brightness %.
+
+        Body: {"pct": 1-100}. Writes the Tiger adapter's ``LED Intensity(%)``
+        property and leaves the shutter state alone. Out-of-range values come
+        back as a 400 with the message from the device setter.
+        """
+        try:
+            data = await request.json()
+            led = self.devices.get("led")
+            if led is None:
+                return web.json_response(
+                    {"success": False, "error": "LED device not found"}, status=503
+                )
+            pct = data.get("pct")
+            try:
+                led.set_intensity_pct(pct)
+            except ValueError as e:
+                return web.json_response({"success": False, "error": str(e)}, status=400)
+            readback = led.get_intensity_pct()
+            logger.info("[led] intensity set to %s%% (readback %s%%)", pct, readback)
+            return web.json_response({"success": True, "pct": pct, "readback_pct": readback})
         except Exception as e:
             import traceback
 
@@ -4450,6 +4495,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_get("/api/plans", self.handle_get_plans)
         self._app.router.add_get("/api/led/status", self.handle_get_led_status)
         self._app.router.add_post("/api/led/set", self.handle_set_led)
+        self._app.router.add_post("/api/led/intensity", self.handle_set_led_intensity)
         self._app.router.add_get("/api/temperature/status", self.handle_get_temperature_status)
         self._app.router.add_post("/api/temperature/set", self.handle_set_temperature)
         self._app.router.add_get("/api/temperature/config", self.handle_get_temperature_config)

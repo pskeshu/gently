@@ -1208,6 +1208,26 @@ def create_router(server) -> APIRouter:
             logger.exception("LED set command failed")
             raise HTTPException(status_code=502, detail=f"led failed: {exc}") from exc
 
+    @router.post("/api/devices/led/intensity", dependencies=[Depends(require_control)])
+    async def led_intensity_set(payload: dict = Body(...)):  # noqa: B008
+        """Set the LED brightness %. Body: {"pct": 1-100}.
+
+        The bound lives in the device layer; an out-of-range value comes back
+        from it as an error, which this forwards rather than clamping.
+        """
+        try:
+            pct = int(payload["pct"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="pct (int) required") from exc
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_led_intensity(pct)
+        except Exception as exc:
+            logger.exception("LED intensity set failed")
+            raise HTTPException(status_code=502, detail=f"led intensity failed: {exc}") from exc
+
     @router.get("/api/devices/led/status")
     async def led_status():
         """Is the LED open? Read from hardware. Read-only route.

@@ -18,7 +18,17 @@ class DiSPIMLED:
 
     ASI Tiger LED (LED:X:31) - LED shutter control via ConfigGroup
     Device-agnostic: any plan that sets device state will work
+
+    Brightness is a separate surface: ``set_intensity_pct(pct)`` writes the
+    Tiger adapter's own ``LED Intensity(%)`` property on the device, not a
+    config preset. The adapter only sends it to the controller while the LED
+    is open; set while closed, it is held and applied on the next open.
     """
+
+    # The ASITiger adapter's property (ASILED.cpp) and its limits. 0 is not a
+    # brightness: the controller reports 0 for "off", so dark is `Closed`.
+    INTENSITY_PROPERTY = "LED Intensity(%)"
+    INTENSITY_LIMITS_PCT = (1, 100)
 
     def __init__(self, core: pymmcore.CMMCore, name: str = "LED", group_name: str | None = None):
         self.core = core
@@ -57,6 +67,38 @@ class DiSPIMLED:
         threading.Thread(target=wait).start()
 
         return status
+
+    def set_intensity_pct(self, pct: float) -> None:
+        """
+        Set LED brightness in percent (whole numbers, 1-100).
+
+        Synchronous: writes the MM property directly. Leaves the shutter
+        state alone — a closed LED stays closed and opens at this brightness.
+
+        Raises
+        ------
+        ValueError
+            If ``pct`` is not a whole number within :attr:`INTENSITY_LIMITS_PCT`.
+        """
+        lo, hi = self.INTENSITY_LIMITS_PCT
+        try:
+            value = float(pct)
+        except (TypeError, ValueError):
+            raise ValueError(f"LED intensity must be a number, got {pct!r}") from None
+        # bool is an int, and True would otherwise be written as 1%.
+        if isinstance(pct, bool) or value != int(value):
+            raise ValueError(f"LED intensity must be a whole percent, got {pct!r}")
+        if not (lo <= value <= hi):
+            raise ValueError(
+                f"LED intensity {pct}% outside [{lo}, {hi}]%. Use 'Closed' to turn the LED off."
+            )
+
+        self.core.setProperty(self.name, self.INTENSITY_PROPERTY, int(value))
+        logger.debug("Set LED intensity to %d%% (%s)", int(value), self.name)
+
+    def get_intensity_pct(self) -> int:
+        """Read the LED brightness % the adapter holds (what the next open uses)."""
+        return int(float(self.core.getProperty(self.name, self.INTENSITY_PROPERTY)))
 
     def read(self):
         """Read current LED configuration - required for Bluesky"""

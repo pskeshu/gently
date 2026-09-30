@@ -493,6 +493,12 @@
                       <div id="op-cam-panel-bottom"></div>
                     </div>
 
+                    <!-- The Light panel again, showing only the LED: this camera
+                         is lit by it, and the laser has no part here. A card of
+                         its own because brightness is the light's, not the
+                         camera's (docs/architecture/PANELS.md). -->
+                    <div class="op-block" id="op-led-host"></div>
+
 
                     <div class="op-gauge" id="op-gauge-bz" data-status="unknown">
                       <div class="op-gauge-head">

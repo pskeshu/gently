@@ -778,6 +778,10 @@ class DiSPIMMicroscope(Microscope):
         """Set LED state ('Open' or 'Closed')."""
         return await self._api_post("/api/led/set", {"state": state})
 
+    async def set_led_intensity(self, pct: int) -> dict:
+        """Set LED brightness % (1-100). Does not open or close the LED."""
+        return await self._api_post("/api/led/intensity", {"pct": pct})
+
     async def set_laser_power(self, wavelength: int, pct: float) -> dict:
         """Set per-line laser power %.
 

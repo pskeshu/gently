@@ -82,6 +82,7 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 | Tool | Description |
 |------|-------------|
 | `set_led` | Set the LED illumination state |
+| `set_led_intensity` | Set the LED brightness in whole percent (1-100) |
 | `get_led_status` | Get current LED illumination status |
 
 ### Plan Execution (`plan_execution_tools.py`)

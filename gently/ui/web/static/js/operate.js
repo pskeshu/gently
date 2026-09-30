@@ -2625,6 +2625,11 @@ const OperateManager = (function () {
                     { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom' });
             }
         }
+        // The bottom camera's LED card. Here rather than in mountLightPanel:
+        // that one waits for the SPIM pane, and this is the pane we start on.
+        if (typeof LightPanel !== 'undefined' && $('op-led-host')) {
+            LightPanel.mount('op-led-host', { only: 'led' });
+        }
         if (typeof CameraPanel !== 'undefined') {
             if ($('op-cam-panel-bottom')) {
                 CameraPanel.mount('op-cam-panel-bottom', { camera: 'bottom', titled: false });
