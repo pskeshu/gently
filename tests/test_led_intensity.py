@@ -380,6 +380,25 @@ class TestTheBottomCameraCard:
         for laser in ("modeRow", "laserBranch", "data-config", "data-beam", "lp-emit"):
             assert laser not in card, f"the LED card draws {laser}"
 
+    def test_the_card_has_a_switch_and_the_full_panel_keeps_its_mode_control(self):
+        """On the bottom pane the LED was read-only: it read Closed after any
+        visit to the SPIM pane (leaving closes it) and nothing there could
+        open it. The switch is the card's; the full panel switches the LED
+        through its mode row, and one control per surface is the rule."""
+        card = _fn("ledCard")
+        assert "data-led-switch=\"${open ? 'Closed' : 'Open'}\"" in card
+        assert "data-led-switch" not in _fn("ledRows")
+        assert "data-led-switch" not in _fn("ledDetail")
+        assert "sw.dataset.ledSwitch === 'Open'" in _fn("wire")
+
+    def test_opening_the_led_gates_the_lasers_first_whatever_they_were_doing(self):
+        """This card reads only the LED, so whether a line is routed is
+        unknown here — and unknown is what #106 was made of."""
+        body = _fn("ledSwitch")
+        assert "if (open) await send('/api/devices/laser/config', { config: 'ALL OFF' });" in body
+        assert body.index("laser/config") < body.index("led/set")
+        assert "state: open ? 'Open' : 'Closed'" in body
+
     def test_an_led_card_on_screen_reads_only_the_led(self):
         body = _fn("readLed")
         assert "/api/devices/led/status" in body
