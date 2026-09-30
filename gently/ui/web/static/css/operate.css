@@ -1704,7 +1704,7 @@
 .op-runrows { display: grid; gap: 2px; margin-bottom: var(--op-3); }
 .op-runrow {
     display: grid;
-    grid-template-columns: minmax(70px, 1fr) 44px 80px 90px 70px minmax(120px, 1fr) auto;
+    grid-template-columns: minmax(70px, 1fr) 44px 80px 90px minmax(110px, max-content) 70px minmax(120px, 1fr) auto;
     align-items: center;
     gap: var(--op-2);
     padding: var(--op-1) var(--op-2);
@@ -1715,7 +1715,11 @@
 .op-runrow.is-error { border-left-color: var(--op-bad); }
 .op-runrow.is-done { opacity: 0.55; }
 .op-runrow-who { font-family: var(--op-mono); font-weight: 600; }
-.op-runrow-n, .op-runrow-next, .op-runrow-int { font-family: var(--op-mono); color: var(--op-ink-dim); }
+.op-runrow-n, .op-runrow-next, .op-runrow-int, .op-runrow-params { font-family: var(--op-mono); color: var(--op-ink-dim); }
+.op-runrow-params { font-size: 0.66rem; }
+/* What the embryos hold when it is not what the field says. */
+.op-plan-now { color: var(--op-ink-dim); margin: 2px 0 6px; }
+.op-plan-now[hidden] { display: none; }
 .op-runrow-state { text-transform: lowercase; color: var(--op-ink-dim); }
 .op-runrow-stop { min-width: 0; font-size: 0.66rem; }
 .op-runrow-halt { font-size: 0.66rem; }

@@ -1044,6 +1044,9 @@ async def fast_calibrate_embryo(
     }
 
     agent._save_state()
+    # A calibration the agent just made is a fact the pane shows: it read
+    # "not calibrated" until something else happened to redraw it.
+    agent.experiment.notify_embryos_changed()
 
     msg = f"""\u2713 Fast calibration complete for {embryo_id}
   Mode: {"BOOTSTRAP" if is_bootstrap else "FAST"}

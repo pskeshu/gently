@@ -335,3 +335,75 @@ class TestThePane:
     def test_the_plan_is_checked_against_the_limits_before_it_is_sent(self):
         assert "AcquisitionPlan.validate(plan, ids, _laserLimits)" in _js("startRun")
         assert "AcquisitionPlan.validate(plan, subjectIds(), _laserLimits)" in _js("renderPlan")
+
+
+# ---------------------------------------------------------------------------
+# A saved tactic
+# ---------------------------------------------------------------------------
+
+
+def _tactic_agent(experiment):
+    agent = MagicMock()
+    agent.experiment = experiment
+    agent.client = MagicMock()
+    agent.client.set_laser_config = AsyncMock(return_value={"success": True})
+    agent.timelapse_orchestrator.start = AsyncMock(return_value="Started timelapse for 2 embryos")
+    agent.context_store = None
+    agent.session_id = None
+    agent.store = None
+    return agent
+
+
+def _tactic(structure):
+    return {
+        "id": "op_1",
+        "kind": "standing_timelapse",
+        "scope": {"mode": "global"},
+        "structure": {"cadence_s": 300, "stop_condition": "manual", **structure},
+    }
+
+
+class TestASavedTactic:
+    """The library runs a plan through tactic_executor, not the start route.
+    What the route learned to carry, this path has to carry too."""
+
+    async def test_it_carries_the_preset_and_the_powers(self):
+        from gently.app.orchestration.tactic_executor import execute_tactic
+
+        ex = _experiment()
+        agent = _tactic_agent(ex)
+        out = await execute_tactic(
+            agent, _tactic({"laser_config": "488 only", "laser_powers": {"488": 4.0}})
+        )
+        assert out["ok"], out
+        kwargs = agent.timelapse_orchestrator.start.await_args.kwargs
+        assert kwargs["laser_config"] == "488 only"
+        for e in ex.embryos.values():
+            assert e.laser_power_488_pct == 4.0
+            assert e.param_provenance["laser_power_488_pct"]["by"] == "tactic"
+
+    async def test_a_saved_brightfield_plan_is_a_brightfield_run(self):
+        from gently.app.orchestration.tactic_executor import execute_tactic
+
+        ex = _experiment()
+        ex.embryos["embryo_1"].num_slices = 40
+        agent = _tactic_agent(ex)
+        out = await execute_tactic(
+            agent,
+            _tactic(
+                {
+                    "volumes": False,
+                    "dic": {"enabled": True, "light": "led", "led_intensity_pct": 40},
+                    "num_slices": 80,
+                    "laser_config": "488 only",
+                    "stop_conditions": {"embryo_1": "hatching"},
+                }
+            ),
+        )
+        assert out["ok"], out
+        kwargs = agent.timelapse_orchestrator.start.await_args.kwargs
+        assert kwargs["volumes"] is False
+        assert kwargs["dic"]["led_intensity_pct"] == 40
+        assert "laser_config" not in kwargs and "stop_conditions" not in kwargs
+        agent.client.set_laser_config.assert_not_awaited()
+        assert ex.embryos["embryo_1"].num_slices == 40, "a volume setting was written"

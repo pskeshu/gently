@@ -117,7 +117,10 @@ const AcquisitionPlan = (() => {
      *   interval        number, in `intervalUnit`
      *   intervalUnit    's' | 'min'
      *   volumes         bool — false is a brightfield run; absent is true
-     *   slices, exposureMs, laserConfig
+     *   slices, exposureMs — a number; '' (the field blank) is "as each
+     *                   embryo has": nothing is sent, and the embryos keep
+     *                   what they hold, which may differ between them
+     *   laserConfig
      *   laserPowers     {wavelength: percent} — per-line power; an empty or
      *                   absent line keeps the power it has
      *   dic             bool
@@ -152,8 +155,10 @@ const AcquisitionPlan = (() => {
             intervalSeconds,
             spim: {
                 enabled: volumes,
-                slices: Math.max(1, Math.round(num(f.slices, 50))),
-                exposureMs: Math.max(1, num(f.exposureMs, 10)),
+                // Absent (an older form, a template) is the default. Blank is
+                // a choice: leave every embryo at what it has.
+                slices: f.slices === '' ? null : Math.max(1, Math.round(num(f.slices, 50))),
+                exposureMs: f.exposureMs === '' ? null : Math.max(1, num(f.exposureMs, 10)),
                 laserConfig: f.laserConfig || null,
                 laserPowers: volumes ? laserPowers : {},
             },
@@ -236,8 +241,10 @@ const AcquisitionPlan = (() => {
         };
         if (volumes) {
             body.monitoring_mode = plan.monitoringMode || 'idle';
-            body.num_slices = plan.spim.slices;
-            body.exposure_ms = plan.spim.exposureMs;
+            // Only what the plan sets. The route writes only the keys it is
+            // sent, so a blank field leaves each embryo's own value alone.
+            if (plan.spim.slices != null) body.num_slices = plan.spim.slices;
+            if (plan.spim.exposureMs != null) body.exposure_ms = plan.spim.exposureMs;
             if (plan.spim.laserConfig) body.laser_config = plan.spim.laserConfig;
             const powers = plan.spim.laserPowers || {};
             if (Object.keys(powers).length) {
@@ -302,7 +309,10 @@ const AcquisitionPlan = (() => {
                 `on the bottom camera${exp}, ${from}, ${lit()} · ` +
                 `${stopWords(plan.stop.kind, plan.stop.value, 'frame')}. No SPIM volumes.`;
         }
-        const spimBits = [`${plan.spim.slices} slices`, `${plan.spim.exposureMs} ms`];
+        const spimBits = [
+            plan.spim.slices == null ? 'slices as each embryo has' : `${plan.spim.slices} slices`,
+            plan.spim.exposureMs == null ? 'exposure as each embryo has' : `${plan.spim.exposureMs} ms`,
+        ];
         if (plan.spim.laserConfig) spimBits.push(plan.spim.laserConfig);
         Object.entries(plan.spim.laserPowers || {})
             .forEach(([wl, pct]) => spimBits.push(`${wl} at ${pct} %`));

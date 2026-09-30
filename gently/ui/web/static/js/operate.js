@@ -2094,6 +2094,9 @@ const OperateManager = (function () {
                 const payload = AcquisitionPlan.toPayload(plan, ids);
                 payload.scope = _targetScope;   // "what to run", kept with the plan
                 await postJSON('/api/devices/timelapse/start', payload);
+                // What was typed has been applied: the form follows the
+                // embryos again until the operator types something new.
+                _planDirty = false;
                 toast(plan.spim.enabled ? 'Timelapse started' : 'Brightfield timelapse started');
                 landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
                 return;
@@ -2148,6 +2151,76 @@ const OperateManager = (function () {
     // never over something the operator has already typed.
     let _planRestored = false;
     let _planDirty = false;
+
+    /**
+     * The SPIM fields follow the embryos the run targets.
+     *
+     * The form is what Start will apply; the embryos hold what the next
+     * acquisition will use. Those are one thing only while nobody else is
+     * changing them, and the agent does — `modify_parameters` used to set
+     * an embryo to 30 slices while this field went on saying 50. So on
+     * every EMBRYOS_UPDATE the fields are read back from the targets: one
+     * value when they agree, blank with "varies 30–50" when they do not,
+     * and a line naming who set what when it is not what the field says.
+     *
+     * Not over something the operator has typed and not yet started
+     * (`_planDirty`): that is a pending change, and the line says how it
+     * differs from what the embryos hold.
+     */
+    const PLAN_FIELDS = [
+        { key: 'num_slices', id: 'op-plan-slices', unit: 'slices' },
+        { key: 'exposure_ms', id: 'op-plan-exposure', unit: 'ms' },
+        { key: 'laser_power_488_pct', id: 'op-plan-power-488', unit: '% 488' },
+        { key: 'laser_power_561_pct', id: 'op-plan-power-561', unit: '% 561' },
+        { key: 'laser_power_405_pct', id: 'op-plan-power-405', unit: '% 405' },
+        { key: 'laser_power_637_pct', id: 'op-plan-power-637', unit: '% 637' },
+    ];
+
+    /** {value, min, max, by} of one parameter across the targets. */
+    function heldAcross(targets, key) {
+        const vals = targets.map(e => e[key]).filter(v => v != null);
+        if (!vals.length) return null;
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const who = new Set();
+        targets.forEach(e => {
+            const by = e.param_provenance && e.param_provenance[key] && e.param_provenance[key].by;
+            if (by) who.add(by);
+        });
+        return { value: min === max ? min : null, min, max, by: [...who] };
+    }
+
+    function syncPlanFromEmbryos() {
+        const ids = new Set(subjectIds());
+        const targets = _embryos.filter(e => ids.has(e.id));
+        const now = $('op-plan-spim-now');
+        if (!targets.length || !$('op-plan-slices')) { if (now) now.hidden = true; return; }
+        const notes = [];
+        PLAN_FIELDS.forEach(f => {
+            const held = heldAcross(targets, f.key);
+            const el = $(f.id);
+            if (!el) return;
+            if (held === null) { el.placeholder = f.id === 'op-plan-slices' || f.id === 'op-plan-exposure' ? '' : 'as it is'; return; }
+            if (!_planDirty) {
+                // Derived, not remembered: the field shows what the embryos
+                // hold, and says "varies" rather than pick one of them.
+                el.value = held.value != null ? held.value : '';
+                el.placeholder = held.value != null ? '' : `varies ${held.min}–${held.max}`;
+            }
+            const typed = el.value === '' ? null : Number(el.value);
+            const differs = typed == null ? held.value == null : typed !== held.value;
+            if (differs) {
+                const have = held.value != null ? `${held.value}` : `${held.min}–${held.max}`;
+                const by = held.by.length ? ` (set by ${held.by.join(', ')})` : '';
+                notes.push(`${have} ${f.unit}${by}`);
+            }
+        });
+        if (now) {
+            now.hidden = !notes.length;
+            now.textContent = notes.length
+                ? `Embryos now hold ${notes.join('; ')} — the field applies at Start.`
+                : '';
+        }
+    }
 
     /** Put a plan into the form. The inverse of readPlan(). */
     function fillPlan(plan) {
@@ -2321,6 +2394,7 @@ const OperateManager = (function () {
         if (!say) return;
         renderOverrideRows();
         renderPowerRows();
+        syncPlanFromEmbryos();
         let plan = readPlan();
         const volumes = plan.spim.enabled !== false;
         renderChannels(volumes);
@@ -2511,12 +2585,34 @@ const OperateManager = (function () {
             `<span class="op-runrow-n">t${r.timepoints}</span>` +
             `<span class="op-runrow-next">${r.is_complete || !live ? '' : `next ${fmtWhen(due)}`}</span>` +
             `<span class="op-runrow-int">${r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : ''}</span>` +
+            `<span class="op-runrow-params" title="${escapeHtml(paramsTitle(r))}">${escapeHtml(paramsWords(r))}</span>` +
             `<span class="op-runrow-state">${escapeHtml(state)}</span>` +
             (r.is_complete || !live ? '<span></span><span></span>' :
                 `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends">` +
                     runStopOptions(ending) + '</select>' +
                 `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" title="Stop this embryo; the rest carry on">Stop</button>`) +
             '</div>';
+    }
+
+    /**
+     * What this embryo's next acquisition uses, from the status row. The
+     * agent changes these per embryo (`modify_parameters`), so this is the
+     * one place its change is shown against the embryo it was made on.
+     */
+    function paramsWords(r) {
+        if (r.acquisition_mode === 'snap') return `snap · ${r.exposure_ms} ms`;
+        const bits = [];
+        if (r.num_slices != null) bits.push(`${r.num_slices} sl`);
+        if (r.exposure_ms != null) bits.push(`${r.exposure_ms} ms`);
+        Object.entries(r.laser_powers || {}).forEach(([wl, pct]) => bits.push(`${wl}@${pct}%`));
+        return bits.join(' · ');
+    }
+
+    /** Who set what — the provenance, for the hover. */
+    function paramsTitle(r) {
+        const by = r.set_by || {};
+        const said = Object.keys(by).map(k => `${k}: set by ${by[k]}`);
+        return said.length ? said.join('\n') : 'as registered';
     }
 
     /** The ending select for a running embryo, preselecting what it has. */
@@ -2952,6 +3048,10 @@ const OperateManager = (function () {
         // own borrow) still read "not calibrated" until something else forced
         // a redraw. Every pane that shows per-embryo state redraws here.
         publishRoster(); renderSpimTarget(); renderSingle(); renderCalTarget();
+        // The Acquisition pane shows per-embryo parameters twice: the plan's
+        // fields (derived from the targets) and the run rows (each its own).
+        // Both follow the change the moment it is announced.
+        if (_pane === 'acquire') { renderPlan(); renderRun(); }
     }
 
     function wire() {

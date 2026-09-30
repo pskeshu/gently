@@ -327,7 +327,12 @@ async def mark_plan_item_status(
 # ---------------------------------------------------------------------------
 
 
-def _apply_spec_to_embryo(embryo, spec) -> list[str]:
+def _apply_spec_to_embryo(embryo, spec, experiment=None) -> list[str]:
+    """Write a spec's imaging settings onto one embryo.
+
+    Announced when the experiment is given, so the pane sees the change the
+    moment the agent makes it, not at the next thing that happens to redraw.
+    """
     """Write per-embryo acquisition fields from an ImagingSpec.
     Returns a list of human-readable changes made."""
     applied = []
@@ -340,6 +345,8 @@ def _apply_spec_to_embryo(embryo, spec) -> list[str]:
     if spec.interval_s is not None:
         embryo.interval_seconds = float(spec.interval_s)
         applied.append(f"interval_s={spec.interval_s}")
+    if applied and experiment is not None:
+        experiment.notify_embryos_changed()
     return applied
 
 
