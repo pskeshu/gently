@@ -259,6 +259,19 @@ const LightPanel = (() => {
         await send('/api/devices/led/set', { state: to === 'led' ? 'Open' : 'Closed' });
     }
 
+    /**
+     * The LED card's switch. Opening the LED is entering brightfield, so the
+     * lasers are gated first — unconditionally, not only when a line is
+     * known to be routed: this card reads only the LED, so what the laser is
+     * doing is unknown here, and unknown is not safe (#106). `ALL OFF` is
+     * the documented brightfield-safe state (spec §2.7) and costs nothing
+     * when it already holds. Closing touches only the LED.
+     */
+    async function ledSwitch(open) {
+        if (open) await send('/api/devices/laser/config', { config: 'ALL OFF' });
+        await send('/api/devices/led/set', { state: open ? 'Open' : 'Closed' });
+    }
+
     /* ── rendering ───────────────────────────────────────────────────────── */
 
     const dash = v => (v == null ? '—' : v);
@@ -335,11 +348,20 @@ const LightPanel = (() => {
      * to choose between the two. It reports the LED and sets its brightness.
      */
     function ledCard(s) {
+        // The switch says what pressing it does, and what it does follows
+        // from the read-back state: an unread LED is offered "Open", since
+        // the one thing the operator cannot do with it is see.
+        const open = s.led === 'Open';
         return `
           <div class="lp">
             <div class="lp-head">
               <span class="lp-title">LED</span>
               <span class="lp-age" title="Values are read from the hardware, not remembered">read ${ageOf(s.ledReadAt)}</span>
+            </div>
+            <div class="lp-row">
+              <button class="lp-btn ${open ? 'is-armed' : ''}" data-led-switch="${open ? 'Closed' : 'Open'}"
+                      aria-pressed="${open}" title="${open ? 'Close the LED shutter' : 'Gate the lasers off and open the LED'}">
+                ${open ? 'Close LED' : 'Open LED'}</button>
             </div>
             ${ledRows(s)}
           </div>`;
@@ -536,6 +558,9 @@ const LightPanel = (() => {
         // On release, for the same reason as the power sliders.
         if (ledPct) ledPct.onchange = () => act(() =>
             send('/api/devices/led/intensity', { pct: Number(ledPct.value) }), scope);
+
+        const sw = el.querySelector('[data-led-switch]');
+        if (sw) sw.onclick = () => act(() => ledSwitch(sw.dataset.ledSwitch === 'Open'), scope);
 
     }
 
