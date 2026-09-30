@@ -42,16 +42,28 @@ async def _apply_plan_settings(agent, structure: dict, embryo_ids: list[str]) ->
     """
     experiment = getattr(agent, "experiment", None)
     embryos = getattr(experiment, "embryos", None) or {}
-    slices = structure.get("num_slices")
-    exposure = structure.get("exposure_ms")
+    changes: dict = {}
+    if structure.get("num_slices") is not None:
+        changes["num_slices"] = int(structure["num_slices"])
+    if structure.get("exposure_ms") is not None:
+        changes["exposure_ms"] = float(structure["exposure_ms"])
+    # The plan's per-line powers, saved as {"488": 4.0}. Out-of-range values
+    # are refused by the device layer at the first volume.
+    powers = structure.get("laser_powers")
+    if isinstance(powers, dict):
+        for wl, pct in powers.items():
+            if pct is not None:
+                changes[f"laser_power_{int(wl)}_pct"] = float(pct)
+    set_params = getattr(experiment, "set_params", None)
     for eid in embryo_ids:
-        emb = embryos.get(eid)
-        if emb is None:
+        if eid not in embryos or not changes:
             continue
-        if slices is not None:
-            emb.num_slices = int(slices)
-        if exposure is not None:
-            emb.exposure_ms = float(exposure)
+        if set_params is not None:
+            # Through the one door: recorded and announced (PANELS.md rule 8).
+            set_params(eid, changes, by="tactic", reason="run from a saved tactic")
+        else:
+            for name, value in changes.items():
+                setattr(embryos[eid], name, value)
     preset = structure.get("laser_config")
     client = getattr(agent, "client", None)
     if preset and client is not None and hasattr(client, "set_laser_config"):
@@ -175,7 +187,12 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             # The whole plan, not just its cadence. A saved plan that lost its
             # channels and endings on the way to the orchestrator would run as
             # something other than what its sentence says.
-            await _apply_plan_settings(agent, structure, embryo_ids)
+            # A saved brightfield plan is a brightfield run: no volume settings
+            # are written onto embryos, no preset is set, and the run is told
+            # it takes no volumes.
+            volumes = structure.get("volumes") is not False
+            if volumes:
+                await _apply_plan_settings(agent, structure, embryo_ids)
             start_kwargs: dict = {
                 "embryo_ids": embryo_ids,
                 "stop_condition": str(structure.get("stop_condition", "manual")),
@@ -186,8 +203,15 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             if isinstance(dic, dict) and dic.get("enabled"):
                 start_kwargs["dic"] = dic
             overrides = structure.get("stop_conditions")
-            if isinstance(overrides, dict) and overrides:
+            if volumes and isinstance(overrides, dict) and overrides:
                 start_kwargs["stop_conditions"] = overrides
+            if not volumes:
+                start_kwargs["volumes"] = False
+            # Carried by the run, not only set once: every volume routes its
+            # own lines as it starts.
+            preset = structure.get("laser_config")
+            if volumes and preset:
+                start_kwargs["laser_config"] = str(preset)
             message = await orchestrator.start(**start_kwargs)
             _keep_plan(agent, structure, embryo_ids, message, tactic)
             # The run knows which tactic it is, so that pausing and resuming

@@ -106,6 +106,7 @@ def skip_embryo(embryo_id: str, reason: str, context: dict) -> str:
 
     embryo.should_skip = True
     embryo.skip_reason = reason
+    agent.experiment.notify_embryos_changed()
 
     return f"Marked {embryo_id} to skip. Reason: {reason}"
 
@@ -161,6 +162,7 @@ def resume_embryo(embryo_id: str, context: dict) -> str:
 
     embryo.should_skip = False
     embryo.skip_reason = None
+    agent.experiment.notify_embryos_changed()
 
     return f"Resumed imaging {embryo_id}"
 
@@ -188,6 +190,7 @@ def assign_nickname(embryo_id: str, nickname: str, context: dict) -> str:
 
     old_nickname = embryo.nickname
     embryo.nickname = nickname
+    agent.experiment.notify_embryos_changed()
 
     if old_nickname:
         return f"Renamed {embryo_id}: '{old_nickname}' -> '{nickname}'"
@@ -245,44 +248,39 @@ def modify_parameters(embryo_id: str, changes: dict, reason: str, context: dict)
     if err:
         return err
 
-    old_params = {
-        "interval_seconds": embryo.interval_seconds,
-        "num_slices": embryo.num_slices,
-        "exposure_ms": embryo.exposure_ms,
-        "priority": embryo.priority,
-        "acquisition_mode": embryo.acquisition_mode,
-        "laser_power_488_pct": embryo.laser_power_488_pct,
-    }
+    from gently.harness.state import ExperimentState
 
-    if "interval_seconds" in changes:
-        embryo.interval_seconds = changes["interval_seconds"]
-    if "num_slices" in changes:
-        embryo.num_slices = changes["num_slices"]
-    if "exposure_ms" in changes:
-        embryo.exposure_ms = changes["exposure_ms"]
-    if "priority" in changes:
-        embryo.priority = changes["priority"]
+    known = ExperimentState.ACQUISITION_PARAMS
+    unknown = sorted(k for k in changes if k not in known)
+    if unknown:
+        return f"Unknown parameter(s) {unknown}. Supported: {', '.join(known)}."
+    old_params = {k: getattr(embryo, k) for k in known if k in changes}
+
     if "acquisition_mode" in changes:
         mode = changes["acquisition_mode"]
-        if mode in ("volume", "snap"):
-            embryo.acquisition_mode = mode
-        else:
+        if mode not in ("volume", "snap"):
             return f"Invalid acquisition_mode '{mode}'. Use 'volume' or 'snap'."
-    if "laser_power_488_pct" in changes:
-        # Soft-validate at the tool layer so the agent gets a clean error
-        # without round-tripping to the device. Hard limit is enforced
-        # at DiSPIMLightSource.set_power_pct regardless.
-        from gently.hardware.dispim.devices.optical import DiSPIMLightSource
+    # Soft-validate at the tool layer so the agent gets a clean error
+    # without round-tripping to the device. Hard limit is enforced
+    # at DiSPIMLightSource.set_power_pct regardless.
+    from gently.hardware.dispim.devices.optical import DiSPIMLightSource
 
-        pct = changes["laser_power_488_pct"]
-        lo, hi = DiSPIMLightSource.POWER_LIMITS_PCT.get(488, (0.0, 100.0))
-        if pct is not None and not (lo <= pct <= hi):
+    for wl in (405, 488, 561, 637):
+        key = f"laser_power_{wl}_pct"
+        if key not in changes or changes[key] is None:
+            continue
+        pct = changes[key]
+        lo, hi = DiSPIMLightSource.POWER_LIMITS_PCT.get(wl, (0.0, 100.0))
+        if not (lo <= pct <= hi):
             return (
-                f"laser_power_488_pct={pct} outside hard safety limit "
+                f"{key}={pct} outside hard safety limit "
                 f"[{lo}, {hi}]%. (Limit is baked into the device layer; "
                 f"change DiSPIMLightSource.POWER_LIMITS_PCT to retune.)"
             )
-        embryo.laser_power_488_pct = pct
+
+    # Through the one door: the write, the record of who made it and why,
+    # and the broadcast that puts it on the operator's screen.
+    agent.experiment.set_params(embryo_id, dict(changes), by="agent", reason=reason)
 
     return (
         f"Modified {embryo_id} parameters:\n"
@@ -352,6 +350,7 @@ def assign_embryo_roles(roles: dict[str, str], context: dict) -> str:
         if old_role == role_name:
             continue
         embryo.role = role_name
+        agent.experiment.notify_embryos_changed()
         changes.append(f"{eid}: {old_role} -> {role_name}")
 
         # Persist to embryo.yaml if FileStore is wired up.

@@ -60,6 +60,23 @@ instance.
 Markup, styles and behaviour ship together and mount into a host element, so
 adding it to a new surface is one call rather than a copy-paste of markup.
 
+**8. Whoever writes, announces — and a form is derived, not remembered.**
+The operator and the agent change the same facts, and each has to see what
+the other did. So every change to shared state ends in the broadcast that
+puts it on the other party's screen, whether the operator made it (a route),
+the agent (a tool) or a rule (the orchestrator). For an embryo's acquisition
+parameters that is one door, `ExperimentState.set_params`, which writes,
+records who and why, and fires `EMBRYOS_UPDATE`;
+`tests/test_every_embryo_write_is_announced.py` fails on any writer that
+does not. The GUI's writes always announced themselves, because the GUI
+needed the redraw; the agent's did not, because the agent did not — which is
+how the Acquisition pane came to show 50 slices over an embryo the agent had
+set to 30. The other half is rule 2 applied to a form: the pane's Slices
+field is read back from the embryos on every broadcast, says "varies 30–50"
+when they disagree, and names who set what when it is not what the field
+says. A value the operator has typed and not yet started is the one thing
+the broadcast does not overwrite.
+
 ## Design language
 
 A panel has to be recognisable as one. An operator scanning the screen for a

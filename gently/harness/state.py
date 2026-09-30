@@ -165,6 +165,11 @@ class EmbryoState:
     laser_power_561_pct: float | None = None
     laser_power_405_pct: float | None = None
     laser_power_637_pct: float | None = None
+    # Who last set each acquisition parameter, and why:
+    # {"num_slices": {"by": "agent", "reason": "...", "at": iso}}. Written by
+    # ExperimentState.set_params, which is how both the operator and the
+    # agent change these — so either can see what the other did.
+    param_provenance: dict = field(default_factory=dict)
 
     # Status
     last_imaged: datetime | None = None
@@ -886,6 +891,7 @@ class EmbryoState:
             "laser_power_561_pct": self.laser_power_561_pct,
             "laser_power_405_pct": self.laser_power_405_pct,
             "laser_power_637_pct": self.laser_power_637_pct,
+            "param_provenance": dict(self.param_provenance),
             "last_imaged": self.last_imaged.isoformat() if self.last_imaged else None,
             "timepoints_acquired": self.timepoints_acquired,
             "should_skip": self.should_skip,
@@ -929,6 +935,60 @@ class ExperimentState:
         # over the event bus. Kept as a plain callback so this module stays
         # bus-agnostic.
         self.on_embryos_changed: Callable[[], None] | None = None
+
+    # The acquisition parameters of an embryo — what its next acquisition
+    # uses. Both the operator (the Acquisition pane, at Start) and the agent
+    # (`modify_parameters`) change these, and each has to see what the other
+    # did, so there is one way to change them: set_params.
+    ACQUISITION_PARAMS = (
+        "interval_seconds",
+        "num_slices",
+        "exposure_ms",
+        "priority",
+        "acquisition_mode",
+        "laser_power_488_pct",
+        "laser_power_561_pct",
+        "laser_power_405_pct",
+        "laser_power_637_pct",
+    )
+
+    def set_params(
+        self,
+        embryo_id: str,
+        changes: dict[str, Any],
+        *,
+        by: str,
+        reason: str | None = None,
+    ) -> dict[str, tuple[Any, Any]]:
+        """Change an embryo's acquisition parameters, and say so.
+
+        Writes only what differs, records on the embryo who set each field
+        and why, and fires ``on_embryos_changed`` once — which is what puts
+        the new values in front of everyone else: the pane, the roster, the
+        agent's next look. A silent write is how the GUI came to show a
+        slice count the agent had already changed.
+
+        Returns ``{field: (old, new)}`` for what actually changed. Unknown
+        fields raise: a typo must not become a silent no-op.
+        """
+        embryo = self.embryos[embryo_id]
+        unknown = sorted(set(changes) - set(self.ACQUISITION_PARAMS))
+        if unknown:
+            raise ValueError(
+                f"not acquisition parameters: {unknown}; they are {list(self.ACQUISITION_PARAMS)}"
+            )
+        applied: dict[str, tuple[Any, Any]] = {}
+        stamp = datetime.now().isoformat(timespec="seconds")
+        for name, value in changes.items():
+            old = getattr(embryo, name)
+            if old == value:
+                continue
+            setattr(embryo, name, value)
+            embryo.param_provenance[name] = {"by": by, "reason": reason, "at": stamp}
+            applied[name] = (old, value)
+        if applied:
+            self.notify_embryos_changed()
+        return applied
 
     def notify_embryos_changed(self) -> None:
         """Fire the on_embryos_changed observer if one is wired.

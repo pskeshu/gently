@@ -62,6 +62,11 @@ def _app(embryos: dict[str, EmbryoState], orchestrator) -> TestClient:
     agent.timelapse_orchestrator = orchestrator
     agent.client = MagicMock()
     agent.lightsheet_monitor = None
+    # A real ExperimentState: the route writes through its `set_params`, and
+    # a mock's would swallow the write this test exists to see land.
+    from gently.harness.state import ExperimentState
+
+    agent.experiment = ExperimentState()
     agent.experiment.embryos = embryos
     app = FastAPI()
     app.include_router(create_router(server))

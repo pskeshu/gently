@@ -845,6 +845,12 @@
                               <input class="op-num-in" id="op-plan-slices" type="number" min="1" max="500" value="50"></div>
                             <div class="op-field"><label class="op-label" for="op-plan-exposure">Exposure (ms)</label>
                               <input class="op-num-in" id="op-plan-exposure" type="number" min="1" max="500" value="10"></div>
+                            {# The field is what Start will apply; the embryos
+                               may hold something else — set by the agent, by a
+                               rule, or by a previous Start on a different set.
+                               This line says so, so the two never silently
+                               disagree. Empty when they agree. #}
+                            <div class="op-cap op-plan-now" id="op-plan-spim-now" hidden></div>
                             <div class="op-field"><label class="op-label" for="op-plan-laser">Lasers</label>
                               <select class="op-sel" id="op-plan-laser"><option value="">current preset</option></select></div>
                             {# One row per line the preset routes, drawn by

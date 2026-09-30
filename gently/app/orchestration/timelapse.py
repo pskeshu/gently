@@ -351,6 +351,8 @@ class TimelapseOrchestrator:
             embryo.cadence_phase = "normal"
             embryo.next_due_at = now  # image immediately on first tick
             self._embryo_states[eid] = embryo
+        # Once, for the lot: every embryo's interval and ending just changed.
+        self.experiment.notify_embryos_changed()
 
         # Per-embryo termination. The run has one default; an embryo that
         # should end differently — "embryo 2 at hatching, the rest at 12 h" —
@@ -1090,6 +1092,10 @@ class TimelapseOrchestrator:
         if reschedule:
             self._reschedule(embryo)
 
+        # The interval is an acquisition parameter the pane shows, so the
+        # embryo list is announced too, not only the cadence event.
+        self.experiment.notify_embryos_changed()
+
         self._emit_event(
             EventType.EMBRYO_CADENCE_CHANGED,
             {
@@ -1791,6 +1797,7 @@ class TimelapseOrchestrator:
         embryo.detection_triggered_at = None
         embryo.detection_type = None
         embryo.no_object_since_timepoint = None
+        self.experiment.notify_embryos_changed()
 
         # Async cadence init for the newcomer. The newcomer inherits the
         # timelapse's current base_interval (the user-specified cadence
@@ -1950,6 +1957,7 @@ class TimelapseOrchestrator:
                 " Note: use modify_interval() to change acquisition interval."
             )
 
+        self.experiment.notify_embryos_changed()
         return f"Modified {embryo_id}: {', '.join(changes)}"
 
     async def stop_embryo(self, embryo_id: str, reason: str = "user_request") -> str:
@@ -3130,6 +3138,14 @@ class TimelapseOrchestrator:
 
             if prule.wavelength == 488:
                 estate.laser_power_488_pct = new_pct
+                estate.param_provenance["laser_power_488_pct"] = {
+                    "by": f"rule:{prule.name}",
+                    "reason": "power ramp",
+                    "at": datetime.now().isoformat(timespec="seconds"),
+                }
+                # A rule is a writer like any other: the pane shows the new
+                # power the moment it is set, not at the next redraw.
+                self.experiment.notify_embryos_changed()
             # (Future wavelengths: extend EmbryoState similarly.)
             self._emit_event(
                 EventType.POWER_RAMP_STEP,

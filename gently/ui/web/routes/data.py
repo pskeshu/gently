@@ -2861,18 +2861,23 @@ def create_router(server) -> APIRouter:
                 raise HTTPException(
                     status_code=502, detail=f"laser preset {preset!r} failed: {exc}"
                 ) from exc
+        changes: dict = {}
+        if sent_exposure:
+            changes["exposure_ms"] = exposure_ms
+        if sent_slices:
+            changes["num_slices"] = num_slices
+        # Only the lines the plan names: an empty field on the pane is not
+        # a request to forget a power somebody set on this embryo.
+        for wavelength, pct in laser_powers.items():
+            changes[f"laser_power_{wavelength}_pct"] = pct
         for eid in targets:
-            emb = experiment.embryos.get(eid)
-            if emb is None:
+            if eid not in experiment.embryos or not changes:
                 continue
-            if sent_exposure:
-                emb.exposure_ms = exposure_ms
-            if sent_slices:
-                emb.num_slices = num_slices
-            # Only the lines the plan names: an empty field on the pane is not
-            # a request to forget a power somebody set on this embryo.
-            for wavelength, pct in laser_powers.items():
-                setattr(emb, f"laser_power_{wavelength}_pct", pct)
+            # Through the one door (ExperimentState.set_params): recorded as
+            # the operator's, and announced, so the agent's next look sees it.
+            experiment.set_params(
+                eid, changes, by="operator", reason="Start on the Acquisition pane"
+            )
 
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
@@ -3194,6 +3199,19 @@ def create_router(server) -> APIRouter:
                 else None,
                 "role": getattr(e, "role", None),
                 "last_error": getattr(e, "last_error", None),
+                # What the next acquisition uses, and who set it. The agent
+                # changes these per embryo; this row is where that shows.
+                "num_slices": getattr(e, "num_slices", None),
+                "exposure_ms": getattr(e, "exposure_ms", None),
+                "acquisition_mode": getattr(e, "acquisition_mode", None),
+                "laser_powers": {
+                    str(wl): getattr(e, f"laser_power_{wl}_pct", None)
+                    for wl in (405, 488, 561, 637)
+                    if getattr(e, f"laser_power_{wl}_pct", None) is not None
+                },
+                "set_by": {
+                    k: v.get("by") for k, v in (getattr(e, "param_provenance", None) or {}).items()
+                },
             }
         out["embryos"] = rows
         # How the last run ended, so an idle run with embryos still going can
