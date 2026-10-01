@@ -3068,7 +3068,10 @@ def create_router(server) -> APIRouter:
                         "rationale": "Started from the Operate Run step.",
                         "live_bind": ["cadence"],
                         "relations": {},
-                        "live": {},
+                        # When, from the first moment: two Starts in a session
+                        # leave two cards, and this is what tells them apart
+                        # until the run ends and says how.
+                        "live": {"started": _when_now()},
                         "source": "operate",
                     }
                 ]
@@ -3203,6 +3206,11 @@ def create_router(server) -> APIRouter:
         agent = bridge.agent if bridge is not None else None
         sid = getattr(agent, "session_id", None) if agent is not None else None
         return sid if isinstance(sid, str) else None
+
+    def _when_now() -> str:
+        from gently.app.orchestration.tactic_executor import when
+
+        return when(datetime.now())
 
     def _keep_plan(agent, plan: dict) -> None:
         """Write the run's plan to the session. Best-effort."""

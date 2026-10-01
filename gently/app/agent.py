@@ -872,8 +872,11 @@ class MicroscopyAgent:
                 try:
                     from gently.app.orchestration.tactic_executor import close_timelapse_tactics
 
+                    data = getattr(event, "data", None) or {}
                     closed = close_timelapse_tactics(
-                        self, getattr(self, "timelapse_orchestrator", None)
+                        self,
+                        getattr(self, "timelapse_orchestrator", None),
+                        reason=data.get("reason") if isinstance(data, dict) else None,
                     )
                     if closed:
                         logger.info(
