@@ -2066,7 +2066,7 @@ const OperateManager = (function () {
                 if (!_selected) { toastFail('Select an embryo first'); return; }
                 _acquiring = true; renderSubnavMeta();
                 try {
-                    await postJSON('/api/devices/acquire/volume', {
+                    const d = await postJSON('/api/devices/acquire/volume', {
                         // Say WHICH embryo. The route used to receive no id at
                         // all, so it imaged wherever the stage happened to be
                         // and could not check whether that embryo had ever been
@@ -2077,7 +2077,9 @@ const OperateManager = (function () {
                         num_slices: Math.max(1, Number(($('op-vol-slices') || {}).value) || 50),
                         exposure_ms: Math.max(1, Number(($('op-vol-exp') || {}).value) || 10),
                     });
-                    toast('Volume acquired');
+                    // The first line of what the acquisition said: which embryo,
+                    // and whether it was kept.
+                    toast(String((d && d.message) || 'Volume acquired').split(/\r?\n/)[0]);
                 } finally { _acquiring = false; await forceLedOff(); renderSubnavMeta(); }
                 return;
             }

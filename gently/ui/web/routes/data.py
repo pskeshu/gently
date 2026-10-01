@@ -2732,18 +2732,54 @@ def create_router(server) -> APIRouter:
     async def acquire_volume(payload: dict = Body(...)):  # noqa: B008
         """Trigger a volume acquisition.
 
-        Body: {num_slices, exposure_ms,
+        Body: {embryo_id?, num_slices, exposure_ms,
                laser_config?, piezo_center?, galvo_center?}.
-        laser_config is forwarded directly to the device client so callers
-        can send "ALL OFF" for brightfield-safe Manual-view captures.
-        piezo_center and galvo_center capture at the dialled focal plane.
+
+        With an embryo_id it is the embryo's volume, exactly as the agent's
+        `acquire_volume` tool takes one: the stage moves to the embryo, the
+        scan uses its calibration, the volume is filed under it and counts
+        as a timepoint, and the projection reaches the Embryos tab. The
+        route used to check the embryo was calibrated and then acquire
+        wherever the stage happened to be, with the default scan geometry,
+        and keep nothing — "Volume acquired", and nothing anywhere to show
+        for it.
+
+        Without one (Manual-mode snapping) it images the current stage
+        position with no embryo in mind, which is legitimate: laser_config,
+        piezo_center and galvo_center are forwarded to the device client.
         """
-        # Optional on purpose: Manual-mode snapping images the current stage
-        # position with no embryo in mind, which is legitimate. When a caller
-        # DOES name an embryo, it gets checked.
         eid = payload.get("embryo_id")
         if eid:
             _require_calibrated([str(eid)], payload)
+            agent = _require_agent_with_experiment()
+            client = _resolve_client()
+            if client is None or not getattr(client, "is_connected", True):
+                raise HTTPException(status_code=503, detail="Microscope not connected")
+            # Registered on import; the agent imports every tool at boot, but
+            # this route must not depend on the agent having done so.
+            import gently.app.tools.acquisition_tools  # noqa: F401
+            from gently.harness.tools.registry import get_tool_registry
+
+            tool = get_tool_registry().get("acquire_volume")
+            if tool is None:
+                raise HTTPException(status_code=500, detail="acquire_volume tool not registered")
+            try:
+                said = await tool.handler(
+                    embryo_id=str(eid),
+                    num_slices=int(payload.get("num_slices", 50)),
+                    exposure_ms=float(payload.get("exposure_ms", 10.0)),
+                    allow_uncalibrated=bool(payload.get("allow_uncalibrated")),
+                    context={"agent": agent, "client": client},
+                )
+            except Exception as exc:
+                logger.exception("Volume acquisition failed")
+                raise HTTPException(status_code=502, detail=f"volume failed: {exc}") from exc
+            # The tool answers in words. Only "Acquired volume for …" is a
+            # volume; everything else — "Error …", "Acquisition failed …",
+            # "Embryo … not found" — is why there is none.
+            if not isinstance(said, str) or not said.startswith("Acquired volume"):
+                raise HTTPException(status_code=502, detail=str(said))
+            return {"success": True, "embryo_id": str(eid), "message": said}
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
