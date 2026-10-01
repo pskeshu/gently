@@ -16,6 +16,7 @@ no LLM. Real acquisition/motion remain the orchestrator's concern (RIG-DEFERRED)
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from gently.app.orchestration.role_scope import resolve_scope_embryos
 
@@ -124,13 +125,70 @@ def timelapse_tactics_going(agent) -> list[str]:
     ]
 
 
-def close_timelapse_tactics(agent, orchestrator=None) -> list[str]:
+def when(dt) -> str:
+    """A moment, as a card says it: '30 Sep 16:45'. Local time, like the logs."""
+    try:
+        return dt.strftime("%d %b %H:%M").lstrip("0")
+    except Exception:
+        return str(dt)
+
+
+def span(seconds: float) -> str:
+    """A duration, as a card says it: '20 s', '12 min', '8 h 15 min'."""
+    s = max(0, int(round(float(seconds))))
+    if s < 60:
+        return f"{s} s"
+    m = s // 60
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    return f"{h} h {m} min" if m else f"{h} h"
+
+
+def run_facts(orchestrator, reason: str | None = None) -> dict[str, str]:
+    """What a run was, for the card of the tactic it ran as.
+
+    Two Starts in one session leave two tactics that say only "Adaptive
+    timelapse · done", so a 20-second false start and the eight-hour run
+    that followed it read as a duplicate. These are the facts that tell them
+    apart: when it started, how it ended and after how long, what it took.
+    Only what the orchestrator knows; a fake with none of it binds nothing.
+    """
+    facts: dict[str, str] = {}
+    started = getattr(orchestrator, "_started_at", None)
+    if started is not None:
+        facts["started"] = when(started)
+    ended = getattr(orchestrator, "_ended", None)
+    if ended in ("stopped", "completed", "failed"):
+        how = ended
+        if ended == "stopped" and reason:
+            how = f"stopped by {reason}"
+        if ended == "failed" and getattr(orchestrator, "_error_message", None):
+            how = f"failed: {orchestrator._error_message}"
+        if started is not None:
+            how += f" after {span((datetime.now() - started).total_seconds())}"
+        facts["ended"] = how
+    if getattr(orchestrator, "_volumes", True) is False:
+        frames = getattr(orchestrator, "_dic_frames", None)
+        if frames is not None:
+            facts["acquired"] = f"{int(frames)} brightfield frame{'' if frames == 1 else 's'}"
+    else:
+        n = getattr(orchestrator, "_total_timepoints", None)
+        if n is not None:
+            facts["acquired"] = f"{int(n)} volume{'' if n == 1 else 's'}"
+    return facts
+
+
+def close_timelapse_tactics(agent, orchestrator=None, reason: str | None = None) -> list[str]:
     """The run has ended: its tactics are done. Returns the ids closed.
 
     Called for every way a run ends, whoever ended it: the Stop button, the
     assistant's tool, the last embryo reaching its ending, an error. The
     Stop button used to be the only one that said so, and only for a run
     started from the pane.
+
+    The tactic is told how (``run_facts``), so its card can say "stopped by
+    operator after 20 s · 4 volumes" and not only "done".
     """
     cs = getattr(agent, "context_store", None)
     sid = getattr(agent, "session_id", None)
@@ -140,10 +198,11 @@ def close_timelapse_tactics(agent, orchestrator=None) -> list[str]:
     for tid in list(getattr(orchestrator, "_operate_tactic_ids", None) or []):
         if tid and tid not in ids:
             ids.append(tid)
+    facts = run_facts(orchestrator, reason) if orchestrator is not None else {}
     closed = []
     for tid in ids:
         try:
-            if cs.transition_tactic(sid, tid, "done"):
+            if cs.transition_tactic(sid, tid, "done", **facts):
                 closed.append(tid)
         except Exception:
             logger.debug("could not close tactic %s", tid, exc_info=True)
@@ -221,6 +280,11 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             if tactic_id:
                 try:
                     orchestrator._operate_tactic_ids = [tactic_id]
+                    # When it started, on the card, from the moment it did.
+                    cs = getattr(agent, "context_store", None)
+                    sid = getattr(agent, "session_id", None)
+                    if cs is not None and sid:
+                        cs.transition_tactic(sid, tactic_id, None, started=when(datetime.now()))
                 except Exception:
                     logger.debug("could not link the run to tactic %s", tactic_id, exc_info=True)
             mode = structure.get("monitoring_mode")

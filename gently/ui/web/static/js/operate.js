@@ -2765,12 +2765,22 @@ const OperateManager = (function () {
         if (struct.cadence_s != null) meta.push(`${struct.cadence_s}s`);
         if (struct.interval != null) meta.push(`${struct.interval}s`);
         if (struct.status) meta.push(struct.status);
+        if (struct.laser_config) meta.push(struct.laser_config);
+        if (struct.volumes === false) meta.push('brightfield');
         if (t.live && t.live.signal != null) meta.push(`signal ${t.live.signal}`);
+        // What the run was: two cards both saying "done" are two runs, and
+        // these are what tell a 20-second false start from the eight-hour one.
+        const live = t.live || {};
+        const when = [];
+        if (live.started) when.push(`started ${live.started}`);
+        if (live.ended) when.push(live.ended);
+        if (live.acquired) when.push(live.acquired);
         return `<div class="op-tcard st-${escapeHtml(state)}">` +
             `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span>` +
             `<span class="op-tcard-state">${escapeHtml(state)}</span></div>` +
             `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>` +
             (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '') +
+            (when.length ? `<div class="op-tcard-meta op-tcard-when">${escapeHtml(when.join(' · '))}</div>` : '') +
             (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '') +
             '</div>';
     }
