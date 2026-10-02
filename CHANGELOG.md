@@ -505,8 +505,8 @@ running multi-embryo timelapse without leaving Devices › Operate, and get it
 back after a restart. Seventy-nine pull requests since `v1.0.0.dev1`, nearly all
 of them started as a sentence somebody said at the microscope.
 
-A release candidate: everything below is merged, and the list under **Known**
-is what has not yet been exercised on the microscope.
+A release candidate: everything below is merged and has been run on the
+microscope. The list under **Known** is what is still open.
 
 **The acquisition plan**
 
@@ -741,32 +741,20 @@ and walk to it.
 
 **Known**
 
-Merged and tested against fakes, not yet exercised on the microscope: the
-acquisition plan end to end, the DIC overview's light, calibration abort,
-keeping a calibration's images, Raise head over its full traverse,
-resuming a run after a restart, and resuming a session from the gate with
-the microscope on.
-
 Perception, the detectors and calibration each still take their own part of
 the camera's frame, by three different rules. Only the projection follows
 the new setting.
 
-Restoring an earlier XY region has never run on the microscope. It writes
-the controller's limits when they are enforced, through the same calls as
-applying a region.
-
-The folder and Fiji buttons have been checked up to the click. Opening
-Explorer and starting Fiji were not exercised, because a run was going on
-the microscope computer.
-
-Two milestone issues need the microscope and are not done: the camera ROI
-readout (#125) and the two-point calibration's beam (#106).
+Two issues stay on the 1.0.0 milestone: an operator-selectable camera
+readout region on the SPIM view (#125), and the laser toggle reading back
+the hardware's state rather than the request it sent (#106).
 
 A plan derived for a session that predates `acquisition.yaml` shows its DIC
 position as pinned rather than "centroid", because the checkpoint stores the
 resolved position.
 
-CI drives no browser. What the UI looks like and does is verified by hand.
+CI drives no browser. What the UI looks like and does is verified by hand,
+on the microscope.
 
 ---
 
