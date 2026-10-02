@@ -469,4 +469,8 @@
     margin-left: 6px;
     vertical-align: middle;
 }
+.session-diag-badge {
+    color: var(--accent-purple, #a78bfa);
+    border-color: var(--accent-purple, #a78bfa);
+}
 .session-item.active-session { border-left: 2px solid var(--accent-green, #4ade80); }

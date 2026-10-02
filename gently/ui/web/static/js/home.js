@@ -144,11 +144,14 @@ const HomeApp = (() => {
             if (!sessions.length) { empty(el, 'No sessions yet.'); return; }
             el.innerHTML = sessions.map(s => {
                 const live = s.active ? '<span class="home-tag home-tag-live">live</span>' : '';
+                const diag = s.advanced_diagnostics
+                    ? '<span class="home-tag home-tag-diag" title="Recorded with Advanced diagnostics on: everything on screen, detailed logs">advanced diagnostics</span>'
+                    : '';
                 const resume = s.active ? '' :
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;

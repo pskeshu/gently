@@ -137,6 +137,44 @@ def _update_meta(base: Path, tab: str, user_agent: str) -> None:
     _write_yaml(meta_path, meta)
 
 
+_tagged: set[str] = set()
+
+
+def _tag_advanced_diagnostics(base: Path, sid: str | None, server) -> None:
+    """Say on the recording, and on its session, that this was recorded with
+    Advanced diagnostics on, and since when.
+
+    A replay with placeholder boxes could be the balanced fidelity or a dropped
+    frame; without this nothing on disk said which. The mark is set once and
+    never cleared: the switch is per start of Gently, and a session resumed
+    later may be recorded both ways, so it means "at least from here".
+    """
+    key = str(base)
+    if key in _tagged:
+        return
+    _tagged.add(key)
+    since = datetime.now().isoformat()
+    meta_path = base / "meta.yaml"
+    meta: dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            import yaml
+
+            meta = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 — corrupt meta must not break ingest
+            meta = {}
+    if not meta.get("advanced_diagnostics"):
+        meta["advanced_diagnostics"] = True
+        meta["advanced_diagnostics_since"] = since
+        _write_yaml(meta_path, meta)
+    store = _store(server)
+    if sid and store is not None and hasattr(store, "mark_advanced_diagnostics"):
+        try:
+            store.mark_advanced_diagnostics(sid, since)
+        except Exception:  # noqa: BLE001 — the tag is not worth losing a batch over
+            logger.debug("could not tag session %s with advanced diagnostics", sid, exc_info=True)
+
+
 def _all_replay_dirs(store) -> list[Path]:
     """Every ui-replay dir on disk (per-session + unassigned buckets)."""
     root = Path(store.root)
@@ -208,7 +246,7 @@ def _read_jsonl(path: Path) -> list[Any]:
 def limits(server) -> dict[str, Any]:
     """What the recording is held to, for this start of Gently.
 
-    Two sets of limits: the ordinary ones, and the larger ones Diagnostics
+    Two sets of limits: the ordinary ones, and the larger ones Advanced diagnostics
     brings. Which applies is chosen at the launch gate, so it is read from
     the server each time and not fixed when Gently was imported.
     """
@@ -240,7 +278,7 @@ def limits(server) -> dict[str, Any]:
 
 
 def apply_diagnostic(server, on: bool) -> dict[str, Any]:
-    """Diagnostics on or off, for this start of Gently: what the recorder
+    """Advanced diagnostics on or off, for this start of Gently: what the recorder
     keeps on pages loaded from now, what the recording is held to, and how
     much the log files are told."""
     server.diagnostic = bool(on)
@@ -259,7 +297,7 @@ def apply_diagnostic(server, on: bool) -> dict[str, Any]:
     if on:
         _capped_tabs.clear()
         logger.warning(
-            "Diagnostics on: recording in full, up to %.0f MB a tab and %.0f MB in all; "
+            "Advanced diagnostics on: recording in full, up to %.0f MB a tab and %.0f MB in all; "
             "log files in detail",
             now["tab_mb"],
             now["budget_mb"],
@@ -280,7 +318,7 @@ def create_router(server) -> APIRouter:
 
     @router.get("/replay/limits")
     async def replay_limits():
-        """What the recording is held to now, and whether Diagnostics is on."""
+        """What the recording is held to now, and whether Advanced diagnostics is on."""
         return {"recording": bool(settings.ui.replay), **limits(server)}
 
     @router.post("/replay/ingest")
@@ -362,14 +400,16 @@ def create_router(server) -> APIRouter:
                             tab,
                             "Raise it in Settings › Recording."
                             if held_to["diagnostic"]
-                            else "Start Gently with Diagnostics on to record a run in full, "
-                            "or raise the cap in Settings › Recording.",
+                            else "Start Gently with Advanced diagnostics on to record a run "
+                            "in full, or raise the cap in Settings › Recording.",
                         )
                 else:
                     _append_lines(rrweb_path, rrweb_events)
             if actions:
                 _append_lines(base / "actions.jsonl", actions)
             _update_meta(base, tab, request.headers.get("user-agent", ""))
+            if held_to["diagnostic"]:
+                _tag_advanced_diagnostics(base, sid, server)
 
         try:
             await asyncio.to_thread(_write)
