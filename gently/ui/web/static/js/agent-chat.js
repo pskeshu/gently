@@ -19,7 +19,7 @@ const AgentChat = (() => {
 
     let panelOpen = false;
     let hasControl = true;        // optimistic until the server says otherwise
-    const answeredAsks = new Set();  // request_ids answered from EITHER surface (transcript / main stage)
+    const answeredAsks = new Set();  // request_ids answered from either surface (slot / overlay)
     let holderLabel = null;
     let streaming = false;
     let currentAgentEl = null;    // the agent content element being streamed into
@@ -582,8 +582,7 @@ const AgentChat = (() => {
             case 'choice_request':
                 hideActivity();
                 setAskState(true);  // waiting on user, not working
-                renderChoice(msg);
-                bumpBadge();
+                renderChoice(msg);  // the beacon (ask-overlay.js) is the collapsed-panel signal
                 break;
 
             case 'applied_spec':
@@ -628,8 +627,8 @@ const AgentChat = (() => {
     }
 
     // Build an ask card from a choice_data payload. Pure: the caller supplies
-    // hasControl + onPick, so the SAME builder renders in the chat transcript
-    // and on the main stage (#ask-stage) — one payload, two renderers.
+    // hasControl + onPick, so the SAME builder renders in the chat's slot and
+    // in the overlay (ask-overlay.js) — one payload, one card, two mounts.
     function buildAskCard(data, opts) {
         opts = opts || {};
         const reqId = opts.reqId || '';
@@ -654,6 +653,7 @@ const AgentChat = (() => {
         (data.options || []).forEach(opt => {
             const btn = document.createElement('button');
             btn.className = 'ac-choice-opt';
+            btn.dataset.optId = String(opt.id);
             btn.disabled = !!opt.disabled || !canAct;  // observers / already-answered → read-only
             const desc = opt.description ? `<span class="ac-choice-desc">${escapeHtml(opt.description)}</span>` : '';
             btn.innerHTML = `<span class="ac-choice-label">${escapeHtml(opt.label)}</span>${desc}`;
@@ -699,13 +699,37 @@ const AgentChat = (() => {
         if (!reqId || answeredAsks.has(reqId)) return;
         answeredAsks.add(reqId);
         send({ type: 'choice_response', request_id: reqId, selected });
+        keepTheRecord(reqId, selected);
         setAskState(false);  // resume working-state visuals
         if (streaming) setActivity('Working…');
         if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('ASK_CLEARED', { request_id: reqId });
     }
 
+    // The answered card leaves the slot and joins the transcript with the pick
+    // marked, so "what did I answer?" still has an answer once the slot clears.
+    function keepTheRecord(reqId, selected) {
+        if (!pendingSlot || !log) return;
+        const card = pendingSlot.querySelector(`.ac-choice[data-req-id="${CSS.escape(reqId)}"]`);
+        if (!card) return;
+        let marked = false;
+        card.querySelectorAll('.ac-choice-opt').forEach(b => {
+            if (b.dataset.optId !== undefined && b.dataset.optId === String(selected)) { b.classList.add('ac-choice-picked'); marked = true; }
+        });
+        const other = card.querySelector('.ac-choice-otherwrap');
+        if (other) other.remove();
+        if (!marked) {  // a typed answer: keep the words
+            const said = document.createElement('div');
+            said.className = 'ac-choice-desc';
+            said.textContent = `You: ${selected}`;
+            card.appendChild(said);
+        }
+        pendingSlot.classList.add('hidden');
+        log.appendChild(card);
+        scrollToBottom();
+    }
+
     // Disable + mark-answered any transcript / sticky-slot ask card for this
-    // request_id ('*' = all). The main stage clears itself via its own handler.
+    // request_id ('*' = all). The overlay clears itself via its own handler.
     function markAnswered(reqId) {
         [log, pendingSlot].forEach(scope => {
             if (!scope) return;
@@ -713,11 +737,6 @@ const AgentChat = (() => {
                 if (reqId !== '*' && card.dataset.reqId !== reqId) return;
                 card.querySelectorAll('button').forEach(b => b.disabled = true);
                 card.classList.add('ac-choice-answered');
-            });
-            // Also fade compact pointers (ux_v2 mode — no buttons to disable).
-            scope.querySelectorAll('.ac-ask-pointer').forEach(ptr => {
-                if (reqId !== '*' && ptr.dataset.reqId !== reqId) return;
-                ptr.classList.add('ac-ask-pointer-answered');
             });
         });
         if (pendingSlot) {
@@ -738,31 +757,17 @@ const AgentChat = (() => {
         const data = msg.choice_data || {};
         const reqId = msg.request_id || data.request_id || '';
         const isWake = msg.origin === 'wake';
-        // Always mirror onto the main stage (AskStage / landing wizard).
+        // One place to answer: the sticky slot above the composer, where the
+        // eye already is. While the panel is collapsed, ask-overlay.js shows
+        // the same card on demand; it listens for this event.
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.emit('AGENT_ASK', { request_id: reqId, choice_data: data, origin: msg.origin });
         }
-        // Under ux_v2 (#ask-stage present), the main stage owns the full ask UI.
-        // Replace the duplicate card in the chat transcript with a compact pointer
-        // so the surrounding context (agent reasoning, tool calls) stays readable
-        // but the choice buttons aren't shown twice.
-        if (document.getElementById('ask-stage')) {
-            const ptr = document.createElement('div');
-            ptr.className = 'ac-ask-pointer';
-            ptr.dataset.reqId = reqId;
-            ptr.textContent = '↑ Gently is asking — answer above';
-            log.appendChild(ptr);
-            scrollToBottom();
-            return;
-        }
-        // v1 / non-ux_v2: render full card as before.
         const card = buildAskCard(data, {
             reqId, isWake, hasControl,
             onPick: (sel) => answerChoice(reqId, sel),
         });
-        // ASK approvals pin to the sticky slot above the composer; ordinary
-        // choices stay inline in the transcript.
-        if (isWake && pendingSlot) {
+        if (pendingSlot) {
             pendingSlot.innerHTML = '';
             pendingSlot.appendChild(card);
             pendingSlot.classList.remove('hidden');
@@ -984,7 +989,7 @@ const AgentChat = (() => {
     function setAskState(waiting) {
         askPending = waiting;
         if (waiting) {
-            if (hasControl) input.placeholder = '↑ Type an answer or pick an option above…';
+            if (hasControl) input.placeholder = 'Pick an option above, or type an answer…';
         } else if (agentBusy) {
             // Restore working-state visuals now the ask has been answered.
             if (hasControl) {
@@ -1157,6 +1162,7 @@ const AgentChat = (() => {
     function togglePanel(open) {
         panelOpen = (open === undefined) ? !panelOpen : open;
         panel.classList.toggle('open', panelOpen);
+        if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('AGENT_PANEL', { open: panelOpen });
         if (railBtn) railBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
         if (panelOpen) {
             clearBadge();
@@ -1312,12 +1318,12 @@ const AgentChat = (() => {
         if (!panel) return;  // markup not present
 
         restorePrefs();
-        // Dual-render: retire a transcript ask card when its ask is answered
-        // (from the transcript OR the main stage) or the turn is cancelled.
+        // Retire the ask card when its ask is answered (from the slot or the
+        // overlay) or the turn is cancelled.
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('ASK_CLEARED', ({ request_id }) => {
                 markAnswered(request_id);
-                // If answered from the main stage (AskStage), restore working state.
+                // Answered from the overlay: restore working state.
                 if (askPending) setAskState(false);
             });
         }
@@ -1418,5 +1424,5 @@ const AgentChat = (() => {
         if (!ws) connect();
     }
 
-    return { togglePanel, runCommand, buildAskCard, answerChoice, mdToHtml, hasControl: () => hasControl };
+    return { togglePanel, runCommand, buildAskCard, answerChoice, mdToHtml, hasControl: () => hasControl, isPanelOpen: () => panelOpen };
 })();

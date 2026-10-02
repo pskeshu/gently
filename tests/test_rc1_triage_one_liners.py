@@ -11,7 +11,9 @@ the line was never written — or if it is reverted. These tests fail then.
 - #133 One close of the agent panel was remembered, so "open by default" was
   false on that machine for good.
 - #131 The agent's question card was in normal flow, so asking a question
-  pushed the instrument's controls down and off the panel.
+  pushed the instrument's controls down and off the panel. (The stage this
+  first fixed was then replaced by the slot and the overlay; see
+  test_the_agent_asks_in_one_place.py.)
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ WEB = ROOT / "gently" / "ui" / "web"
 ROUTES = WEB / "routes" / "device_layer.py"
 OPERATE = WEB / "static" / "js" / "operate.js"
 CHAT = WEB / "static" / "js" / "agent-chat.js"
-ASK_CSS = WEB / "static" / "css" / "ask-stage.css"
 
 
 def _js_function(src: str, name: str) -> str:
@@ -65,24 +66,3 @@ def test_the_agent_panel_opens_on_every_load() -> None:
         "defeats 'open by default' for good"
     )
     assert "togglePanel(true);" in _js_function(src, "restorePrefs")
-
-
-def test_asking_a_question_takes_no_height_from_the_workspace() -> None:
-    """#131: the ask stage is a zero-height row; its card overflows, in front."""
-    css = ASK_CSS.read_text(encoding="utf-8")
-    rule = re.search(r"\n\.ask-stage \{([^}]*)\}", css)
-    assert rule, ".ask-stage rule missing"
-    decls = {
-        d.split(":")[0].strip(): d.split(":", 1)[1].strip()
-        for d in rule.group(1).split(";")
-        if ":" in d
-    }
-    assert decls.get("height") == "0", (
-        "the stage takes height again; a question reflows the instrument"
-    )
-    assert decls.get("min-height") == "0", "a flex item's min-height:auto would undo height:0"
-    assert decls.get("overflow") == "visible"
-    assert "z-index" in decls and "position" in decls, (
-        "the card must paint over the content it overlaps"
-    )
-    assert "margin: 14px 16px 0" not in css

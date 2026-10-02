@@ -31,6 +31,15 @@
         {# Agent lives in the docked right sidebar (collapses to a spark rail) —
            no header toggle. Ctrl/Cmd+J still opens it. #}
         {% endif %}
+        {# The beacon: while the agent waits on a question and the chat is
+           collapsed, this says so, with the question, until it is answered.
+           Click opens the question over the workspace (ask-overlay.js). #}
+        <button id="ask-beacon" class="ask-beacon hidden" type="button" aria-live="polite"
+                title="Gently is waiting for your answer. Click to see the question.">
+            <span class="ask-beacon-dot" aria-hidden="true"></span>
+            <span class="ask-beacon-label">Gently is asking:</span>
+            <span class="ask-beacon-q"></span>
+        </button>
         <!-- Process console. The desktop shell spawns the backend with no
              console window, so this is the only way to read what the agent and
              device layer are saying while a session is running. -->
