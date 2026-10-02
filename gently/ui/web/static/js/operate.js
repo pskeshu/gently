@@ -1845,7 +1845,7 @@ const OperateManager = (function () {
             // the row disappears immediately even before the event lands.
             _embryos = _embryos.filter(e => e.id !== id);
             if (_selected === id) {
-                _selected = _embryos.length ? _embryos[0].id : null;
+                _selected = null;   // the pick is gone; nothing else was picked (#140)
                 SharedState.set('selectedEmbryoId', _selected);
             }
             publishRoster(); renderSpimTarget(); renderSingle(); drawMarkers();
@@ -3081,17 +3081,19 @@ const OperateManager = (function () {
         setImg('op-img-spim', 'op-ph-spim', p);
     }
     function onEmbryosUpdate(p) {
+        const hadAny = _embryos.length > 0;
         _embryos = (p && Array.isArray(p.embryos)) ? p.embryos.slice() : [];
         if (_selected && !_embryos.some(e => e.id === _selected)) _selected = null;
         // Drop members that no longer exist, or the set silently targets ghosts
         // — the same class of bug as the phantom roster row in #126.
         const known = new Set(_embryos.map(e => e.id));
         _targets = _targets.filter(id => known.has(id));
-        // The embryo list is shared across all three panes; keep a live
-        // selection whenever it is non-empty so SPIM/Acquire aren't a dead-end
-        // ("No embryo selected") right after registering. The operator can still
-        // switch by clicking a registered embryo (bottom) or a roster row.
-        if (!_selected && _embryos.length) _selected = _embryos[0].id;
+        // The embryo list is shared across all three panes; on first population
+        // pick a live selection so SPIM/Acquire aren't a dead-end ("No embryo
+        // selected") right after registering. After that the selection is the
+        // operator's: an embryo the server drops from under it falls to none,
+        // it does not hop to embryo 1 with nobody touching the list (#140).
+        if (!_selected && !hadAny && _embryos.length) _selected = _embryos[0].id;
         if (!_targets.length && _selected) _targets = [_selected];
         SharedState.set('selectedEmbryoIds', _targets.slice());
         SharedState.set('selectedEmbryoId', _selected);

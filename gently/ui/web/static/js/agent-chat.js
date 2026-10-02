@@ -1157,8 +1157,6 @@ const AgentChat = (() => {
     function togglePanel(open) {
         panelOpen = (open === undefined) ? !panelOpen : open;
         panel.classList.toggle('open', panelOpen);
-        // Remember collapse state so a reload restores it (defaults to open).
-        try { localStorage.setItem('gently-chat-open', panelOpen ? '1' : '0'); } catch (_) {}
         if (railBtn) railBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
         if (panelOpen) {
             clearBadge();
@@ -1245,12 +1243,12 @@ const AgentChat = (() => {
             if (w) setChatWidth(w, false);
         } catch (_) {}
         // The agent panel is always docked — a real column that pushes content,
-        // not a float over it. It's open by default; the header Agent toggle /
-        // Ctrl+J / × collapse it to width 0 to reclaim space for the viewer.
+        // not a float over it. It is open on every load; the header Agent toggle /
+        // Ctrl+J / × collapse it to width 0 for this session only. The collapse
+        // used to be remembered, so one close made "open by default" false on
+        // that machine for good (#133).
         document.body.classList.add('chat-docked');
-        let open = true;
-        try { open = localStorage.getItem('gently-chat-open') !== '0'; } catch (_) {}
-        togglePanel(open);
+        togglePanel(true);
     }
 
     // Unseen-activity badge on the header toggle — so a closed panel still tells

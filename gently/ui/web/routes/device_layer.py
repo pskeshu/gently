@@ -197,7 +197,10 @@ def create_router(server) -> APIRouter:
                 status_code=409,
             )
 
-        return sup.stop(force=bool(body.get("force")))
+        # stop() blocks in proc.wait() under a lock for up to the grace period;
+        # keep it off the event loop (#117), as /api/shutdown already does, so
+        # the status polls and the "stopping" toast can land meanwhile.
+        return await asyncio.to_thread(sup.stop, force=bool(body.get("force")))
 
     # ── Whole-backend shutdown (desktop shell handshake, issue #85) ───────
 
