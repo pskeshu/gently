@@ -552,6 +552,27 @@ class FileStore:
         data["last_active"] = _now()
         _write_yaml(yaml_path, data)
 
+    def mark_advanced_diagnostics(self, session_id: str, since: str) -> bool:
+        """Record on the session that it was recorded with Advanced diagnostics
+        on, from ``since``. Set once, never cleared. Returns True if written.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return False
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return False
+        meta = data.get("metadata")
+        if not isinstance(meta, dict):
+            meta = data["metadata"] = {}
+        if meta.get("advanced_diagnostics"):
+            return False
+        meta["advanced_diagnostics"] = True
+        meta["advanced_diagnostics_since"] = since
+        _write_yaml(yaml_path, data)
+        return True
+
     def save_session_snapshot(self, session_id: str, snapshot: dict) -> None:
         """Write conversation.json in the session folder."""
         sd = self._require_session_dir(session_id)

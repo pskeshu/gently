@@ -62,6 +62,9 @@ def create_router(server) -> APIRouter:
                         "embryo_count": count,
                         "description": s.get("description", ""),
                         "active": sid == active_id,
+                        "advanced_diagnostics": bool(
+                            (s.get("metadata") or {}).get("advanced_diagnostics")
+                        ),
                     }
                 )
         except Exception as e:

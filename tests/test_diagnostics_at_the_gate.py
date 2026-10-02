@@ -208,7 +208,7 @@ class TestTheRecording:
             self._send(client, 10)
         said = " ".join(r.getMessage() for r in caplog.records)
         assert "dropping further frames" in said
-        assert "Start Gently with Diagnostics on" in said
+        assert "Start Gently with Advanced diagnostics on" in said
 
     def test_the_page_can_ask_what_it_is_held_to(self, rig):
         server, client, _ = rig

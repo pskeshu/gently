@@ -726,6 +726,7 @@ a.tab-link.active {
     padding: 1px 6px; border-radius: 999px;
 }
 .home-tag-live { color: var(--accent-green); border: 1px solid rgba(74, 222, 128, 0.4); }
+.home-tag-diag { color: var(--accent-purple); border: 1px solid rgba(167, 139, 250, 0.45); }
 .home-resume {
     flex: 0 0 auto;
     padding: 4px 11px; border-radius: 7px;
