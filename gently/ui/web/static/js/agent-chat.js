@@ -1,7 +1,7 @@
 /**
  * Floating agent-chat window — the web-side control surface.
  *
- * Connects to the same /ws/agent bridge the TUI uses, streams the agent's
+ * Connects to the /ws/agent bridge, streams the agent's
  * responses, and renders interactive choice pickers. A single-driver control
  * lock on the server arbitrates who may drive the microscope; this client
  * shows a banner and offers "Take control" when another client holds it.
@@ -623,7 +623,7 @@ const AgentChat = (() => {
                 break;
 
             default:
-                break;  // pong / state_update / browse_result / unknown — ignored
+                break;  // pong / state_update / unknown — ignored
         }
     }
 

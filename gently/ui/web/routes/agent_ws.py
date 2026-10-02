@@ -1,9 +1,9 @@
 """
 Agent WebSocket route — /ws/agent
 
-Provides the TUI ↔ agent bridge. The Ink TUI connects here
-to send chat messages and receive streaming responses, tool calls,
-choice pickers, command results, and notifications.
+The bridge between the browser's agent panel and the agent: chat
+messages in; streaming responses, tool calls, choice pickers, command
+results and notifications out.
 """
 
 import asyncio
@@ -362,7 +362,7 @@ def create_router(server) -> APIRouter:
         }
         await websocket.send_json(_connected_msg)
 
-        # Subscribe to mesh peer events so the TUI gets live peer counts
+        # Subscribe to mesh peer events so the client gets live peer counts
         _mesh_unsubs = []
         mesh_svc = getattr(server, "mesh_service", None)
         if mesh_svc is not None and server.event_bus is not None:
@@ -634,12 +634,12 @@ def create_router(server) -> APIRouter:
         _log_transcript("out", _connected_msg)
 
         async def send_fn(data: dict):
-            """Send a JSON message to the TUI client."""
+            """Send a JSON message to the client."""
             _log_transcript("out", data)
             try:
                 await websocket.send_json(data)
             except Exception:
-                logger.debug("Failed to send to TUI client")
+                logger.debug("Failed to send to client")
 
         def choice_future_factory(choice_data: dict) -> asyncio.Future:
             """Create a future for a choice request and send it to the client."""
@@ -794,7 +794,7 @@ def create_router(server) -> APIRouter:
                 try:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON from TUI: {raw[:100]}")
+                    logger.warning(f"Invalid JSON from client: {raw[:100]}")
                     continue
 
                 _log_transcript("in", data)
@@ -919,7 +919,7 @@ def create_router(server) -> APIRouter:
                             bridge.init_wizard(cs, cc)
                             w = bridge._wizard
 
-                            # Tell TUI we're entering wizard mode
+                            # Tell the client we're entering wizard mode
                             await send_fn(
                                 {
                                     "type": "command_result",
@@ -965,16 +965,6 @@ def create_router(server) -> APIRouter:
                                     "error": str(e),
                                 }
                             )
-
-                elif msg_type == "browse":
-                    target = data.get("target", "")
-                    await _handle_browse(
-                        target,
-                        data,
-                        server,
-                        bridge,
-                        send_fn,
-                    )
 
                 elif msg_type == "ping":
                     await websocket.send_json({"type": "pong"})
@@ -1036,182 +1026,6 @@ def create_router(server) -> APIRouter:
                 _choice_futures.clear()
 
     return router
-
-
-async def _handle_browse(target, data, server, bridge, send_fn):
-    """Handle browse requests from the TUI browser panel."""
-    try:
-        if target == "campaigns":
-            cs = getattr(server, "context_store", None)
-            if cs is None:
-                await send_fn({"type": "browse_result", "target": "campaigns", "data": []})
-                return
-
-            def serialize_campaign(c):
-                status_val = c.status.value if hasattr(c.status, "value") else str(c.status)
-                plan_status = cs.get_plan_status(c.id)
-                subcampaigns = cs.get_subcampaigns(c.id)
-                if subcampaigns:
-                    children = [serialize_campaign(s) for s in subcampaigns]
-                    items = []
-                else:
-                    children = []
-                    items_raw = cs.get_plan_items(campaign_id=c.id)
-                    items = [
-                        {
-                            "id": item.id,
-                            "title": item.title,
-                            "status": item.status.value
-                            if hasattr(item.status, "value")
-                            else str(item.status),
-                            "type": item.type.value
-                            if hasattr(item.type, "value")
-                            else str(item.type),
-                            "claimed_by_hostname": getattr(item, "claimed_by_hostname", None),
-                        }
-                        for item in items_raw
-                    ]
-                return {
-                    "id": c.id,
-                    "shorthand": c.shorthand or "",
-                    "description": c.description or "",
-                    "target": c.target or "",
-                    "status": status_val,
-                    "is_shared": bool(c.is_shared),
-                    "total": plan_status["total"],
-                    "completed": plan_status["completed"],
-                    "in_progress": plan_status["in_progress"],
-                    "subcampaigns": children,
-                    "items": items,
-                }
-
-            roots = cs.get_root_campaigns()
-            result = [serialize_campaign(c) for c in roots]
-            await send_fn({"type": "browse_result", "target": "campaigns", "data": result})
-
-        elif target == "peers":
-            mesh_svc = getattr(server, "mesh_service", None)
-            if mesh_svc is None:
-                await send_fn({"type": "browse_result", "target": "peers", "data": []})
-                return
-            peers = mesh_svc.get_peers()
-            result = []
-            for p in peers:
-                result.append(
-                    {
-                        "instance_id": p.instance_id,
-                        "hostname": p.hostname,
-                        "ip_address": p.ip_address,
-                        "viz_port": p.viz_port,
-                        "mode": p.status.agent_mode if p.status else "unknown",
-                        "embryo_count": p.status.embryo_count if p.status else 0,
-                        "is_trusted": p.is_trusted,
-                        "tls_enabled": p.tls_enabled,
-                        "shared_campaigns": [],
-                    }
-                )
-            await send_fn({"type": "browse_result", "target": "peers", "data": result})
-
-        elif target == "peer_campaigns":
-            hostname = data.get("hostname", "")
-            mesh_svc = getattr(server, "mesh_service", None)
-            if not mesh_svc or not hostname:
-                await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": []})
-                return
-            peer = mesh_svc.find_peer_by_hostname(hostname)
-            if not peer or not mesh_svc.peer_client:
-                await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": []})
-                return
-            info = await mesh_svc.peer_client.fetch_peer_info(peer)
-            shared = (info or {}).get("shared_campaigns", [])
-            # Return peers list with this peer's campaigns populated
-            peers = mesh_svc.get_peers()
-            result = []
-            for p in peers:
-                campaigns = []
-                if p.instance_id == peer.instance_id:
-                    for c in shared:
-                        campaigns.append(
-                            {
-                                "id": c.get("id", ""),
-                                "shorthand": c.get("shorthand", ""),
-                                "description": c.get("description", ""),
-                                "total": c.get("item_count", 0),
-                                "completed": c.get("completed_count", 0),
-                                "items": [],
-                            }
-                        )
-                result.append(
-                    {
-                        "instance_id": p.instance_id,
-                        "hostname": p.hostname,
-                        "ip_address": p.ip_address,
-                        "viz_port": p.viz_port,
-                        "mode": p.status.agent_mode if p.status else "unknown",
-                        "embryo_count": p.status.embryo_count if p.status else 0,
-                        "is_trusted": p.is_trusted,
-                        "tls_enabled": p.tls_enabled,
-                        "shared_campaigns": campaigns,
-                    }
-                )
-            await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": result})
-
-        elif target == "peer_campaign_items":
-            hostname = data.get("hostname", "")
-            campaign_id = data.get("campaign_id", "")
-            mesh_svc = getattr(server, "mesh_service", None)
-            if not mesh_svc or not hostname or not campaign_id:
-                await send_fn(
-                    {
-                        "type": "browse_result",
-                        "target": "peer_campaign_items",
-                        "data": [],
-                    }
-                )
-                return
-            peer = mesh_svc.find_peer_by_hostname(hostname)
-            if not peer or not mesh_svc.peer_client:
-                await send_fn(
-                    {
-                        "type": "browse_result",
-                        "target": "peer_campaign_items",
-                        "data": [],
-                    }
-                )
-                return
-            export = await mesh_svc.peer_client.fetch_campaign_export(peer, campaign_id)
-            if not export:
-                await send_fn(
-                    {
-                        "type": "browse_result",
-                        "target": "peer_campaign_items",
-                        "data": [],
-                    }
-                )
-                return
-            items = []
-            for item in export.get("items", []):
-                items.append(
-                    {
-                        "id": item.get("id", ""),
-                        "title": item.get("title", ""),
-                        "status": item.get("status", "planned"),
-                        "claimed_by_hostname": item.get("claimed_by_hostname"),
-                    }
-                )
-            await send_fn(
-                {
-                    "type": "browse_result",
-                    "target": "peer_campaign_items",
-                    "data": items,
-                    "campaign_id": campaign_id,
-                    "hostname": hostname,
-                }
-            )
-
-    except Exception as e:
-        logger.debug(f"Browse error ({target}): {e}")
-        await send_fn({"type": "browse_result", "target": target, "data": []})
 
 
 _request_counter = 0
