@@ -4,10 +4,23 @@
    shared free-text ("Something else…") escape styling. Only #ask-stage is
    gated behind the flag, so loading this CSS unconditionally is harmless. */
 
-.ask-stage { margin: 14px 16px 0; }
+/* Out of the workspace's flow: a zero-height row whose card overflows over the
+   content below it, so asking a question does not push the instrument around
+   (#131). Needs no positioned ancestor, so the rail and the strip keep their
+   place whatever the shell does. */
+.ask-stage {
+    position: relative;
+    z-index: 40;
+    height: 0;
+    min-height: 0;
+    flex: 0 0 0;
+    overflow: visible;
+    margin: 0 16px;
+}
 .ask-stage.hidden { display: none; }
 
 .ask-stage .ac-choice {
+    margin-top: 14px;
     border: 1px solid var(--border, #e4e9f0);
     border-radius: 14px;
     padding: 16px 18px;
