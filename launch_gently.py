@@ -5,8 +5,7 @@ Launch the Microscopy Agent
 Conversational AI agent for diSPIM microscope control.
 
 Starts the agent + web visualization server, then opens the browser UI.
-The web UI is the control surface (the legacy Ink TUI is retired — its
-source is kept in the tree but no longer launched).
+The web UI is the control surface; the Ink TUI it replaced is gone.
 
 Usage:
     python launch_gently.py                      # Start server + open browser
@@ -26,7 +25,6 @@ import asyncio
 import logging
 import os
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -80,7 +78,7 @@ def _format_elapsed(last_active: str) -> str:
 
 
 def _build_session_items(store: FileStore) -> list:
-    """Build a list of session dicts for the Ink picker."""
+    """Build a list of session dicts for --sessions."""
     sessions = store.list_sessions()
     items = []
     for session in sessions:
@@ -196,36 +194,6 @@ def _open_browser(url: str) -> None:
         webbrowser.open(url)
     except Exception:
         pass
-
-
-def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
-    """
-    Spawn the Ink TUI in session-picker mode and capture the selection.
-
-    Retired: kept for reference / potential reuse by a future web session
-    picker. No longer called by the launcher.
-
-    Returns the selected session ID, or None for a new session.
-    """
-    proc = subprocess.run(
-        ["node", str(tui_dist), "--pick-session", sessions_json],
-        stdin=sys.stdin,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-        text=True,
-    )
-
-    # Clear the screen so the picker output doesn't linger
-    # when the main TUI takes over.
-    os.system("cls" if os.name == "nt" else "clear")
-
-    # Parse the SESSION:<id> protocol line from stdout
-    for line in (proc.stdout or "").splitlines():
-        if line.startswith("SESSION:"):
-            selected = line[len("SESSION:") :].strip()
-            return selected if selected else None
-
-    return None
 
 
 # launch_gently runs as `__main__`, whose logger is not wired to the configured

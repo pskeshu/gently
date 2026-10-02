@@ -174,11 +174,6 @@ The device layer exposes status information:
 - **Stage movement errors**: Position is outside device limits. Check the limits table above
 - **Piezo calibration fails**: The scan range may exceed piezo limits (±200 μm). Reduce `num_slices` or amplitude
 
-### TUI won't launch
-
-- **"TUI not available"**: Run `cd gently/tui && npm install && npm run build`
-- **Node not found**: Install Node.js 18+ and ensure `node` is on your PATH
-
 ## Environment Variables
 
 | Variable | Default | Purpose |

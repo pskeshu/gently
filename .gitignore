@@ -62,10 +62,6 @@ dmypy.json
 # Napari/Qt
 *.qss
 
-# Node.js / TUI
-gently/tui/node_modules/
-gently/tui/dist/
-
 # Database
 *.db
 *.sqlite
@@ -143,8 +139,6 @@ electron/
 # Root-level one-off documents
 /stage_definitions_for_review.pdf
 /stage_definitions_for_review.txt
-gently/ui/tui/node_modules/
-gently/ui/tui/dist/
 
 # Stray local storage: GENTLY_STORAGE_PATH default (D:\Gently3) resolves
 # literally to ./D:/ under the repo on Linux. Not data we track.
