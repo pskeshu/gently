@@ -1,0 +1,142 @@
+/* The agent's question while the chat is collapsed (ask-overlay.js): a beacon
+   in the header that carries the question until it is answered, and the same
+   card the chat shows above its composer, centred over a dimmed workspace, on
+   demand. The card markup is .ac-choice from agent-chat.css; this file frames
+   the beacon and the overlay and holds the ask-card extras shared by every
+   surface (the free-text escape, the provenance tag). */
+
+/* ── Beacon ──────────────────────────────────────────────────────────────── */
+.ask-beacon {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 360px;
+    padding: 4px 12px 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--accent, #2f6df6);
+    background: var(--bg-card, #fff);
+    color: var(--text, #0f172a);
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 1.3;
+    cursor: pointer;
+}
+.ask-beacon:hover { background: var(--bg-hover, #f1f5f9); }
+.ask-beacon.hidden { display: none; }
+.ask-beacon-dot {
+    flex: 0 0 auto;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent, #2f6df6);
+    animation: ask-pulse 1.4s ease-out infinite;
+}
+.ask-beacon-label { flex: 0 0 auto; font-weight: 600; }
+.ask-beacon-q {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted, #475569);
+}
+@keyframes ask-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(47, 109, 246, 0.55); }
+    70%  { box-shadow: 0 0 0 7px rgba(47, 109, 246, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(47, 109, 246, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ask-beacon-dot { animation: none; }
+}
+
+/* ── Overlay ─────────────────────────────────────────────────────────────── */
+/* Above the header and the panels, below toasts (which start at 9999). */
+.ask-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ask-overlay.hidden { display: none; }
+.ask-overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.38);
+}
+.ask-overlay-dialog {
+    position: relative;
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    padding: 14px 16px 12px;
+    border: 1px solid var(--border, #e4e9f0);
+    border-radius: 14px;
+    background: var(--bg-card, #fff);
+    color: var(--text, #0f172a);
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.28);
+}
+.ask-overlay-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+.ask-overlay-close {
+    border: 0;
+    background: none;
+    color: var(--text-muted, #64748b);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+.ask-overlay-close:hover { color: var(--text, #0f172a); }
+.ask-overlay-dialog .ac-choice-q { font-size: 1.02rem; font-weight: 600; }
+.ask-overlay-open-chat {
+    margin-top: 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent, #2f6df6);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.ask-overlay-open-chat:hover { text-decoration: underline; }
+
+/* ── Shared ask-card extras ──────────────────────────────────────────────── */
+/* Free-text "Something else…" escape — present on ask cards on every surface. */
+.ac-choice-otherwrap { margin-top: 6px; }
+.ac-choice-other.hidden,
+.ac-choice-otherform.hidden { display: none; }
+.ac-choice-otherform { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.ac-choice-otherinput {
+    flex: 1; min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 8px;
+    font: inherit;
+    background: var(--surface, #fff);
+    color: inherit;
+}
+.ac-choice-otherinput:focus { outline: none; border-color: var(--accent, #2f6df6); }
+.ac-choice-othergo {
+    border: 0; cursor: pointer;
+    background: var(--accent, #2f6df6); color: #fff;
+    border-radius: 8px; padding: 8px 12px; line-height: 1;
+}
+
+/* Per-field provenance tag on imaging-spec rows (Phase 3b): shows where an
+   inferred value came from, e.g. "inferred · medium". */
+.ac-spec-src {
+    margin-left: 6px;
+    font-size: 10px;
+    letter-spacing: .02em;
+    color: var(--text-muted, #94a3b8);
+    background: var(--bg-hover, #f1f5f9);
+    border-radius: 999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    vertical-align: middle;
+}

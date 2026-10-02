@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
     <link rel="stylesheet" href="/static/css/agent-chat.css">
-    <link rel="stylesheet" href="/static/css/ask-stage.css">
+    <link rel="stylesheet" href="/static/css/ask-overlay.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <link rel="stylesheet" href="/static/css/notebook.css">
     <link rel="stylesheet" href="/static/css/operate.css">
@@ -101,9 +101,6 @@
     <div class="app-main">
 
     {% if ux_v2 %}<div class="v2-strip" id="v2-strip"><span class="v2-strip-live"><span class="v2-strip-dot"></span>LIVE</span><span class="diag-badge" id="diag-badge" hidden title="Gently was started with Diagnostics on: the recording is kept in full and the log files are in detail. It uses more disk. It is a switch on the launch gate.">Diagnostics</span><span class="v2-strip-status" id="v2-strip-status"></span></div>{% endif %}
-
-    {# ux_v2: the agent's current pending ask, dual-rendered here + in the chat. #}
-    {% if ux_v2 %}<div id="ask-stage" class="ask-stage hidden" aria-live="polite"></div>{% endif %}
 
     <!-- Calibration Tab -->
     <!-- Home Tab (landing) -->
@@ -1776,6 +1773,22 @@
 
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/logconsole.js"></script>
+    {# The agent's question, on demand, while the chat is collapsed: the same
+       card the chat shows above its composer, centred over a dimmed
+       workspace. Opened from the header beacon; Esc or a click outside
+       puts it back to the beacon. ask-overlay.js owns it. #}
+    <div id="ask-overlay" class="ask-overlay hidden" role="dialog" aria-labelledby="ask-overlay-title">
+        <div class="ask-overlay-backdrop" data-dismiss></div>
+        <div class="ask-overlay-dialog">
+            <div class="ask-overlay-head">
+                <span id="ask-overlay-title">Gently is asking</span>
+                <button class="ask-overlay-close" type="button" data-dismiss title="Put away (Esc)" aria-label="Put the question away">×</button>
+            </div>
+            <div id="ask-overlay-card"></div>
+            <button class="ask-overlay-open-chat" type="button">open the chat ›</button>
+        </div>
+    </div>
+
     <script src="/static/js/event-bus.js"></script>
     <script src="/static/js/settings-store.js"></script>
     <script src="/static/js/status-store.js"></script>
@@ -1819,7 +1832,7 @@
     <script src="/static/js/campaigns.js"></script>
     <script src="/static/js/review.js"></script>
     <script src="/static/js/agent-chat.js"></script>
-    <script src="/static/js/ask-stage.js"></script>
+    <script src="/static/js/ask-overlay.js"></script>
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/context-surface.js"></script>
     <!-- The Atrium spatial shell. Inert unless ?atrium=1. docs/atrium/SPEC.md -->
