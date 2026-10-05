@@ -1347,19 +1347,20 @@ function esc(str) { return escapeHtml(str); }
 
 const STATUS_COLORS = {
     planned: 'var(--text-muted)',
-    in_progress: 'var(--accent)',
-    completed: 'var(--accent-green)',
+    in_progress: 'var(--accent-green)',
+    completed: 'var(--accent)',
     skipped: 'var(--text-muted)',
-    blocked: '#f85149',
+    blocked: 'var(--accent-red)',
 };
 
 // Timeline-only: tint bars by task type so the filter highlight has something to pop.
+// Okabe-Ito categorical set (colorblind-safe); bars also carry TYPE_ICONS.
 const TYPE_COLORS = {
-    imaging: '#3b82f6',          // blue
-    bench: '#10b981',            // green
-    genetics: '#a855f7',         // purple
-    analysis: '#06b6d4',         // cyan
-    decision_point: '#f59e0b',   // amber
+    imaging: '#0072b2',          // blue
+    bench: '#009e73',            // bluish green
+    genetics: '#cc79a7',         // reddish purple
+    analysis: '#e69f00',         // orange
+    decision_point: '#f0e442',   // yellow
 };
 
 function setupPlanViewSwitcher() {
@@ -1717,7 +1718,7 @@ function renderMatrixView() {
             if (count === 0) {
                 html += '<td class="matrix-cell empty">—</td>';
             } else {
-                const dots = matching.map(i => `<span class="matrix-dot" style="background:${STATUS_COLORS[i.status]}" title="${esc(i.title)}"></span>`).join('');
+                const dots = matching.map(i => `<span class="matrix-dot" style="background:none;width:auto;height:auto;color:${STATUS_COLORS[i.status]};font-size:10px;line-height:1" title="${esc(i.title)}">${STATUS_DOTS[i.status] || '\u25CB'}</span>`).join('');
                 html += `<td class="matrix-cell">${dots}<span class="matrix-count">${count}</span></td>`;
             }
         });
@@ -1841,7 +1842,7 @@ function renderTimelinePlanView() {
                                        (statusAccent ? `;box-shadow:inset 4px 0 0 ${statusAccent}` : '');
                         return `<div class="tl-bar${dim}" style="${styles}"
                                      data-action="select-item" data-id="${item.id}" title="Day ${start + 1}–${start + dur}: ${esc(item.title)} (${dur}d)">
-                            ${dur > 1 ? `<span class="tl-bar-text">${dur}d</span>` : ''}
+                            <span class="tl-bar-text">${icon}${dur > 1 ? ` ${dur}d` : ''}</span>
                         </div>`;
                     }).join('')}
                 </div>

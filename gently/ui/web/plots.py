@@ -136,7 +136,9 @@ def generate_focus_curve_plot(
     unit, unit_label = _thousands(scores)
 
     # Data points
-    ax.scatter(positions, scores / unit, c="#2196F3", s=70, zorder=3, label="Measurements")
+    ax.scatter(
+        positions, scores / unit, c="#0072b2", marker="o", s=70, zorder=3, label="Measurements"
+    )
 
     # Gaussian fit curve
     if fit_params is not None and len(fit_params) >= 4:
@@ -146,7 +148,8 @@ def generate_focus_curve_plot(
         ax.plot(
             x_fit,
             y_fit / unit,
-            color="#F44336",
+            color="#d55e00",
+            linestyle="-",
             linewidth=2,
             label=f"Gaussian fit (R²={r_squared:.3f})",
         )
@@ -154,7 +157,7 @@ def generate_focus_curve_plot(
     # Best position marker
     ax.axvline(
         best_position,
-        color="#4CAF50",
+        color="#009e73",
         linestyle="--",
         linewidth=2,
         label=f"Best: {best_position:.2f} µm",
@@ -223,7 +226,7 @@ def generate_calibration_summary_plot(
     # Calibration points
     galvos = [galvo_top, galvo_bottom]
     piezos = [piezo_top, piezo_bottom]
-    ax.scatter(galvos, piezos, c="#2196F3", s=100, zorder=3, label="Calibration points")
+    ax.scatter(galvos, piezos, c="#0072b2", marker="o", s=100, zorder=3, label="Calibration points")
 
     # Linear fit line
     margin = 0.05
@@ -236,7 +239,8 @@ def generate_calibration_summary_plot(
     ax.plot(
         galvo_range,
         piezo_fit,
-        color="#F44336",
+        color="#d55e00",
+        linestyle="-",
         linewidth=2,
         label=f"piezo = {slope:.1f}·galvo + {offset:.1f}",
     )
@@ -316,12 +320,20 @@ def generate_edge_detection_plot(
     vis_numeric = [1 if v else 0 for v in visibility]
 
     # Plot visibility as step function
-    colors = ["#4CAF50" if v else "#F44336" for v in visibility]
-    ax.scatter(galvo_positions, vis_numeric, c=colors, s=80, zorder=3)
+    # Colour + marker shape: visible = green circle, not visible = vermilion cross
+    for vis, marker, color, label in (
+        (True, "o", "#009e73", "Visible"),
+        (False, "x", "#d55e00", "Not visible"),
+    ):
+        xs = [g for g, v in zip(galvo_positions, visibility, strict=True) if bool(v) == vis]
+        if xs:
+            ax.scatter(
+                xs, [int(vis)] * len(xs), c=color, marker=marker, s=80, zorder=3, label=label
+            )
 
     # Draw step-like connecting lines
     for i in range(len(galvo_positions) - 1):
-        color = "#4CAF50" if visibility[i] else "#F44336"
+        color = "#009e73" if visibility[i] else "#d55e00"
         ax.hlines(
             vis_numeric[i],
             galvo_positions[i],
@@ -335,7 +347,7 @@ def generate_edge_detection_plot(
     if edge_top is not None:
         ax.axvline(
             edge_top,
-            color="#2196F3",
+            color="#0072b2",
             linestyle="--",
             linewidth=2,
             label=f"Top edge: {edge_top:.3f}°",
@@ -343,8 +355,8 @@ def generate_edge_detection_plot(
     if edge_bottom is not None:
         ax.axvline(
             edge_bottom,
-            color="#FF9800",
-            linestyle="--",
+            color="#e69f00",
+            linestyle="-.",
             linewidth=2,
             label=f"Bottom edge: {edge_bottom:.3f}°",
         )
@@ -354,8 +366,7 @@ def generate_edge_detection_plot(
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["No", "Yes"])
     ax.set_title(f"{embryo_id} - Edge Detection")
-    if edge_top is not None or edge_bottom is not None:
-        ax.legend(loc="best", framealpha=0.9)
+    ax.legend(loc="best", framealpha=0.9)
     ax.grid(True, alpha=0.3, axis="x")
 
     return _finish(fig)

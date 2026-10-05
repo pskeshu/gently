@@ -785,7 +785,8 @@ const ExperimentOverview = {
             const color  = (roleInfo && roleInfo.ui_color) || '#8b949e';
             const bg     = this._hexToRgba(color, 0.12);
             const border = this._hexToRgba(color, 0.35);
-            return `<span class="ops-scope-chip" style="color:${ESC(color)};background:${bg};border-color:${border}">role: ${ESC(role)}</span>`;
+            const glyph  = this._roleGlyph(roleInfo);
+            return `<span class="ops-scope-chip" style="color:${ESC(color)};background:${bg};border-color:${border}">role: ${glyph ? glyph + ' ' : ''}${ESC(role)}</span>`;
         }
         if (scope.mode === 'embryos') {
             const ids = (scope.embryo_ids || []).join(', ');
@@ -1063,6 +1064,12 @@ const ExperimentOverview = {
         }
     },
 
+    // Role ui_icon name -> glyph (mirrors strategy_snapshot.py _ROLE_ICONS). '' when unknown.
+    _roleGlyph(roleInfo) {
+        const G = { star: '\u2605', diamond: '\u25C6', circle: '\u25CF', triangle: '\u25B2', square: '\u25A0' };
+        return (roleInfo && G[roleInfo.ui_icon]) || '';
+    },
+
     // Convert a hex color (#rrggbb) to rgba(r,g,b,alpha) for inline styles.
     _hexToRgba(hex, alpha) {
         const h = (hex || '#888888').replace('#', '');
@@ -1115,9 +1122,11 @@ const ExperimentOverview = {
                 .filter(e => e.role === role)
                 .map(e => e.embryo_id)
                 .join(', ');
+            const glyph = this._roleGlyph(roleInfo);
+            const roleLabel = `${glyph ? glyph + ' ' : ''}${ESC(role)}`;
             const label = matchIds
-                ? `→ ${ESC(role)} · ${ESC(matchIds)}`
-                : `→ ${ESC(role)}`;
+                ? `→ ${roleLabel} · ${ESC(matchIds)}`
+                : `→ ${roleLabel}`;
             const bg = this._hexToRgba(color, 0.12);
             const border = this._hexToRgba(color, 0.35);
             return `<span class="ops-scope-badge" style="color:${ESC(color)};background:${bg};border-color:${border}">${label}</span>`;
@@ -1178,7 +1187,7 @@ const ExperimentOverview = {
                 const roleEmbyros = byRole[role];
                 const roleInfo = rolesMap.get(role);
                 const uiColor = (roleInfo && roleInfo.ui_color) || '#8b949e';
-                const uiIcon  = (roleInfo && roleInfo.ui_icon)  || '';
+                const uiIcon  = this._roleGlyph(roleInfo);
                 const bgRgba  = this._hexToRgba(uiColor, 0.08);
                 const ids = roleEmbyros.map(e => e.embryo_id).join(', ');
 
@@ -1205,7 +1214,7 @@ const ExperimentOverview = {
 
                 return `<div class="ops-role-group">
                     <div class="ops-role-header" style="border-left-color:${ESC(uiColor)};background:${bgRgba}">
-                        <span class="ops-role-name" style="color:${ESC(uiColor)}">${ESC(role.toUpperCase())}</span>
+                        <span class="ops-role-name" style="color:${ESC(uiColor)}">${uiIcon ? uiIcon + ' ' : ''}${ESC(role.toUpperCase())}</span>
                         <span class="ops-role-sep">·</span>
                         <span class="ops-role-count">${roleEmbyros.length} embryo${roleEmbyros.length !== 1 ? 's' : ''}</span>
                         <span class="ops-role-ids">${ESC(ids)}</span>

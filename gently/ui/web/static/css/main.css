@@ -14,14 +14,25 @@
     --text: #c9d1d9;
     --text-muted: #8b949e;
 
-    /* Modern/playful accent colors - brighter and more vibrant */
+    /* Accent colors. The five STATUS hues are chosen so every pair stays
+       apart under protanopia, deuteranopia and tritanopia (checked by
+       tools/cvd_check.py, enforced by tests/test_colorblind_tokens.py):
+         green = live / running / ok        amber = paused / warning
+         blue  = done / complete / selected red   = error / blocked / emitting
+         grey  = idle / planned
+       Purple is NOT a status colour: it means AI-authored / perception only.
+       Colour is never the only cue — see the STATUS SHAPES section. */
     --accent: #60a5fa;
     --accent-hover: #93c5fd;
-    --accent-green: #4ade80;
+    --accent-green: #3ee6b0;
+    --accent-amber: #fbbf24;
+    --accent-red: #f0405a;
     --accent-purple: #c084fc;
     --accent-orange: #fb923c;
     --accent-pink: #f472b6;
     --accent-cyan: #22d3ee;
+    --text-secondary: var(--text-muted);
+    --accent-soft: rgba(96, 165, 250, 0.12);
 
     /* Temperature graph colors (root-level so the graph is portable outside
        .devices-container-map — e.g. when reused in manual mode) */
@@ -32,7 +43,7 @@
 
     /* Gradients for modern feel */
     --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
-    --gradient-success: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
+    --gradient-success: linear-gradient(135deg, var(--accent-green) 0%, var(--accent-cyan) 100%);
     --gradient-warm: linear-gradient(135deg, #fb923c 0%, #f472b6 100%);
 
     /* Shadows */
@@ -57,29 +68,34 @@
     --bg-hover: #f1f5f9;
     --border: #e2e8f0;
 
-    /* Text */
+    /* Text. Muted is a violet-grey rather than slate: slate collapses into
+       the status green under deuteranopia (tools/cvd_check.py). */
     --text: #1e293b;
-    --text-muted: #64748b;
+    --text-muted: #5a5a7c;
 
-    /* Slightly deeper accents for light mode contrast */
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-green: #22c55e;
-    --accent-purple: #a855f7;
-    --accent-orange: #f97316;
-    --accent-pink: #ec4899;
-    --accent-cyan: #06b6d4;
+    /* Deeper accents: every one of these clears 4.5:1 as text on white */
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-green: #138669;
+    --accent-amber: #a16207;
+    --accent-red: #9f1239;
+    --accent-purple: #7e22ce;
+    --accent-orange: #c2410c;
+    --accent-pink: #be185d;
+    --accent-cyan: #0e7490;
+    --text-secondary: var(--text-muted);
+    --accent-soft: #eaf1ff;
 
     /* Temperature graph colors (root-level; see dark block) */
-    --temp-setpoint-color: #f59e0b;
+    --temp-setpoint-color: #a16207;
     --temp-water-color: #0e7490;
     --temp-grid-line-color: rgba(29, 43, 58, 0.22);
     --temp-grid-label-color: #6b7280;
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
-    --gradient-success: linear-gradient(135deg, #22c55e 0%, #06b6d4 100%);
-    --gradient-warm: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+    --gradient-primary: linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%);
+    --gradient-success: linear-gradient(135deg, var(--accent-green) 0%, var(--accent-cyan) 100%);
+    --gradient-warm: linear-gradient(135deg, var(--accent-orange) 0%, var(--accent-pink) 100%);
 
     /* Shadows - softer for light mode */
     --shadow-glow: 0 4px 20px rgba(59, 130, 246, 0.15);
@@ -254,11 +270,11 @@ body {
 }
 
 .header-status .status-indicator.paused {
-    background: var(--accent-orange);
+    background: var(--accent-amber);
 }
 
 .header-status .status-indicator.completed {
-    background: var(--accent-purple);
+    background: var(--accent);
 }
 
 .header-status .status-text {
@@ -366,7 +382,7 @@ body {
 }
 
 .status-dot.connected { background: var(--accent-green); opacity: 1; }
-.status-dot.partial { background: var(--accent-green); opacity: 1; }
+.status-dot.partial { background: var(--accent-amber); opacity: 1; }
 
 /* Status button & popover */
 .status-button-wrapper {
@@ -465,7 +481,7 @@ body {
 
 .status-badge.online {
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
 }
 
 .status-badge.offline {
@@ -725,7 +741,7 @@ a.tab-link.active {
     font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     padding: 1px 6px; border-radius: 999px;
 }
-.home-tag-live { color: var(--accent-green); border: 1px solid rgba(74, 222, 128, 0.4); }
+.home-tag-live { color: var(--accent-green); border: 1px solid color-mix(in srgb, var(--accent-green) 40%, transparent); }
 .home-tag-diag { color: var(--accent-purple); border: 1px solid rgba(167, 139, 250, 0.45); }
 .home-resume {
     flex: 0 0 auto;
@@ -998,8 +1014,8 @@ a.tab-link.active {
 }
 
 .gallery-item.best-focus {
-    border: 2px solid #22c55e;
-    box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
+    border: 2px solid var(--accent-green);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .gallery-img {
@@ -1705,7 +1721,7 @@ a.tab-link.active {
 }
 
 .card-type-badge.done {
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     color: var(--accent-green);
 }
 
@@ -1837,11 +1853,11 @@ a.tab-link.active {
 }
 
 .timeline-event.session { background: rgba(96, 165, 250, 0.2); color: var(--accent); }
-.timeline-event.acquisition { background: rgba(74, 222, 128, 0.2); color: var(--accent-green); }
+.timeline-event.acquisition { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
 .timeline-event.perception { background: rgba(192, 132, 252, 0.2); color: var(--accent-purple); }
 .timeline-event.cv { background: rgba(34, 211, 238, 0.2); color: var(--accent-cyan); }
 .timeline-event.analysis { background: rgba(244, 114, 182, 0.2); color: var(--accent-pink); }
-.timeline-event.error { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+.timeline-event.error { background: color-mix(in srgb, var(--accent-red) 15%, transparent); color: var(--accent-red); }
 .timeline-event.default { background: var(--bg-hover); color: var(--text-muted); }
 
 .timeline-event.selected {
@@ -1969,7 +1985,7 @@ a.tab-link.active {
 .summary-card.session .summary-card-bar-fill { background: var(--accent); }
 .summary-card.acquisition .summary-card-bar-fill { background: var(--accent-green); }
 .summary-card.perception .summary-card-bar-fill { background: var(--accent-purple); }
-.summary-card.error .summary-card-bar-fill { background: #f85149; }
+.summary-card.error .summary-card-bar-fill { background: var(--accent-red); }
 .summary-card.sources .summary-card-bar-fill { background: var(--accent-cyan); }
 .summary-card.uptime .summary-card-bar-fill { background: var(--accent-orange); }
 
@@ -2087,12 +2103,12 @@ a.tab-link.active {
     font-weight: 500;
 }
 
-.event-type-badge.cv { background: rgba(124, 58, 237, 0.2); color: #a371f7; }
-.event-type-badge.perception { background: rgba(192, 132, 252, 0.2); color: #c084fc; }
-.event-type-badge.analysis { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
-.event-type-badge.acquisition { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
-.event-type-badge.session { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
-.event-type-badge.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+.event-type-badge.cv { background: rgba(34, 211, 238, 0.2); color: var(--accent-cyan); }
+.event-type-badge.perception { background: rgba(192, 132, 252, 0.2); color: var(--accent-purple); }
+.event-type-badge.analysis { background: rgba(244, 114, 182, 0.2); color: var(--accent-pink); }
+.event-type-badge.acquisition { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
+.event-type-badge.session { background: rgba(96, 165, 250, 0.2); color: var(--accent); }
+.event-type-badge.error { background: color-mix(in srgb, var(--accent-red) 20%, transparent); color: var(--accent-red); }
 .event-type-badge.default { background: var(--bg-hover); color: var(--text-muted); }
 
 /* Log-record badges per level. The level is the badge text (DEBUG / INFO /
@@ -2100,14 +2116,14 @@ a.tab-link.active {
    the level so the column doesn't read the same string for every line. */
 .event-type-badge.log-debug { background: rgba(125, 134, 145, 0.18); color: #9ba3b0; }
 .event-type-badge.log-info  { background: rgba(88, 166, 255, 0.16); color: var(--accent); }
-.event-type-badge.log-warn  { background: rgba(210, 153, 34, 0.22); color: var(--accent-orange); }
-.event-type-badge.log-error { background: rgba(248, 81, 73, 0.22); color: #f85149; }
+.event-type-badge.log-warn  { background: color-mix(in srgb, var(--accent-amber) 22%, transparent); color: var(--accent-amber); }
+.event-type-badge.log-error { background: color-mix(in srgb, var(--accent-red) 22%, transparent); color: var(--accent-red); }
 
 /* Log line message: monospace, faint logger prefix, expandable trace. */
 .log-row .event-data { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .log-logger { color: var(--text-muted); opacity: 0.85; margin-right: 0.5rem; }
 .log-message { color: var(--text); }
-.log-exc { color: #f85149; opacity: 0.85; }
+.log-exc { color: var(--accent-red); opacity: 0.85; }
 
 .event-source {
     color: var(--text-muted);
@@ -2221,8 +2237,8 @@ a.tab-link.active {
 }
 
 .lightbox-close:hover {
-    background: rgba(248, 81, 73, 0.15);
-    color: #f85149;
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+    color: var(--accent-red);
 }
 
 .lightbox-close:active {
@@ -2980,8 +2996,8 @@ tr.has-image:hover {
 }
 
 .shortcuts-close:hover {
-    background: rgba(248, 81, 73, 0.15);
-    color: #f85149;
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+    color: var(--accent-red);
 }
 
 .shortcuts-body {
@@ -3119,8 +3135,8 @@ kbd {
 }
 
 .projection-viewer-close:hover {
-    background: rgba(248, 81, 73, 0.15);
-    color: #f85149;
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+    color: var(--accent-red);
 }
 
 .projection-viewer-body {
@@ -3146,7 +3162,7 @@ kbd {
     justify-content: center;
     height: 100%;
     min-height: 200px;
-    color: #f85149;
+    color: var(--accent-red);
     text-align: center;
 }
 
@@ -3432,12 +3448,12 @@ kbd {
 }
 
 .ambient-pulse.warning {
-    border-color: rgba(251, 146, 60, 0.25);
+    border-color: color-mix(in srgb, var(--accent-amber) 25%, transparent);
     animation: ambientWarn 4s ease-in-out infinite;
 }
 
 .ambient-pulse.critical {
-    border-color: rgba(239, 68, 68, 0.4);
+    border-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
     animation: ambientCrit 2s ease-in-out infinite;
 }
 
@@ -3446,19 +3462,19 @@ kbd {
 }
 
 @keyframes ambientWarn {
-    0%, 100% { box-shadow: inset 0 0 30px rgba(251, 146, 60, 0.05); }
-    50% { box-shadow: inset 0 0 60px rgba(251, 146, 60, 0.12); }
+    0%, 100% { box-shadow: inset 0 0 30px color-mix(in srgb, var(--accent-amber) 5%, transparent); }
+    50% { box-shadow: inset 0 0 60px color-mix(in srgb, var(--accent-amber) 12%, transparent); }
 }
 
 @keyframes ambientCrit {
-    0%, 100% { box-shadow: inset 0 0 40px rgba(239, 68, 68, 0.08); }
-    50% { box-shadow: inset 0 0 80px rgba(239, 68, 68, 0.2); }
+    0%, 100% { box-shadow: inset 0 0 40px color-mix(in srgb, var(--accent-red) 8%, transparent); }
+    50% { box-shadow: inset 0 0 80px color-mix(in srgb, var(--accent-red) 20%, transparent); }
 }
 
 @keyframes ambientHatch {
-    0% { box-shadow: inset 0 0 0 rgba(74, 222, 128, 0); border-color: transparent; }
-    50% { box-shadow: inset 0 0 100px rgba(74, 222, 128, 0.15); border-color: rgba(74, 222, 128, 0.4); }
-    100% { box-shadow: inset 0 0 0 rgba(74, 222, 128, 0); border-color: transparent; }
+    0% { box-shadow: inset 0 0 0 transparent; border-color: transparent; }
+    50% { box-shadow: inset 0 0 100px color-mix(in srgb, var(--accent-green) 15%, transparent); border-color: color-mix(in srgb, var(--accent-green) 40%, transparent); }
+    100% { box-shadow: inset 0 0 0 transparent; border-color: transparent; }
 }
 
 /* ========================================
@@ -3494,16 +3510,16 @@ kbd {
 .board-col-spark { flex: 1; min-width: 100px; }
 .board-col-alert { width: 110px; flex-shrink: 0; text-align: right; }
 
-/* Pace cell coloring — green when on reference, orange when slow,
+/* Pace cell coloring — green when on reference, amber when slow,
    red when seriously slow. Class names mirror _formatPace(). */
 .board-col-pace.pace-unknown { color: var(--text-muted); }
-.board-col-pace.pace-normal  { color: var(--accent-green, #4ade80); }
-.board-col-pace.pace-slow    { color: #fb923c; }
-.board-col-pace.pace-slow-bad { color: #f87171; font-weight: 600; }
+.board-col-pace.pace-normal  { color: var(--accent-green); }
+.board-col-pace.pace-slow    { color: var(--accent-amber); }
+.board-col-pace.pace-slow-bad { color: var(--accent-red); font-weight: 600; }
 
 /* Subtle overdue mark in the stereo cell when clock has run past the
    expected stage duration. */
-.stereo-overdue { color: #fb923c; margin-left: 4px; }
+.stereo-overdue { color: var(--accent-amber); margin-left: 4px; }
 
 .board-rows { flex: 1; }
 
@@ -3531,8 +3547,8 @@ kbd {
 }
 
 .board-status-dot.running { color: var(--accent-green); }
-.board-status-dot.complete { color: var(--accent-purple); }
-.board-status-dot.error { color: #f85149; }
+.board-status-dot.complete { color: var(--accent); }
+.board-status-dot.error { color: var(--accent-red); }
 
 .board-embryo-name {
     font-weight: 600;
@@ -3545,12 +3561,12 @@ kbd {
 }
 
 .conf-high { color: var(--accent-green); }
-.conf-med { color: var(--accent-orange); }
-.conf-low { color: #f85149; }
+.conf-med { color: var(--accent-amber); }
+.conf-low { color: var(--accent-red); }
 
 .rate-fast { color: var(--accent-green); }
 .rate-normal { color: var(--text-muted); }
-.rate-slow { color: var(--accent-orange); }
+.rate-slow { color: var(--accent-amber); }
 
 .board-sparkline {
     display: block;
@@ -3558,8 +3574,8 @@ kbd {
 }
 
 .board-alert { font-size: 0.75rem; font-weight: 500; }
-.board-alert-warn { color: var(--accent-orange); }
-.board-alert-critical { color: #f85149; animation: detectionPulse 2s infinite; }
+.board-alert-warn { color: var(--accent-amber); }
+.board-alert-critical { color: var(--accent-red); animation: detectionPulse 2s infinite; }
 .board-alert-none { color: var(--text-muted); font-size: 0.75rem; }
 
 .board-detail {
@@ -3681,13 +3697,13 @@ kbd {
    Visually distinct so the eye catches it at a glance on a 56px cell:
    amber border, brighter pulse, amber overlay badge, italic label. */
 .filmstrip-cell.pending .filmstrip-thumb {
-    border-color: #f59e0b !important;  /* amber-500, overrides inline stage color */
-    box-shadow: 0 0 0 1px #f59e0b66, 0 0 8px #f59e0b44;
+    border-color: var(--accent-amber) !important;  /* amber-500, overrides inline stage color */
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-amber) 40%, transparent), 0 0 8px color-mix(in srgb, var(--accent-amber) 27%, transparent);
     animation: filmstripPendingPulse 1.2s ease-in-out infinite;
 }
 
 .filmstrip-cell.pending .filmstrip-stage-label {
-    color: #f59e0b !important;
+    color: var(--accent-amber) !important;
     font-style: italic;
     font-weight: 600;
     letter-spacing: 0.5px;
@@ -3706,18 +3722,18 @@ kbd {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #f59e0b;
-    box-shadow: 0 0 6px #f59e0bcc;
+    background: var(--accent-amber);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent-amber) 80%, transparent);
     animation: filmstripPendingBlink 1s ease-in-out infinite;
     pointer-events: none;
 }
 
 @keyframes filmstripPendingPulse {
     0%, 100% {
-        box-shadow: 0 0 0 1px #f59e0b66, 0 0 8px #f59e0b44;
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-amber) 40%, transparent), 0 0 8px color-mix(in srgb, var(--accent-amber) 27%, transparent);
     }
     50% {
-        box-shadow: 0 0 0 2px #f59e0bcc, 0 0 14px #f59e0b88;
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-amber) 80%, transparent), 0 0 14px color-mix(in srgb, var(--accent-amber) 53%, transparent);
     }
 }
 
@@ -3831,9 +3847,9 @@ kbd {
     margin-top: 2px;
 }
 
-.vitals-ok { background: rgba(74, 222, 128, 0.15); color: var(--accent-green); }
-.vitals-warn { background: rgba(251, 146, 60, 0.15); color: var(--accent-orange); }
-.vitals-critical { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+.vitals-ok { background: color-mix(in srgb, var(--accent-green) 15%, transparent); color: var(--accent-green); }
+.vitals-warn { background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber); }
+.vitals-critical { background: color-mix(in srgb, var(--accent-red) 15%, transparent); color: var(--accent-red); }
 
 .vitals-chart-container {
     flex: 1;
@@ -4088,15 +4104,15 @@ kbd {
 }
 
 .timelapse-status.paused .status-indicator {
-    background: var(--accent-orange);
+    background: var(--accent-amber);
 }
 
 .timelapse-status.completed .status-indicator {
-    background: var(--accent-green);
+    background: var(--accent);
 }
 
 .timelapse-status.stopped .status-indicator {
-    background: var(--accent-orange);
+    background: var(--text-muted);
 }
 
 .timelapse-status .status-text {
@@ -4187,16 +4203,16 @@ kbd {
 }
 
 .embryo-card.paused {
-    border-left: 3px solid var(--accent-orange);
+    border-left: 3px solid var(--accent-amber);
 }
 
 .embryo-card.complete {
-    border-left: 3px solid var(--accent-purple);
+    border-left: 3px solid var(--accent);
     opacity: 0.85;
 }
 
 .embryo-card.error {
-    border-left: 3px solid #f85149;
+    border-left: 3px solid var(--accent-red);
 }
 
 /* Embryo Card Header */
@@ -4225,23 +4241,23 @@ kbd {
 }
 
 .embryo-status.running {
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     color: var(--accent-green);
 }
 
 .embryo-status.paused {
-    background: rgba(251, 146, 60, 0.15);
-    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 15%, transparent);
+    color: var(--accent-amber);
 }
 
 .embryo-status.complete {
-    background: rgba(168, 85, 247, 0.15);
-    color: var(--accent-purple);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
 }
 
 .embryo-status.error {
-    background: rgba(248, 81, 73, 0.15);
-    color: #f85149;
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+    color: var(--accent-red);
 }
 
 .embryo-status-icon {
@@ -4289,7 +4305,7 @@ kbd {
 }
 
 .embryo-card.complete .progress-fill {
-    background: var(--accent-purple);
+    background: var(--accent);
 }
 
 .progress-stats {
@@ -4401,9 +4417,9 @@ kbd {
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
     border-radius: 8px;
-    border: 1px solid rgba(74, 222, 128, 0.2);
+    border: 1px solid color-mix(in srgb, var(--accent-green) 20%, transparent);
 }
 
 .completion-reason {
@@ -4421,14 +4437,14 @@ kbd {
 /* Error display */
 .error-info {
     padding: 0.75rem;
-    background: rgba(248, 81, 73, 0.1);
+    background: color-mix(in srgb, var(--accent-red) 10%, transparent);
     border-radius: 8px;
-    border: 1px solid rgba(248, 81, 73, 0.2);
+    border: 1px solid color-mix(in srgb, var(--accent-red) 20%, transparent);
 }
 
 .error-message {
     font-size: 0.85rem;
-    color: #f85149;
+    color: var(--accent-red);
 }
 
 /* ========================================
@@ -4515,9 +4531,9 @@ kbd {
     border-left-color: var(--accent);
 }
 
-.embryo-rail-item.complete { border-left-color: var(--accent-purple); }
-.embryo-rail-item.paused { border-left-color: var(--accent-orange); }
-.embryo-rail-item.error { border-left-color: #f85149; }
+.embryo-rail-item.complete { border-left-color: var(--accent); }
+.embryo-rail-item.paused { border-left-color: var(--accent-amber); }
+.embryo-rail-item.error { border-left-color: var(--accent-red); }
 
 .embryo-rail-item .rail-icon {
     font-size: 1.1rem;
@@ -4591,15 +4607,15 @@ kbd {
 }
 
 .embryo-card.minimal.complete {
-    border-left-color: var(--accent-purple);
+    border-left-color: var(--accent);
 }
 
 .embryo-card.minimal.paused {
-    border-left-color: var(--accent-orange);
+    border-left-color: var(--accent-amber);
 }
 
 .embryo-card.minimal.error {
-    border-left-color: #f85149;
+    border-left-color: var(--accent-red);
 }
 
 .embryo-card.minimal .card-info {
@@ -4670,12 +4686,12 @@ kbd {
 
 /* Completed embryos get a different play button style */
 .embryo-card.minimal.complete .card-play-btn {
-    background: linear-gradient(135deg, var(--accent-purple) 0%, #9333ea 100%);
-    box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .embryo-card.minimal.complete .card-play-btn:hover {
-    box-shadow: 0 4px 16px rgba(168, 85, 247, 0.5);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .reasoning-count {
@@ -4761,8 +4777,8 @@ kbd {
 }
 
 .reasoning-status-dot.running { color: var(--accent-green); }
-.reasoning-status-dot.complete { color: var(--accent-purple); }
-.reasoning-status-dot.error { color: #f85149; }
+.reasoning-status-dot.complete { color: var(--accent); }
+.reasoning-status-dot.error { color: var(--accent-red); }
 
 .reasoning-embryo-name {
     font-size: 1.1rem;
@@ -4877,7 +4893,7 @@ kbd {
 }
 
 .detection-result.positive {
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     color: var(--accent-green);
 }
 
@@ -4895,18 +4911,18 @@ kbd {
 }
 
 .confidence-badge.high {
-    background: rgba(74, 222, 128, 0.2);
+    background: color-mix(in srgb, var(--accent-green) 20%, transparent);
     color: var(--accent-green);
 }
 
 .confidence-badge.medium {
-    background: rgba(251, 146, 60, 0.2);
-    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 20%, transparent);
+    color: var(--accent-amber);
 }
 
 .confidence-badge.low {
-    background: rgba(248, 81, 73, 0.2);
-    color: #f85149;
+    background: color-mix(in srgb, var(--accent-red) 20%, transparent);
+    color: var(--accent-red);
 }
 
 .detection-timing {
@@ -5046,8 +5062,8 @@ kbd {
     align-items: center;
     gap: 0.25rem;
     padding: 0.15rem 0.5rem;
-    background: rgba(74, 222, 128, 0.15);
-    border: 1px solid rgba(74, 222, 128, 0.3);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-green) 30%, transparent);
     border-radius: 12px;
     font-size: 0.7rem;
     font-weight: 500;
@@ -5059,7 +5075,7 @@ kbd {
 }
 
 .quick-jump-badge:hover {
-    background: rgba(74, 222, 128, 0.25);
+    background: color-mix(in srgb, var(--accent-green) 25%, transparent);
     border-color: var(--accent-green);
     transform: translateY(-1px);
 }
@@ -5192,32 +5208,35 @@ kbd {
     z-index: 10;
 }
 
+.eval-dot.low .eval-dot-label { color: var(--accent-red); }
+
 .eval-dot.low {
     background: var(--bg-hover);
+    border-color: color-mix(in srgb, var(--accent-red) 45%, transparent);
 }
 
 .eval-dot.medium {
-    background: rgba(251, 191, 36, 0.15);
-    border-color: rgba(251, 191, 36, 0.3);
+    background: color-mix(in srgb, var(--accent-amber) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent-amber) 30%, transparent);
 }
 
 .eval-dot.medium .eval-dot-label {
-    color: #fbbf24;
+    color: var(--accent-amber);
 }
 
 .eval-dot.high {
-    background: rgba(251, 146, 60, 0.15);
-    border-color: rgba(251, 146, 60, 0.3);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .eval-dot.high .eval-dot-label {
-    color: #fb923c;
+    color: var(--accent-green);
 }
 
 .eval-dot.positive {
-    background: rgba(74, 222, 128, 0.2);
+    background: color-mix(in srgb, var(--accent-green) 20%, transparent);
     border-color: var(--accent-green);
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .eval-dot.positive .eval-dot-label {
@@ -5227,7 +5246,7 @@ kbd {
 
 .eval-dot.positive:hover {
     transform: scale(1.15);
-    box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent-green) 50%, transparent);
 }
 
 /* Stage-colored eval dots for perception system */
@@ -5268,24 +5287,24 @@ kbd {
 
 .eval-dot.stage-hatching,
 .eval-dot.stage-hatched {
-    background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(34, 197, 94, 0.2) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-green) 20%, transparent) 0%, color-mix(in srgb, var(--accent-green) 20%, transparent) 100%);
     border-color: var(--accent-green);
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .eval-dot.hatching {
     animation: hatchingPulse 1.5s ease-in-out infinite;
-    box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 50%, transparent);
 }
 
 @keyframes hatchingPulse {
     0%, 100% {
         transform: scale(1);
-        box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+        box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 50%, transparent);
     }
     50% {
         transform: scale(1.1);
-        box-shadow: 0 0 15px rgba(74, 222, 128, 0.7);
+        box-shadow: 0 0 15px color-mix(in srgb, var(--accent-green) 70%, transparent);
     }
 }
 
@@ -5434,7 +5453,7 @@ kbd {
 }
 
 .inline-detail-container .detail-verdict.detected {
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
     color: var(--accent-green);
 }
 
@@ -5616,18 +5635,18 @@ kbd {
 }
 
 .detection-row-compact .confidence.high {
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     color: var(--accent-green);
 }
 
 .detection-row-compact .confidence.medium {
-    background: rgba(251, 146, 60, 0.15);
-    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 15%, transparent);
+    color: var(--accent-amber);
 }
 
 .detection-row-compact .confidence.low {
-    background: rgba(139, 92, 246, 0.15);
-    color: var(--accent-purple);
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+    color: var(--accent-red);
 }
 
 /* Load More Button */
@@ -5655,16 +5674,16 @@ kbd {
 
 /* Positive Detection Card - Elevated, always visible */
 .detection-card.positive-highlight {
-    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(34, 211, 238, 0.05));
-    border: 1px solid rgba(74, 222, 128, 0.3);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-green) 8%, transparent), rgba(34, 211, 238, 0.05));
+    border: 1px solid color-mix(in srgb, var(--accent-green) 30%, transparent);
     border-left: 4px solid var(--accent-green);
-    box-shadow: 0 4px 16px rgba(74, 222, 128, 0.1);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-green) 10%, transparent);
     margin-bottom: 1rem;
 }
 
 .detection-card.positive-highlight:hover {
-    border-color: rgba(74, 222, 128, 0.5);
-    box-shadow: 0 6px 20px rgba(74, 222, 128, 0.15);
+    border-color: color-mix(in srgb, var(--accent-green) 50%, transparent);
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-green) 15%, transparent);
 }
 
 /* Context indicator for positive detections */
@@ -5693,7 +5712,7 @@ kbd {
 }
 
 .context-dot.medium {
-    background: var(--accent-orange);
+    background: var(--accent-amber);
 }
 
 .context-dot.high {
@@ -5765,13 +5784,13 @@ kbd {
 /* Highlight pulse animation for scroll-to-detection */
 @keyframes highlightPulse {
     0% {
-        box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-green) 70%, transparent);
     }
     50% {
-        box-shadow: 0 0 0 10px rgba(74, 222, 128, 0);
+        box-shadow: 0 0 0 10px transparent;
     }
     100% {
-        box-shadow: 0 4px 16px rgba(74, 222, 128, 0.1);
+        box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-green) 10%, transparent);
     }
 }
 
@@ -5890,11 +5909,11 @@ kbd {
 }
 
 .strip-indicator.paused {
-    background: var(--accent-orange);
+    background: var(--accent-amber);
 }
 
 .strip-indicator.completed {
-    background: var(--accent-green);
+    background: var(--accent);
 }
 
 @keyframes stripPulse {
@@ -5951,12 +5970,12 @@ kbd {
 }
 
 .strip-alert.success {
-    background: rgba(74, 222, 128, 0.15);
-    border-color: rgba(74, 222, 128, 0.3);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .strip-alert.success:hover {
-    background: rgba(74, 222, 128, 0.25);
+    background: color-mix(in srgb, var(--accent-green) 25%, transparent);
     border-color: var(--accent-green);
 }
 
@@ -6042,7 +6061,7 @@ kbd {
 }
 
 .vlm-analysis.detected {
-    border-color: rgba(74, 222, 128, 0.3);
+    border-color: color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .vlm-header {
@@ -6149,8 +6168,8 @@ kbd {
 }
 
 .confidence-bar.high .bar { background: var(--accent-green); }
-.confidence-bar.medium .bar:nth-child(-n+2) { background: var(--accent-orange); }
-.confidence-bar.low .bar:first-child { background: var(--accent-orange); }
+.confidence-bar.medium .bar:nth-child(-n+2) { background: var(--accent-amber); }
+.confidence-bar.low .bar:first-child { background: var(--accent-red); }
 
 .vlm-observations {
     padding: 0 1rem 1rem;
@@ -6228,11 +6247,11 @@ kbd {
     gap: 0.5rem;
     padding: 0.65rem 1rem;
     margin: 0 1rem 1rem;
-    background: rgba(251, 146, 60, 0.1);
-    border-left: 3px solid var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+    border-left: 3px solid var(--accent-amber);
     border-radius: 0 8px 8px 0;
     font-size: 0.8rem;
-    color: var(--accent-orange);
+    color: var(--accent-amber);
 }
 
 .vlm-uncertainty .icon {
@@ -6268,25 +6287,25 @@ kbd {
 .vlm-action-btn.agree:hover {
     border-color: var(--accent-green);
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
 }
 
 .vlm-action-btn.disagree:hover {
-    border-color: #f87171;
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.1);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 10%, transparent);
 }
 
 .vlm-action-btn.agreed {
     border-color: var(--accent-green);
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
 }
 
 .vlm-action-btn.disagreed {
-    border-color: #f87171;
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.15);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
 }
 
 /* ========================================
@@ -6324,7 +6343,7 @@ kbd {
 }
 
 .detection-card.detected .detection-reasoning-text {
-    background: linear-gradient(90deg, rgba(74, 222, 128, 0.08) 0%, var(--bg-card) 100%);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent-green) 8%, transparent) 0%, var(--bg-card) 100%);
     border-left-color: var(--accent-green);
 }
 
@@ -6362,7 +6381,7 @@ kbd {
     align-items: center;
     gap: 0.35rem;
     background: var(--accent-cyan);
-    color: white;
+    color: var(--bg-dark);
     font-size: 0.65rem;
     font-weight: 600;
     padding: 2px 8px;
@@ -6494,9 +6513,12 @@ kbd {
 :root {
     --color-success: var(--accent-green);
     --color-ai: var(--accent-purple);
-    --color-warning: var(--accent-orange);
-    --color-danger: #f87171;
+    --color-warning: var(--accent-amber);
+    --color-danger: var(--accent-red);
     --color-info: var(--accent-cyan);
+    /* older names still referenced in a few rules */
+    --error: var(--accent-red);
+    --success: var(--accent-green);
 }
 
 /* ========================================
@@ -6522,7 +6544,7 @@ kbd {
 .tab-badge.has-new {
     animation: badgeAlert 1s ease-in-out infinite;
     background: var(--accent-green);
-    color: white;
+    color: var(--bg-dark);
 }
 
 @keyframes badgeAlert {
@@ -6600,7 +6622,7 @@ kbd {
     border-radius: 50%;
     z-index: 2;
     transform: translate(-50%, -50%);
-    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.3);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-green) 30%, transparent);
 }
 
 .timeline-detection-marker::after {
@@ -6609,7 +6631,7 @@ kbd {
 
 .timeline-detection-marker:hover {
     transform: translate(-50%, -50%) scale(1.2);
-    box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.4), 0 0 12px var(--accent-green);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-green) 40%, transparent), 0 0 12px var(--accent-green);
 }
 
 /* Detection Toast - non-intrusive notification */
@@ -6823,7 +6845,7 @@ kbd {
 .ctrl-btn.active {
     background: var(--accent-purple);
     border-color: var(--accent-purple);
-    color: white;
+    color: var(--bg-dark);
 }
 
 .ctrl-icon {
@@ -6937,12 +6959,12 @@ kbd {
 
 .context-verdict.detected {
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
 }
 
 .context-verdict.hatching {
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     animation: hatchingPulse 1.5s ease-in-out infinite;
 }
 
@@ -6970,7 +6992,7 @@ kbd {
 
 .context-reasoning mark.active {
     background: var(--accent-purple);
-    color: white;
+    color: var(--bg-dark);
     animation: highlightPulse 0.5s ease-out;
 }
 
@@ -7436,7 +7458,7 @@ kbd {
 
 .detail-verdict.detected {
     color: var(--accent-green);
-    background: rgba(74, 222, 128, 0.1);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
 }
 
 .detail-reasoning {
@@ -7492,7 +7514,7 @@ kbd {
 
 .transitional-badge {
     background: var(--accent-orange);
-    color: white;
+    color: var(--bg-dark);
     padding: 0.15rem 0.5rem;
     border-radius: 4px;
     font-size: 0.7rem;
@@ -7981,19 +8003,19 @@ kbd {
 }
 
 .verification-status.running {
-    border-color: var(--accent-orange);
-    background: linear-gradient(135deg, rgba(251, 146, 60, 0.08), rgba(251, 146, 60, 0.03));
+    border-color: var(--accent-amber);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-amber) 8%, transparent), color-mix(in srgb, var(--accent-amber) 3%, transparent));
     animation: pulse-border 2s ease-in-out infinite;
 }
 
 .verification-status.passed {
     border-color: var(--accent-green);
-    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(74, 222, 128, 0.03));
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-green) 8%, transparent), color-mix(in srgb, var(--accent-green) 3%, transparent));
 }
 
 .verification-status.failed {
     border-color: var(--accent-red);
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.03));
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-red) 8%, transparent), color-mix(in srgb, var(--accent-red) 3%, transparent));
 }
 
 .verification-status.summary {
@@ -8003,7 +8025,7 @@ kbd {
 
 @keyframes pulse-border {
     0%, 100% { border-color: var(--accent-orange); }
-    50% { border-color: rgba(251, 146, 60, 0.4); }
+    50% { border-color: color-mix(in srgb, var(--accent-amber) 40%, transparent); }
 }
 
 .verification-header {
@@ -8080,12 +8102,12 @@ kbd {
 }
 
 .strategy-icon.passed {
-    background: rgba(74, 222, 128, 0.2);
+    background: color-mix(in srgb, var(--accent-green) 20%, transparent);
     color: var(--accent-green);
 }
 
 .strategy-icon.failed {
-    background: rgba(239, 68, 68, 0.2);
+    background: color-mix(in srgb, var(--accent-red) 20%, transparent);
     color: var(--accent-red);
 }
 
@@ -8110,18 +8132,18 @@ kbd {
 }
 
 .verification-card.started {
-    border-left-color: var(--accent-orange);
-    background: linear-gradient(135deg, rgba(251, 146, 60, 0.05), transparent);
+    border-left-color: var(--accent-amber);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-amber) 5%, transparent), transparent);
 }
 
 .verification-card.passed {
     border-left-color: var(--accent-green);
-    background: linear-gradient(135deg, rgba(74, 222, 128, 0.05), transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-green) 5%, transparent), transparent);
 }
 
 .verification-card.failed {
     border-left-color: var(--accent-red);
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-red) 5%, transparent), transparent);
 }
 
 .detector-badge.verification {
@@ -8130,7 +8152,7 @@ kbd {
 }
 
 .detection-result.verification-started {
-    color: var(--accent-orange);
+    color: var(--accent-amber);
 }
 
 .consecutive-badge {
@@ -8142,12 +8164,12 @@ kbd {
 }
 
 .consecutive-badge.passed {
-    background: rgba(74, 222, 128, 0.15);
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
     color: var(--accent-green);
 }
 
 .consecutive-badge.failed {
-    background: rgba(239, 68, 68, 0.15);
+    background: color-mix(in srgb, var(--accent-red) 15%, transparent);
     color: var(--accent-red);
 }
 
@@ -8250,7 +8272,7 @@ kbd {
 
 .eval-dot.verification-failed:hover {
     transform: scale(1.3);
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent-red) 50%, transparent);
 }
 
 /* Separator between detection dots and verification dots */
@@ -8378,7 +8400,7 @@ kbd {
 .projections-error {
     text-align: center;
     padding: 2rem;
-    color: var(--accent-red, #ef4444);
+    color: var(--accent-red);
 }
 
 .projections-controls {
@@ -8502,8 +8524,8 @@ body.modal-open {
 }
 
 .embryo-toast.error {
-    border-color: var(--accent-red, #ef4444);
-    color: var(--accent-red, #ef4444);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
 }
 
 /* ========================================
@@ -8711,7 +8733,7 @@ body.modal-open {
 .settings-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
 .settings-result { font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
 .settings-result.is-ok { color: var(--accent-green); }
-.settings-result.is-err { color: var(--accent-orange); }
+.settings-result.is-err { color: var(--accent-red); }
 .settings-pre {
     font: 0.78rem/1.5 ui-monospace, SFMono-Regular, monospace;
     color: var(--text); background: var(--bg-dark); border: 1px solid var(--border);
@@ -8859,10 +8881,10 @@ body.modal-open {
     vertical-align: middle;
     transition: background 0.2s;
 }
-.tab-status-dot.live { background: var(--accent-green, #3fb950); box-shadow: 0 0 6px rgba(63, 185, 80, 0.6); }
-.tab-status-dot.stale { background: var(--accent-orange, #d29922); }
-.tab-status-dot.paused { background: var(--accent, #58a6ff); }
-.tab-status-dot.error { background: #f85149; }
+.tab-status-dot.live { background: var(--accent-green); box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 60%, transparent); }
+.tab-status-dot.stale { background: var(--accent-amber); }
+.tab-status-dot.paused { background: var(--accent-amber); }
+.tab-status-dot.error { background: var(--accent-red); }
 
 .devices-container {
     display: flex;
@@ -8905,10 +8927,10 @@ body.modal-open {
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
-.devices-status-pill.live { background: rgba(63, 185, 80, 0.2); color: var(--accent-green, #3fb950); }
-.devices-status-pill.paused { background: rgba(88, 166, 255, 0.2); color: var(--accent, #58a6ff); }
-.devices-status-pill.stale { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange, #d29922); }
-.devices-status-pill.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+.devices-status-pill.live { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
+.devices-status-pill.paused { background: color-mix(in srgb, var(--accent-amber) 20%, transparent); color: var(--accent-amber); }
+.devices-status-pill.stale { background: color-mix(in srgb, var(--accent-amber) 20%, transparent); color: var(--accent-amber); }
+.devices-status-pill.error { background: color-mix(in srgb, var(--accent-red) 20%, transparent); color: var(--accent-red); }
 
 /* Device-layer supervision card (device-layer.js) */
 /* The device-layer strip's buttons used to borrow `.marking-action-btn` from
@@ -8988,19 +9010,19 @@ body.modal-open {
    blue-active/blue-faded. Overrides the generic .devices-layer-btn:disabled
    0.4 opacity so the red stays legible while disabled. */
 #devices-layer-stop {
-    background: #f85149;
-    border-color: #f85149;
+    background: var(--accent-red);
+    border-color: var(--accent-red);
     color: #fff;
 }
 #devices-layer-stop:hover:not(:disabled) {
     filter: brightness(1.08);
-    background: #f85149;
+    background: var(--accent-red);
 }
 #devices-layer-stop:disabled {
     opacity: 1;
     background: transparent;
-    border-color: rgba(248, 81, 73, 0.4);
-    color: rgba(248, 81, 73, 0.55);
+    border-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
+    color: color-mix(in srgb, var(--accent-red) 55%, transparent);
 }
 .devices-layer-log {
     margin: 0.55rem 0 0;
@@ -9275,10 +9297,10 @@ body.modal-open {
     background: var(--map-ink-mute);
     box-shadow: 0 0 0 0 currentColor;
 }
-.devices-status-led.live::before  { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.6); }
+.devices-status-led.live::before  { background: var(--accent-green); box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 60%, transparent); }
 .devices-status-led.paused::before{ background: var(--map-accent); }
 .devices-status-led.stale::before { background: var(--map-warm); }
-.devices-status-led.error::before { background: #f87171; }
+.devices-status-led.error::before { background: var(--accent-red); }
 /* Status sub-label (e.g. the live "Δt 0.20s"). The value updates every frame;
    tabular figures + a reserved, right-aligned width keep its box from changing
    size, so the rapidly-changing digits can't reflow and jitter the LIVE badge
@@ -10198,7 +10220,7 @@ body.modal-open {
 }
 
 .chat-message-content.error {
-    color: var(--accent-orange);
+    color: var(--accent-red);
 }
 
 @keyframes chat-blink {
@@ -10370,13 +10392,13 @@ body.modal-open {
 }
 .ls-stream-btn:hover { border-color: var(--map-accent); color: var(--map-ink); }
 .ls-stream-btn.active {
-    border-color: #4ade80;
-    color: #4ade80;
-    background: rgba(74, 222, 128, 0.10);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
 }
 .ls-stream-btn.active::before {
-    background: #4ade80;
-    box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+    background: var(--accent-green);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-green) 70%, transparent);
 }
 
 .ls-label {
@@ -10946,7 +10968,7 @@ body.modal-open {
 }
 
 .gallery-tab-error {
-    color: var(--accent-red, #ef4444);
+    color: var(--accent-red);
 }
 
 .gallery-tab-grid {
@@ -11054,7 +11076,7 @@ body.modal-open {
 /* Doubled class (0,2,0): a single .gently-toast--error would tie with
    .gently-toast and depend on source order. */
 .gently-toast.gently-toast--error {
-    border-color: var(--accent-red, #ef4444);
+    border-color: var(--accent-red);
 }
 
 .gently-toast.visible {
@@ -11127,13 +11149,13 @@ body.modal-open {
    during a boot but says nothing about whether to wait — these two states do,
    and they cost no space because the chip is always there. */
 .status-dot.booting {
-    background: var(--accent-amber, #d97706);
+    background: var(--accent-amber);
     opacity: 1;
     animation: rig-booting 1.4s ease-in-out infinite;
 }
 @keyframes rig-booting { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .status-dot.booting { animation: none; } }
-.status-dot.down { background: var(--accent-red, #dc2626); opacity: 1; }
+.status-dot.down { background: var(--accent-red); opacity: 1; }
 
 /* XY limits switch on the Devices map. Here rather than in a devices.css,
    because that file was created alongside the reverted joystick control and
@@ -11155,8 +11177,8 @@ body.modal-open {
 /* Limits OFF is worth seeing across the room: nothing is fencing the stage,
    for anyone on this controller. */
 .devices-limits-btn[aria-pressed="true"] {
-    border-color: var(--accent-amber, #d97706);
-    color: var(--accent-amber, #d97706);
+    border-color: var(--accent-amber);
+    color: var(--accent-amber);
 }
 .devices-limits-note { font-size: 0.66rem; opacity: 0.75; }
 
@@ -11263,7 +11285,7 @@ body.modal-open {
     color: var(--map-ink-mute, #9aa0aa);
 }
 .region-say { margin: 0; font-size: 0.72rem; color: var(--map-ink-mute, #9aa0aa); }
-.region-say[data-bad="1"] { color: var(--op-warn, #d97706); }
+.region-say[data-bad="1"] { color: var(--accent-amber); }
 /* An aside that holds for the whole walk. It sits under the prompt and never
    replaces it: the instruction is the one line that cannot be given up. */
 .region-note { font-size: 0.66rem; color: var(--map-ink-mute, #9aa0aa); opacity: 0.8; }
@@ -11513,13 +11535,13 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
 .home-image-group-count { font-size: 0.72rem; color: var(--text-muted, #64748b); }
 .home-image-live {
     padding: 0 7px;
-    border: 1px solid var(--accent-green, #4ade80);
+    border: 1px solid var(--accent-green);
     border-radius: 999px;
     font-size: 0.62rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: var(--accent-green, #16a34a);
+    color: var(--accent-green);
 }
 .home-image-group-head .reveal-btn { margin-left: auto; align-self: center; }
 
@@ -11587,7 +11609,7 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
 }
 .settings-badge.is-set { border-style: dashed; }
 .settings-row-status { font-size: 0.72rem; color: var(--accent-green); min-height: 1em; }
-.settings-row-status.is-err { color: var(--accent-orange); }
+.settings-row-status.is-err { color: var(--accent-red); }
 .settings-readonly {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
@@ -11632,3 +11654,106 @@ a.settings-btn { display: inline-block; text-decoration: none; }
 /* `hidden` loses the specificity tie to a class that sets display, so each
    class that is hidden through the attribute says so itself. */
 .settings-radio[hidden], .settings-custom[hidden], .settings-save-bar[hidden] { display: none; }
+
+/* ========================================
+   STATUS SHAPES
+   Colour is never the only cue. Every small status indicator also carries a
+   shape, so the status hues (see :root) survive colour-blindness and
+   greyscale. One state = one colour = one shape:
+     live / running / connected / ok    solid filled circle (pulses where it did)
+     paused / warning / stale / partial half-filled circle
+     done / complete / completed        ring
+     error / failed / down / critical   filled diamond
+     idle / off / stopped / unknown     hollow dashed circle
+   Text-only states get a glyph prefix: ✓ ok  ✕ error  ! warning  ● live.
+   Glyph dots (.board-status-dot, .reasoning-status-dot, campaigns .dot-*)
+   already receive a distinct character from the JS that writes them.
+   Other stylesheets carry a short block of the same name for their own
+   selectors (campaigns, shell, experiment, agent-chat, operate, rig-menu).
+   ======================================== */
+
+/* half-filled: paused / warning / stale / partial / booting / medium */
+.status-dot.partial,
+.status-dot.booting,
+.tab-status-dot.stale,
+.tab-status-dot.paused,
+.header-status .status-indicator.paused,
+.timelapse-status.paused .status-indicator,
+.strip-indicator.paused,
+.context-dot.medium {
+    background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--accent-amber);
+}
+.devices-status-led.stale::before,
+.devices-camera-led.stale {
+    background: linear-gradient(90deg, var(--map-warm) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--map-warm);
+}
+.devices-status-led.paused::before {
+    background: linear-gradient(90deg, var(--map-accent) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--map-accent);
+}
+
+/* ring: done / complete / completed */
+.header-status .status-indicator.completed,
+.timelapse-status.completed .status-indicator,
+.strip-indicator.completed {
+    background: transparent;
+    box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* diamond: error / down / failed */
+.status-dot.error,
+.status-dot.down,
+.tab-status-dot.error,
+.devices-status-led.error::before {
+    border-radius: 1px;
+    transform: rotate(45deg);
+}
+
+/* hollow dashed: idle / off / stopped. box-sizing keeps the dot its size. */
+.status-dot:not(.connected):not(.partial):not(.error):not(.down):not(.booting),
+.timelapse-status.stopped .status-indicator,
+.cal-spim-led.idle {
+    background: transparent;
+    border: 1px dashed var(--text-muted);
+    box-sizing: border-box;
+}
+.ls-laser-dot:not(.ls-laser-dot--on),
+.devices-camera-led:not(.live):not(.stale) {
+    background: transparent;
+    border: 1px dashed var(--map-ink-mute);
+    box-sizing: border-box;
+}
+
+/* eval dots carry a label, so the shape is the border: dashed = low,
+   half-filled = medium, heavy ring = high, filled (unchanged) = positive */
+.eval-dot.low { border-style: dashed; }
+.eval-dot.medium {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-amber) 30%, transparent) 50%, transparent 50%);
+}
+.eval-dot.high { border-width: 2px; }
+
+/* text-only states */
+.conf-high::before { content: '✓ '; }
+.conf-med::before,
+.vitals-warn::before,
+.board-col-pace.pace-slow::before,
+.region-say[data-bad="1"]::before { content: '! '; }
+.board-col-pace.pace-slow-bad::before { content: '!! '; }
+.conf-low::before,
+.vitals-critical::before,
+.settings-row-status.is-err::before,
+.settings-result.is-err::before { content: '✕ '; }
+
+/* left-edge stripes: double = error, dashed = paused, solid = running/done */
+.embryo-card.error,
+.embryo-card.minimal.error,
+.embryo-rail-item.error,
+.trace-step.trace-temporal_context.arrest-warning {
+    border-left-style: double;
+    border-left-width: 6px;
+}
+.embryo-card.paused,
+.embryo-card.minimal.paused,
+.embryo-rail-item.paused { border-left-style: dashed; }

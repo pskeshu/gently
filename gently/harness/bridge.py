@@ -853,43 +853,6 @@ class AgentBridge:
             )
             return
 
-        if cmd.startswith("/theme"):
-            parts = cmd.split()
-            if len(parts) > 1:
-                from gently.app.theme import get_theme, set_theme
-
-                try:
-                    set_theme(parts[1])
-                    theme = get_theme()
-                    await send_fn(
-                        {
-                            "type": "command_result",
-                            "command": "/theme",
-                            "content": {"theme": theme.name, "changed": True},
-                        }
-                    )
-                except ValueError as e:
-                    await send_fn(
-                        {
-                            "type": "command_result",
-                            "command": "/theme",
-                            "error": str(e),
-                        }
-                    )
-            else:
-                from gently.app.theme import get_theme, list_themes
-
-                current = get_theme()
-                themes = {k: v.name for k, v in list_themes().items()}
-                await send_fn(
-                    {
-                        "type": "command_result",
-                        "command": "/theme",
-                        "content": {"themes": themes, "current": current.name},
-                    }
-                )
-            return
-
         if cmd == "/sessions":
             await send_fn(
                 {

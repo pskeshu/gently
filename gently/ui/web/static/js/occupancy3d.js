@@ -39,7 +39,7 @@ const Occupancy3DManager = (function () {
         cuboid: 0x14b8c4,
         cuboidFace: 0x14b8c4,
         sheet: 0x39d0ff,
-        slice: 0x2a6f78,
+        slice: 0x7c3aed,  // purple: keep it apart from the cyan cuboid
         beam: 0xffd166,
     };
 
@@ -441,7 +441,9 @@ const Occupancy3DManager = (function () {
         if (_stage.x != null && _stage.y != null) {
             const fovPx = FOV_UM * s;
             parts.push(`<rect x="${(px(_stage.x) - fovPx / 2).toFixed(1)}" y="${(py(_stage.y) - fovPx / 2).toFixed(1)}" width="${Math.max(fovPx, 3).toFixed(1)}" height="${Math.max(fovPx, 3).toFixed(1)}" class="occ3d-mm-cuboid"/>`);
-            parts.push(`<circle cx="${px(_stage.x).toFixed(1)}" cy="${py(_stage.y).toFixed(1)}" r="2.5" class="occ3d-mm-stage"/>`);
+            // Stage = hollow ring + centre dot, embryos = small filled dots: differ by shape, not only colour.
+            parts.push(`<circle cx="${px(_stage.x).toFixed(1)}" cy="${py(_stage.y).toFixed(1)}" r="3.5" class="occ3d-mm-stage"/>`);
+            parts.push(`<circle cx="${px(_stage.x).toFixed(1)}" cy="${py(_stage.y).toFixed(1)}" r="1" class="occ3d-mm-stage-dot"/>`);
         }
         _minimapEl.innerHTML = parts.join('');
     }

@@ -42,7 +42,7 @@ def test_roles_include_lineaging():
     roles = _client().get("/api/roles").json()["roles"]
     lineaging = next(r for r in roles if r["name"] == "lineaging")
     assert lineaging["role_class"] == "reference"
-    assert lineaging["ui_color"] == "#33cc88"
+    assert lineaging["ui_color"] == "#009e73"
     assert lineaging["ui_icon"] == "triangle"
 
 

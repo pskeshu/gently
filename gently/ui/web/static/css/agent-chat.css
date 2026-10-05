@@ -137,8 +137,8 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
     color: var(--text-muted);
     white-space: nowrap;
 }
-.agent-chat-conn.ac-conn-ok { color: var(--accent-green); border-color: rgba(74, 222, 128, 0.35); }
-.agent-chat-conn.ac-conn-bad { color: var(--accent-orange, #fb923c); border-color: rgba(251, 146, 60, 0.35); }
+.agent-chat-conn.ac-conn-ok { color: var(--accent-green); border-color: color-mix(in srgb, var(--accent-green) 35%, transparent); }
+.agent-chat-conn.ac-conn-bad { color: var(--accent-red); border-color: color-mix(in srgb, var(--accent-red) 35%, transparent); }
 .agent-chat-close {
     background: none; border: none;
     color: var(--text-muted); line-height: 1;
@@ -152,9 +152,9 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 .agent-control-banner {
     display: flex; align-items: center; gap: 10px;
     padding: 9px 14px;
-    background: rgba(251, 146, 60, 0.10);
+    background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
     border-bottom: 1px solid var(--border);
-    color: var(--accent-orange, #fb923c);
+    color: var(--accent-amber);
     font-size: 12.5px;
 }
 .ac-take-control {
@@ -269,8 +269,9 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 .ac-tool-head { display: flex; align-items: center; gap: 8px; }
 .ac-tool-args { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
 .ac-tool-summary { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
-.ac-tool-summary-err, .ac-tool-warn { color: var(--accent-orange, #fb923c); }
-.ac-tool-err { border-color: rgba(251, 146, 60, 0.35); }
+.ac-tool-summary-err { color: var(--accent-red); }
+.ac-tool-warn { color: var(--accent-amber); }
+.ac-tool-err { border-color: color-mix(in srgb, var(--accent-red) 35%, transparent); }
 .ac-tool-spin {
     width: 11px; height: 11px; border-radius: 50%;
     border: 1.6px solid var(--border);
@@ -286,8 +287,8 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
     font-size: 11.5px; color: var(--text-muted);
     text-align: center; max-width: 95%;
 }
-.ac-level-error { color: var(--color-danger, #f87171); }
-.ac-level-warning { color: var(--accent-orange, #fb923c); }
+.ac-level-error { color: var(--color-danger); }
+.ac-level-warning { color: var(--accent-amber); }
 .ac-level-success { color: var(--accent-green); }
 
 /* ── Choice picker ──────────────────────────────────────── */
@@ -312,7 +313,7 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 .ac-choice-opt:disabled { opacity: 0.5; cursor: default; }
 .ac-choice-label { font-weight: 600; font-size: 13px; }
 .ac-choice-desc { font-size: 12px; color: var(--text-muted); }
-.ac-choice-picked { border-color: var(--accent-green); background: rgba(74, 222, 128, 0.08); }
+.ac-choice-picked { border-color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 8%, transparent); }
 .ac-choice-wake {
     border-color: rgba(167, 139, 250, 0.45);
     border-left: 3px solid var(--accent-purple);
@@ -454,7 +455,7 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
     flex: 0 0 auto; background: none; border: none;
     color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
 }
-.ac-queue-remove:hover { color: var(--color-danger, #f87171); }
+.ac-queue-remove:hover { color: var(--color-danger); }
 
 /* ── Rendered markdown (mdToHtml output, ac-md-* classes) ──────────────────
    Shared by the chat transcript and the ux_v2 plan-wizard activity feed — the
@@ -494,3 +495,10 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 .ac-md-table th:last-child, .ac-md-table td:last-child { border-right: 0; }
 .ac-md-table tr:last-child td { border-bottom: 0; }
 .ac-md-table thead th { background: var(--bg, #f6f8fb); font-weight: 650; color: var(--text); }
+
+/* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
+.agent-rail-dot { background: transparent; outline: 1px dashed var(--text-muted); outline-offset: -1px; }  /* idle */
+.agent-rail-dot.ok { outline: 0; }
+.ac-level-success::before, .ac-choice-picked .ac-choice-label::before { content: '✓ '; }
+.ac-level-warning::before { content: '! '; }
+.ac-level-error::before { content: '✕ '; }

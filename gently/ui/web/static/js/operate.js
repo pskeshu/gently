@@ -743,10 +743,16 @@ const OperateManager = (function () {
             ctx.save();
             ctx.strokeStyle = isEngaged() ? '#7d8899' : (sel ? '#93c5fd' : '#60a5fa');
             ctx.fillStyle = ctx.strokeStyle;
-            ctx.lineWidth = sel ? 2 : 1.2;
+            ctx.lineWidth = sel ? 2.5 : 1.2;
             if (isEngaged()) ctx.setLineDash([4, 3]);
             ctx.beginPath(); ctx.arc(cx, cy, EMB_R, 0, Math.PI * 2); ctx.stroke();
             ctx.setLineDash([]);
+            if (sel) {
+                // Selected: dashed outer halo so the state reads as shape, not only shade.
+                ctx.setLineDash([3, 3]); ctx.lineWidth = 1.2;
+                ctx.beginPath(); ctx.arc(cx, cy, EMB_R + 4, 0, Math.PI * 2); ctx.stroke();
+                ctx.setLineDash([]);
+            }
             ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
             ctx.font = '600 11px Inter Tight, sans-serif';
             ctx.fillText(labelFor(emb), cx + EMB_R + 3, cy + 4);

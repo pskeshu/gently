@@ -47,11 +47,13 @@
     animation: none;
 }
 .boot-banner.failed {
-    border-color: var(--accent-orange);
+    border-color: var(--accent-red);
 }
 .boot-banner.failed .boot-banner-dot {
-    background: var(--accent-orange);
+    background: var(--accent-red);
     animation: none;
+    border-radius: 1px;            /* diamond: failed is a shape, not just a colour */
+    transform: rotate(45deg) scale(0.85);
 }
 /* Not running: the rig was asked for and is not up. Stated, not alarmed —
    the operator may be deliberately working without it for a while. */

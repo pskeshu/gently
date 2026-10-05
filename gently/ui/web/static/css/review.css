@@ -154,7 +154,7 @@
 }
 
 .error {
-    color: #ef4444;
+    color: var(--accent-red);
 }
 
 /* Main content */
@@ -299,7 +299,7 @@
 
 .review-container .status-badge.complete {
     background: var(--accent-green);
-    color: white;
+    color: var(--bg-dark);
 }
 
 .embryo-details {
@@ -365,7 +365,7 @@
 
 .detection-item.positive .detection-result {
     background: var(--accent-green);
-    color: white;
+    color: var(--bg-dark);
 }
 
 .confidence {
@@ -408,7 +408,7 @@
 }
 
 .message.system {
-    border-left: 3px solid var(--accent-orange);
+    border-left: 3px dashed var(--accent-orange);
     opacity: 0.8;
 }
 
@@ -462,8 +462,8 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--accent-green, #4ade80);
-    border: 1px solid var(--accent-green, #4ade80);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
     border-radius: 999px;
     padding: 1px 7px;
     margin-left: 6px;
@@ -473,4 +473,4 @@
     color: var(--accent-purple, #a78bfa);
     border-color: var(--accent-purple, #a78bfa);
 }
-.session-item.active-session { border-left: 2px solid var(--accent-green, #4ade80); }
+.session-item.active-session { border-left: 2px solid var(--accent-green); }

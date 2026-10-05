@@ -761,9 +761,9 @@ const CalibrationProfileView = {
                 const label = isFocusTop ? 'TOP FOCUS' : 'BOT FOCUS';
                 svgParts.push(`
                     <polygon points="${x1 - 4},${y} ${x1 - 11},${y - 4.5} ${x1 - 11},${y + 4.5}"
-                             fill="var(--accent-green)"/>
+                             fill="var(--accent)"/>
                     <text x="${x1 - 14}" y="${y + 3.5}" text-anchor="end"
-                          fill="var(--accent-green)" font-size="9" font-weight="600">${label}</text>
+                          fill="var(--accent)" font-size="9" font-weight="600">${label}</text>
                 `);
             }
         });
@@ -797,13 +797,13 @@ const CalibrationProfileView = {
             const chipX = x1 - chipW - 8;
             svgParts.push(`
                 <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
-                      stroke="var(--accent-green)" stroke-width="2.4"
+                      stroke="var(--accent)" stroke-width="2.4"
                       stroke-linecap="round" opacity="0.98"
                       filter="url(#focus-glow)" class="cal-focus-line"/>
-                <circle cx="${x1}" cy="${y}" r="2.5" fill="var(--accent-green)"/>
-                <circle cx="${x2}" cy="${y}" r="2.5" fill="var(--accent-green)"/>
+                <circle cx="${x1}" cy="${y}" r="2.5" fill="var(--accent)"/>
+                <circle cx="${x2}" cy="${y}" r="2.5" fill="var(--accent)"/>
                 <rect x="${chipX}" y="${y - chipH / 2}" width="${chipW}" height="${chipH}" rx="${chipH / 2}"
-                      fill="var(--accent-green)" opacity="0.92"/>
+                      fill="var(--accent)" opacity="0.92"/>
                 <text x="${chipX + chipW / 2}" y="${y + 3.5}" text-anchor="middle"
                       fill="#0a1419" font-size="9" font-weight="700"
                       letter-spacing="0.6">${label}</text>
