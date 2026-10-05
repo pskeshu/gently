@@ -27,11 +27,12 @@
     --op-rule: #262c36;
     --op-ink: #d7dee8;
     --op-ink-dim: #7d8899;
-    /* the only three signal colours on this surface */
-    --op-live: #4ade80;   /* a stream is running */
-    --op-warn: #f5a524;   /* floor proximity, XY locked */
-    --op-emit: #f4485d;   /* LED or laser emitting — nothing else may use this */
-    --op-bad:  #ef4444;   /* the sample is below the floor; HALT */
+    /* the signal colours on this surface, aliased to the shared status
+       palette in main.css so they stay colorblind-separable and themed */
+    --op-live: var(--accent-green);   /* a stream is running */
+    --op-warn: var(--accent-amber);   /* floor proximity, XY locked */
+    --op-emit: var(--accent-red);     /* LED or laser emitting — shape marks it too */
+    --op-bad:  var(--accent-red);     /* the sample is below the floor; HALT (pulses) */
 
     --op-1: 4px;  --op-2: 8px;  --op-3: 12px;
     --op-4: 16px; --op-5: 20px; --op-6: 24px;
@@ -55,10 +56,6 @@
     --op-rule: #dfe4ea;
     --op-ink: #1c2430;
     --op-ink-dim: #667081;
-    --op-live: #16a34a;
-    --op-warn: #b45309;
-    --op-emit: #dc2626;
-    --op-bad:  #b91c1c;
 }
 
 /* ── sub-navigation ─────────────────────────────────────────────────────── */
@@ -558,7 +555,6 @@
     border-color: var(--op-live);
     color: var(--op-live);
 }
-.op-btn.is-emitting { border-color: var(--op-emit); color: var(--op-emit); }
 
 .op-nbtn {
     padding: var(--op-1) var(--op-2);
@@ -778,8 +774,8 @@
 
 /* Armed is a hazard, not a preference — it reads as one. */
 .lp-btn.is-armed {
-    border-color: var(--accent-red, #ef4444);
-    color: var(--accent-red, #ef4444);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
     font-weight: 600;
 }
 
@@ -793,7 +789,7 @@
     font-weight: 700;
     letter-spacing: 0.04em;
     color: #fff;
-    background: var(--accent-red, #ef4444);
+    background: var(--accent-red);
 }
 
 /* "I do not know" must not look like "no". */
@@ -1081,8 +1077,8 @@
 }
 
 .rp-del:hover {
-    border-color: var(--accent-red, #ef4444);
-    color: var(--accent-red, #ef4444);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
 }
 
 /* A reference embryo is not imaged as a subject; it should not look like one. */
@@ -1304,8 +1300,8 @@
     border-radius: 3px;
     font-size: 0.68rem;
     line-height: 1.35;
-    color: var(--accent-amber, #d97706);
-    background: color-mix(in srgb, var(--accent-amber, #d97706) 12%, transparent);
+    color: var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
 }
 
 /* Armed with nothing routed — safe, surprising, and the state the rig is left
@@ -1764,3 +1760,10 @@
 }
 .op-cal-kept-img:hover, .op-cal-kept-img:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
 .op-cal-kept-img img { display: block; width: 100%; height: auto; border-radius: 3px; }
+
+/* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
+.op-btn.is-on::before { content: '● '; }
+.op-btn.is-armed { border-color: var(--op-bad); color: var(--op-bad); font-weight: 600; }
+.op-btn.is-armed::before, .lp-btn.is-armed::before,
+.op-gauge.is-near-floor .op-gauge-name::before,
+.op-plan-say[data-bad="1"]::before { content: '! '; }

@@ -56,9 +56,9 @@
 }
 .expov-live-badge {
     padding: 2px 8px;
-    background: rgba(34, 197, 94, 0.18);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.45);
+    background: color-mix(in srgb, var(--accent-green) 18%, transparent);
+    color: var(--accent-green);
+    border: 1px solid color-mix(in srgb, var(--accent-green) 45%, transparent);
     font-size: 9px;
     font-weight: 700;
     border-radius: 10px;
@@ -195,10 +195,10 @@
     height: 8px;
     border-radius: 2px;
 }
-.expov-mini-legend-swatch.base     { background: #4b5563; opacity: 0.7; }
+.expov-mini-legend-swatch.base     { background: var(--text-muted); opacity: 0.7; }
 .expov-mini-legend-swatch.fast     { background: var(--accent-orange); opacity: 0.7; }
-.expov-mini-legend-swatch.burst    { background: #ef4444; }
-.expov-mini-legend-swatch.cooldown { background: #a78bfa; opacity: 0.7; }
+.expov-mini-legend-swatch.burst    { background: var(--accent-red); }
+.expov-mini-legend-swatch.cooldown { background: var(--accent-purple); opacity: 0.7; }
 .expov-mini-legend-swatch.projected {
     background: repeating-linear-gradient(
         90deg,
@@ -282,11 +282,11 @@
 }
 
 /* Phase fills — saturation differentiates cadence intensity */
-.expov-svg-phase-base       { fill: #6b7280; opacity: 0.32; }
+.expov-svg-phase-base       { fill: var(--text-muted); opacity: 0.32; }
 .expov-svg-phase-fast       { fill: var(--accent-orange); opacity: 0.55; }
-.expov-svg-phase-burst      { fill: #ef4444; opacity: 0.85; }
-.expov-svg-phase-cooldown   { fill: #a78bfa; opacity: 0.50; }
-.expov-svg-phase-paused     { fill: #3b82f6; opacity: 0.28; }
+.expov-svg-phase-burst      { fill: var(--accent-red); opacity: 0.85; }
+.expov-svg-phase-cooldown   { fill: var(--accent-purple); opacity: 0.50; }
+.expov-svg-phase-paused     { fill: var(--accent-amber); opacity: 0.28; }
 
 /* Per-acquisition dot: one soft circle per past firing along the top
    edge of the lane. Discrete (one mark per timepoint) but the circular
@@ -455,8 +455,8 @@
 
 .expov-svg-dose-track { fill: var(--bg-hover); }
 .expov-svg-dose-fill-ok    { fill: var(--accent-green); opacity: 0.7; }
-.expov-svg-dose-fill-warn  { fill: var(--accent-orange); opacity: 0.85; }
-.expov-svg-dose-fill-crit  { fill: #ef4444; opacity: 0.85; }
+.expov-svg-dose-fill-warn  { fill: var(--accent-amber); opacity: 0.85; }
+.expov-svg-dose-fill-crit  { fill: var(--accent-red); opacity: 0.85; }
 .expov-svg-dose-text {
     fill: var(--text);
     font-size: 9.5px;
@@ -471,7 +471,7 @@
 .expov-svg-stop-hatch { fill: var(--accent-green); }
 
 .expov-svg-burst-balloon-bg {
-    fill: #ef4444;
+    fill: var(--accent-red);
     opacity: 0.9;
 }
 .expov-svg-burst-label {
@@ -641,10 +641,12 @@
    ============================================================ */
 
 :root {
-    --ops-done:   #34d399;
-    --ops-active: #f5a623;
-    --ops-plan:   #5aa9e6;
-    --ops-live:   #22d3ee;
+    /* shared status palette (main.css): done=blue, active=amber, live=green,
+       planned=grey + dashed outline */
+    --ops-done:   var(--accent);
+    --ops-active: var(--accent-amber);
+    --ops-plan:   var(--text-muted);
+    --ops-live:   var(--accent-green);
     --ops-mono:   ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -801,7 +803,7 @@
 .ops-node.active::before {
     border-color: var(--ops-active);
     background: var(--ops-active);
-    box-shadow: 0 0 0 5px rgba(245, 166, 35, 0.14);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--ops-active) 14%, transparent);
 }
 
 /* AUDIT: queued = cocked instrument — dashed blue dot (not empty) */
@@ -834,8 +836,8 @@
     display: inline-block;
     padding: 1px 7px;
     border-radius: 9px;
-    background: rgba(90, 169, 230, 0.15);
-    border: 1px solid rgba(90, 169, 230, 0.45);
+    background: color-mix(in srgb, var(--ops-plan) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ops-plan) 45%, transparent);
     color: var(--ops-plan);
     font-size: 9px;
     font-weight: 700;
@@ -863,9 +865,9 @@
 
 /* active — amber left edge + tinted gradient + FLATTENED (no card-in-card) */
 .ops-node.active .ops-card {
-    border-color: rgba(245, 166, 35, 0.3);
+    border-color: color-mix(in srgb, var(--ops-active) 30%, transparent);
     border-left: 3px solid var(--ops-active);
-    background: linear-gradient(180deg, rgba(245, 166, 35, 0.05), transparent),
+    background: linear-gradient(180deg, color-mix(in srgb, var(--ops-active) 5%, transparent), transparent),
                 var(--bg-card, #161b22);
 }
 
@@ -881,7 +883,7 @@
 /* Hairline rule between card header and live readouts (flattened layout) */
 .ops-rule {
     border: none;
-    border-top: 1px solid rgba(245, 166, 35, 0.18);
+    border-top: 1px solid color-mix(in srgb, var(--ops-active) 18%, transparent);
     margin: 10px 0;
 }
 
@@ -1005,8 +1007,8 @@
     background: var(--bg-hover, #21262d);
 }
 
-.ops-ph.done   { border-color: rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.05); }
-.ops-ph.active { border-color: rgba(245, 166, 35, 0.45); background: rgba(245, 166, 35, 0.08); }
+.ops-ph.done   { border-color: color-mix(in srgb, var(--ops-done) 35%, transparent); background: color-mix(in srgb, var(--ops-done) 5%, transparent); }
+.ops-ph.active { border-color: color-mix(in srgb, var(--ops-active) 45%, transparent); background: color-mix(in srgb, var(--ops-active) 8%, transparent); }
 .ops-ph.todo   { opacity: 0.6; }
 
 .ops-pht {
@@ -1097,8 +1099,8 @@
 
 .ops-cadence-phase.normal { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
 .ops-cadence-phase.fast   { background: rgba(251, 146, 60,  0.2); color: var(--accent-orange, #fb923c); }
-.ops-cadence-phase.burst  { background: rgba(239, 68,  68,  0.2); color: #f87171; }
-.ops-cadence-phase.paused { background: rgba(90, 169, 230,  0.15); color: var(--ops-plan); }
+.ops-cadence-phase.burst  { background: color-mix(in srgb, var(--accent-red) 20%, transparent); color: var(--accent-red); }
+.ops-cadence-phase.paused { background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber); }
 
 .ops-cadence-val { color: var(--text-muted); margin-left: auto; }
 
@@ -1116,9 +1118,9 @@
     letter-spacing: 0.1em;
 }
 
-.ops-monitor-armed    { background: rgba(90, 169, 230, 0.15);  color: var(--ops-plan);   border: 1px solid rgba(90, 169, 230, 0.35); }
-.ops-monitor-watching { background: rgba(245, 166, 35, 0.12); color: var(--ops-active); border: 1px solid rgba(245, 166, 35, 0.3); }
-.ops-monitor-fired    { background: rgba(52, 211, 153, 0.12);  color: var(--ops-done);   border: 1px solid rgba(52, 211, 153, 0.3); }
+.ops-monitor-armed    { background: color-mix(in srgb, var(--ops-plan) 15%, transparent);  color: var(--ops-plan);   border: 1px solid color-mix(in srgb, var(--ops-plan) 35%, transparent); }
+.ops-monitor-watching { background: color-mix(in srgb, var(--ops-active) 12%, transparent); color: var(--ops-active); border: 1px solid color-mix(in srgb, var(--ops-active) 30%, transparent); }
+.ops-monitor-fired    { background: color-mix(in srgb, var(--ops-done) 12%, transparent);  color: var(--ops-done);   border: 1px solid color-mix(in srgb, var(--ops-done) 30%, transparent); }
 
 /* Planned kind-detail snippets (cadence note, watch hint) */
 .ops-cadence-note,
@@ -1259,7 +1261,7 @@
     border-bottom: 1px solid var(--border, #30363d);
 }
 
-.ops-class-header.subject   { background: rgba(245, 166, 35,  0.04); }
+.ops-class-header.subject   { background: color-mix(in srgb, var(--ops-active) 4%, transparent); }
 .ops-class-header.reference { background: rgba(139, 148, 158, 0.06); }
 
 .ops-class-label {
@@ -1286,7 +1288,7 @@
     height: 6px;
     border-radius: 50%;
     background: var(--ops-active);
-    box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.2);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ops-active) 20%, transparent);
     animation: ops-roster-pulse 2s ease-in-out infinite;
     flex-shrink: 0;
 }
@@ -1410,8 +1412,8 @@
 
 .ops-rem-phase.normal { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
 .ops-rem-phase.fast   { background: rgba(251, 146, 60,  0.2); color: var(--accent-orange, #fb923c); }
-.ops-rem-phase.burst  { background: rgba(239, 68,  68,  0.2); color: #f87171; }
-.ops-rem-phase.paused { background: rgba(90,  169, 230, 0.15); color: var(--ops-plan); }
+.ops-rem-phase.burst  { background: color-mix(in srgb, var(--accent-red) 20%, transparent); color: var(--accent-red); }
+.ops-rem-phase.paused { background: color-mix(in srgb, var(--accent-amber) 15%, transparent); color: var(--accent-amber); }
 
 .ops-rem-tactic {
     color: var(--text);
@@ -1493,10 +1495,10 @@
     transition: border-color 0.15s;
 }
 .ops-node.planned .ops-card[data-tactic-expand-id]:hover {
-    border-color: rgba(90, 169, 230, 0.5);
+    border-color: color-mix(in srgb, var(--ops-plan) 50%, transparent);
 }
 .ops-node.done .ops-card[data-tactic-expand-id]:hover {
-    border-color: rgba(52, 211, 153, 0.4);
+    border-color: color-mix(in srgb, var(--ops-done) 40%, transparent);
 }
 .ops-node.paused .ops-card[data-tactic-expand-id]:hover {
     border-color: rgba(139, 148, 158, 0.45);
@@ -1734,19 +1736,19 @@
 
 /* Status colour variants mirroring ops- state palette */
 .ops-lp-status-planned {
-    background: rgba(90, 169, 230, 0.12);
+    background: color-mix(in srgb, var(--ops-plan) 12%, transparent);
     color: var(--ops-plan, #5aa9e6);
-    border: 1px solid rgba(90, 169, 230, 0.3);
+    border: 1px solid color-mix(in srgb, var(--ops-plan) 30%, transparent);
 }
 .ops-lp-status-active {
-    background: rgba(245, 166, 35, 0.12);
-    color: var(--ops-active, #f5a623);
-    border: 1px solid rgba(245, 166, 35, 0.3);
+    background: color-mix(in srgb, var(--ops-active) 12%, transparent);
+    color: var(--ops-active);
+    border: 1px solid color-mix(in srgb, var(--ops-active) 30%, transparent);
 }
 .ops-lp-status-done {
-    background: rgba(52, 211, 153, 0.1);
-    color: var(--ops-done, #34d399);
-    border: 1px solid rgba(52, 211, 153, 0.25);
+    background: color-mix(in srgb, var(--ops-done) 10%, transparent);
+    color: var(--ops-done);
+    border: 1px solid color-mix(in srgb, var(--ops-done) 25%, transparent);
 }
 
 /* Per-row delink (×) button */
@@ -1836,3 +1838,14 @@
     transition: color 0.15s;
 }
 .ops-lp-picker-cancel-btn:hover { color: var(--text); }
+
+/* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
+.ops-pip.during { background: linear-gradient(90deg, var(--ops-active) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--ops-active); }
+.ops-pip.after  { background: transparent; box-shadow: inset 0 0 0 2px var(--ops-done); }
+/* SVG bands: a different dash per phase / dose level, so the fills differ in pattern too */
+.expov-svg-phase-fast     { stroke: var(--accent-orange); stroke-width: 1; stroke-dasharray: 6 2; }
+.expov-svg-phase-burst    { stroke: var(--accent-red);    stroke-width: 1; stroke-dasharray: 2 2; }
+.expov-svg-phase-cooldown { stroke: var(--accent-purple); stroke-width: 1; stroke-dasharray: 4 4; }
+.expov-svg-phase-paused   { stroke: var(--accent-amber);  stroke-width: 1; stroke-dasharray: 1 3; }
+.expov-svg-dose-fill-warn { stroke: var(--accent-amber);  stroke-width: 1; stroke-dasharray: 4 2; }
+.expov-svg-dose-fill-crit { stroke: var(--accent-red);    stroke-width: 1; stroke-dasharray: 2 2; }

@@ -136,7 +136,7 @@
     transition: all 0.15s ease;
 }
 .decide-card:hover { border-color: var(--accent); }
-.decide-card.completed { border-left-color: var(--accent-green); }
+.decide-card.completed { border-left-color: var(--accent); }
 .decide-card.active { border-left-color: var(--accent); }
 .decide-phase {
     font-size: 0.7rem;
@@ -531,17 +531,17 @@
     justify-content: center;
     gap: 12px;
     padding: 8px 20px;
-    background: rgba(251, 146, 60, 0.10);
-    border-bottom: 1px solid rgba(251, 146, 60, 0.25);
-    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent-amber) 25%, transparent);
+    color: var(--accent-amber);
     font-size: 0.78rem;
     font-weight: 500;
     flex-shrink: 0;
 }
 .snapshot-close {
     background: none;
-    border: 1px solid rgba(251, 146, 60, 0.3);
-    color: var(--accent-orange);
+    border: 1px solid color-mix(in srgb, var(--accent-amber) 30%, transparent);
+    color: var(--accent-amber);
     padding: 3px 10px;
     border-radius: 4px;
     font-size: 0.72rem;
@@ -550,8 +550,8 @@
     transition: all 0.15s;
 }
 .snapshot-close:hover {
-    background: rgba(251, 146, 60, 0.15);
-    border-color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-amber) 15%, transparent);
+    border-color: var(--accent-amber);
 }
 
 /* ── Header Additions ────────────────────────────────── */
@@ -678,9 +678,9 @@
     border-radius: 50%;
     flex-shrink: 0;
 }
-.nav-status-dot.st-active   { background: var(--accent-green); box-shadow: 0 0 6px rgba(74,222,128,0.4); }
-.nav-status-dot.st-completed { background: var(--accent-purple); }
-.nav-status-dot.st-paused   { background: var(--accent-orange); }
+.nav-status-dot.st-active   { background: var(--accent-green); box-shadow: 0 0 6px color-mix(in srgb, var(--accent-green) 40%, transparent); }
+.nav-status-dot.st-completed { background: var(--accent); }
+.nav-status-dot.st-paused   { background: var(--accent-amber); }
 .nav-campaign-name {
     flex: 1;
     font-size: 0.8rem;
@@ -1197,7 +1197,7 @@
     font-weight: 600;
     text-transform: uppercase;
     color: var(--accent-green);
-    background: rgba(74,222,128,0.08);
+    background: color-mix(in srgb, var(--accent-green) 8%, transparent);
     padding: 1px 6px;
     border-radius: 3px;
 }
@@ -1343,7 +1343,7 @@
 }
 .spec-edit-unit { color: var(--text-muted); font-size: 0.66rem; }
 .spec-edit-error {
-    color: var(--accent-orange, #d98324);
+    color: var(--accent-red);
     font-size: 0.68rem;
     margin-top: 2px;
 }
@@ -1566,19 +1566,19 @@
 }
 .status-active {
     color: var(--accent-green);
-    background: rgba(74,222,128,0.08);
+    background: color-mix(in srgb, var(--accent-green) 8%, transparent);
 }
 .status-active::before { background: var(--accent-green); box-shadow: 0 0 4px var(--accent-green); }
 .status-completed {
-    color: var(--accent-purple);
-    background: rgba(192,132,252,0.08);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
-.status-completed::before { background: var(--accent-purple); }
+.status-completed::before { background: var(--accent); }
 .status-paused {
-    color: var(--accent-orange);
-    background: rgba(251,146,60,0.08);
+    color: var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 8%, transparent);
 }
-.status-paused::before { background: var(--accent-orange); }
+.status-paused::before { background: var(--accent-amber); }
 .status-planned {
     color: var(--text-muted);
     background: rgba(139,148,158,0.08);
@@ -1588,9 +1588,9 @@
 /* Status dots */
 .dot-planned     { color: var(--text-muted); opacity: 0.4; }
 .dot-in_progress { color: var(--accent); }
-.dot-completed   { color: var(--accent-green); }
-.dot-skipped     { color: var(--accent-orange); opacity: 0.5; }
-.dot-blocked     { color: var(--accent-pink); opacity: 0.5; }
+.dot-completed   { color: var(--accent); }
+.dot-skipped     { color: var(--text-muted); opacity: 0.5; }
+.dot-blocked     { color: var(--accent-red); opacity: 0.5; }
 
 /* Type icon colors */
 .type-imaging        { color: var(--accent); }
@@ -1687,3 +1687,16 @@
     }
     a { color: inherit; }
 }
+
+/* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
+.nav-status-dot { border: 1px dashed var(--text-muted); box-sizing: border-box; }   /* planned */
+.nav-status-dot.st-active, .nav-status-dot.st-completed, .nav-status-dot.st-paused { border: 0; }
+.nav-status-dot.st-paused, .status-paused::before {
+    background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--accent-amber);
+}
+.nav-status-dot.st-completed { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+.status-completed::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.status-planned::before { background: transparent; border: 1px dashed var(--text-muted); box-sizing: border-box; }
+.decide-card { border-left-style: dashed; }                     /* planned */
+.decide-card.completed, .decide-card.active { border-left-style: solid; }

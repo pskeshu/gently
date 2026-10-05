@@ -25,7 +25,7 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
     --atr-shadow-lift: 0 14px 40px rgba(0, 0, 0, .6), 0 2px 4px rgba(0, 0, 0, .45);
     --atr-win-border:  #2b3440;
     --atr-chrome-bg:   rgba(22, 27, 34, .92);
-    --warn:            #d29922;   /* consumed by .atr-calling and #atr-releases */
+    --warn:            var(--accent-amber);   /* consumed by .atr-calling and #atr-releases */
 }
 [data-theme="light"] {
     --atr-bench:       #dde3ec;   /* a real surface, not almost-white */
@@ -34,7 +34,6 @@ body.atrium-on .atr-body > .tab-content { display: block !important; }
     --atr-shadow-lift: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 4px rgba(15, 23, 42, .08);
     --atr-win-border:  #cbd5e1;
     --atr-chrome-bg:   rgba(255, 255, 255, .92);
-    --warn:            #b45309;   /* darker: the light chrome is nearly white */
 }
 
 /* ── the bench ───────────────────────────────────────────────────────── */
@@ -196,9 +195,9 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
 /* R6: a window that has released above the gauge says so */
 .atr-win.atr-calling { animation: atr-call 1.7s ease-in-out infinite; }
 @keyframes atr-call {
-    50% { box-shadow: 0 8px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--warn, #d29922) 55%, transparent); }
+    50% { box-shadow: 0 8px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent); }
 }
-#atr-releases { color: var(--warn, #d29922); cursor: help; }
+#atr-releases { color: var(--warn); cursor: help; }
 
 /* The chrome is screen-fixed and the bench pans beneath it, so a window WILL
    slide under the chip bar. It cannot be prevented by layout — only made

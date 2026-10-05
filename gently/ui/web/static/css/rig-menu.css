@@ -10,8 +10,7 @@
 
 /* A rig that is down is not a neutral fact: amber says "not ready", red says
    "it fell over". Both stay quiet enough for a header. */
-.status-dot.error { background: #ef4444; opacity: 1; }
-.status-dot.partial { background: var(--accent-orange, #f59e0b); }
+.status-dot.error { background: var(--accent-red); opacity: 1; }
 
 /* ── the menu ───────────────────────────────────────────────── */
 .rig-menu { width: 316px; padding: 0.35rem 0; }
@@ -42,8 +41,8 @@
 }
 .rig-state { font-size: 0.8rem; font-weight: 600; color: var(--text); }
 .rig-state-connected { color: var(--accent-green); }
-.rig-state-partial { color: var(--accent-orange, #f59e0b); }
-.rig-state-error { color: #ef4444; }
+.rig-state-partial { color: var(--accent-amber); }
+.rig-state-error { color: var(--accent-red); }
 .rig-state-off { color: var(--text-muted); }
 
 .rig-temp-now { font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -85,7 +84,7 @@
 .rig-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .rig-btn:disabled { opacity: 0.45; cursor: default; }
 .rig-btn-go:hover:not(:disabled) { border-color: var(--accent-green); color: var(--accent-green); }
-.rig-btn-stop:hover:not(:disabled) { border-color: #ef4444; color: #ef4444; }
+.rig-btn-stop:hover:not(:disabled) { border-color: var(--accent-red); color: var(--accent-red); }
 
 .rig-field { display: flex; align-items: center; gap: 0.35rem; }
 .rig-field-label { font-size: 0.7rem; color: var(--text-muted); }
@@ -107,7 +106,7 @@
     margin-top: 0.45rem;
     font-size: 0.7rem;
     line-height: 1.35;
-    color: #ef4444;
+    color: var(--accent-red);
 }
 
 /* ── room light switch ──────────────────────────────────────── */
@@ -181,7 +180,7 @@
 
 /* ── the temperature chart ──────────────────────────────────────
    One series (water) against a reference (setpoint). Series hue #3b82f6 in
-   both themes, checked against the chart surface; the drift colour #d97706 is
+   both themes, checked against the chart surface; the drift colour --accent-amber is
    status, used one at a time and always beside a label that says how far off.
    Grid and axis text wear ink tokens, never the data colour. */
 .devices-temp-graph { position: relative; }
@@ -226,14 +225,14 @@
     stroke: var(--bg-card);      /* 2px surface ring keeps it legible on the line */
     stroke-width: 2;
 }
-.temp-end-dot.is-drifting { fill: #d97706; }
+.temp-end-dot.is-drifting { fill: var(--accent-amber); }
 .temp-end-label {
     fill: var(--text);
     font-size: 11.5px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
-.temp-end-label.is-drifting { fill: #d97706; }
+.temp-end-label.is-drifting { fill: var(--accent-amber); }
 
 /* Crosshair: readers aim at a time, not at a 2px line. */
 .temp-cross { stroke: var(--text-muted); stroke-width: 1; opacity: 0.5; }
@@ -257,7 +256,7 @@
 .temp-tip span { color: var(--text-muted); }
 
 /* The fold's heading carries the same judgement as the chart's end marker. */
-.devices-tempwrap-now.is-drifting { color: #d97706; }
+.devices-tempwrap-now.is-drifting { color: var(--accent-amber); }
 
 /* `hidden` must actually hide. The UA rule is `[hidden] { display: none }` at
    specificity 0,1,0 — exactly the same as a class — so a later `.rig-progress
@@ -265,3 +264,7 @@
    it last said. That is how a ready device layer kept reporting
    "2/5 · Initializing Micro-Manager core". */
 .rig-progress[hidden] { display: none; }
+
+/* ── STATUS SHAPES (vocabulary in main.css). The SVG end label cannot take a
+   pseudo-element, so the fold heading carries the glyph. ── */
+.devices-tempwrap-now.is-drifting::before { content: '! '; }

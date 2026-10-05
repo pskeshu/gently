@@ -84,10 +84,10 @@ body.ux-v2 .v2-strip {
 }
 body.ux-v2 .v2-strip-live {
     display: inline-flex; align-items: center; gap: 6px;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: #ef4444;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: var(--text-muted);
 }
 body.ux-v2 .v2-strip-dot {
-    width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted);
 }
 body.ux-v2 .v2-strip-status { margin-left: auto; font-variant-numeric: tabular-nums; }
 
@@ -113,9 +113,9 @@ body.ux-v2 .cx-lens-h { font-size: 11px; font-weight: 600; color: var(--text-sec
 body.ux-v2 .cx-item { display: flex; align-items: center; gap: 9px; padding: 5px 0; flex-wrap: wrap; }
 body.ux-v2 .cx-text { flex: 1; min-width: 0; font-size: 13px; color: var(--text, #0f172a); }
 body.ux-v2 .cx-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-body.ux-v2 .cx-dot.cx-q { background: #d97706; }
+body.ux-v2 .cx-dot.cx-q { background: var(--accent-amber); }
 body.ux-v2 .cx-dot.cx-w { background: var(--accent, #2f6df6); }
-body.ux-v2 .cx-dot.cx-e { background: var(--accent-green, #16a34a); }
+body.ux-v2 .cx-dot.cx-e { background: var(--accent-green); }
 body.ux-v2 .cx-act { flex: none; border: 1px solid var(--border, #e4e9f0); background: none; color: var(--text-secondary, #475569); border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 body.ux-v2 .cx-act:hover { border-color: var(--accent, #2f6df6); color: var(--accent, #2f6df6); }
 body.ux-v2 .cx-answer { display: flex; gap: 6px; align-items: center; flex: 1 0 100%; margin-top: 4px; }
@@ -208,8 +208,8 @@ body.ux-v2 .cx-empty { font-size: 12.5px; color: var(--text-muted, #94a3b8); fon
 .logc-body:focus { outline: none; }
 .logc-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .logc-line { display: block; }
-.logc-line.is-warn { color: var(--accent-orange); }
-.logc-line.is-error { color: var(--accent-red, #ef4444); font-weight: 600; }
+.logc-line.is-warn { color: var(--accent-amber); }
+.logc-line.is-error { color: var(--accent-red); font-weight: 600; }
 
 @media (max-width: 720px) {
     .logc-panel { height: 78vh; }
@@ -220,21 +220,24 @@ body.ux-v2 .cx-empty { font-size: 12.5px; color: var(--text-muted, #94a3b8); fon
 /* body[data-run="running"|"paused"|"idle"] is set by shell.js from the
    timelapse's events and status. Idle is the absence of a rule: nothing
    here fires until something is actually running. */
-:root { --run-live: #e5484d; --run-paused: #d97706; }
+:root { --run-live: var(--accent-green); --run-paused: var(--accent-amber); }
 
-/* The strip's LIVE dot becomes the REC light. */
+/* The strip's LIVE dot pulses while running: green = running everywhere
+   in the UI (red is reserved for errors and emitting light). */
 body[data-run="running"] .v2-strip-dot {
     background: var(--run-live);
-    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--run-live) 55%, transparent);
     animation: run-rec 1.6s ease-out infinite;
 }
 body[data-run="paused"] .v2-strip-dot { background: var(--run-paused); animation: none; }
+body[data-run="running"] .v2-strip-live { color: var(--run-live); }
+body[data-run="paused"] .v2-strip-live { color: var(--run-paused); }
 body[data-run="running"] .v2-strip-status,
 body[data-run="paused"] .v2-strip-status { font-weight: 600; }
 @keyframes run-rec {
-    0%   { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
-    70%  { box-shadow: 0 0 0 7px rgba(229, 72, 77, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--run-live) 55%, transparent); }
+    70%  { box-shadow: 0 0 0 7px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* The rail: the two pages where the run lives carry the light too, so
@@ -274,13 +277,28 @@ body.ux-v2 .home-hero { display: none; }
     display: inline-block;
     margin-left: 10px;
     padding: 0 7px;
-    border: 1px solid var(--accent-orange, #f59e0b);
+    border: 1px solid var(--accent-amber);
     border-radius: 999px;
     font-size: 0.62rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: var(--accent-orange, #b45309);
+    color: var(--accent-amber);
     cursor: help;
 }
 .diag-badge[hidden] { display: none; }
+
+/* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
+body.ux-v2 .cx-dot.cx-q {                                      /* question: half-filled */
+    background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--accent-amber);
+}
+body.ux-v2 .cx-dot.cx-w { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }  /* expectation: ring */
+body.ux-v2 .v2-strip-dot { background: transparent; border: 1px dashed var(--text-muted); box-sizing: border-box; }  /* idle */
+body[data-run="running"] .v2-strip-dot, body[data-run="paused"] .v2-strip-dot { border: 0; }
+body[data-run="paused"] .v2-strip-dot,
+body[data-run="paused"] .v2-nav-item[data-tab="devices"]::after,
+body[data-run="paused"] .v2-nav-item[data-tab="embryos"]::after {
+    background: linear-gradient(90deg, var(--run-paused) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--run-paused);
+}

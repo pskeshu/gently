@@ -19,7 +19,7 @@ class CommandCategory(Enum):
     INSPECTION = auto()  # /status, /detectors, /embryos, /timelapse, /timeline
     SESSION = auto()  # /sessions, /resume, /save, /import-embryos
     PLANNING = auto()  # /plan
-    APPEARANCE = auto()  # /theme, /history, /tokens
+    APPEARANCE = auto()  # /history, /tokens
     DIAGNOSTICS = auto()  # /test-device
 
 
@@ -523,20 +523,6 @@ Options:
     )
 
     # === Appearance Commands ===
-    registry.register(
-        CommandDefinition(
-            name="/theme",
-            description="Switch color theme",
-            help_text=(
-                "Change the CLI color theme.\n\n"
-                "Available themes: vibrant, scientific, claude, monochrome"
-            ),
-            positional_arg="name",
-            positional_hint="name",
-            category=CommandCategory.APPEARANCE,
-        )
-    )
-
     registry.register(
         CommandDefinition(
             name="/history",

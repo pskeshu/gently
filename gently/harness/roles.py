@@ -42,7 +42,7 @@ class EmbryoRole:
     default_cadence_seconds: float = 300.0
     detector_name: str | None = None
     photodose_budget_multiplier: float = 1.0
-    ui_color: str = "#888888"
+    ui_color: str = "#999999"
     ui_icon: str = "circle"
     # After N consecutive "no_object" detections, treat the embryo as
     # gone (likely hatched / drifted out of FOV) and terminate imaging.
@@ -64,7 +64,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         default_cadence_seconds=300.0,
         detector_name=None,
         photodose_budget_multiplier=1.0,
-        ui_color="#888888",
+        ui_color="#999999",  # Okabe-Ito grey
         ui_icon="circle",
         no_object_consecutive_terminal=None,
         role_class="subject",  # safe default: protect like a subject
@@ -80,7 +80,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         default_cadence_seconds=300.0,
         detector_name="dopaminergic_signal",  # filled in by Phase 2
         photodose_budget_multiplier=1.0,
-        ui_color="#ff66cc",  # magenta
+        ui_color="#d55e00",  # Okabe-Ito vermilion
         ui_icon="star",
         no_object_consecutive_terminal=5,  # forgiving — they might drift back
         role_class="subject",
@@ -95,7 +95,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         default_cadence_seconds=300.0,
         detector_name="perception",
         photodose_budget_multiplier=10.0,
-        ui_color="#00cccc",  # cyan
+        ui_color="#56b4e9",  # Okabe-Ito sky blue
         ui_icon="diamond",
         no_object_consecutive_terminal=2,  # they don't drift back; gone == gone
         role_class="reference",
@@ -109,7 +109,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         default_cadence_seconds=300.0,
         detector_name="perception",  # nuclear pipeline, same as calibration
         photodose_budget_multiplier=5.0,
-        ui_color="#33cc88",  # teal-green — distinct from cyan (calibration) and magenta (test)
+        ui_color="#009e73",  # Okabe-Ito bluish green — CVD-safe vs vermilion/sky blue
         ui_icon="triangle",
         no_object_consecutive_terminal=2,  # reference embryos don't drift back
         role_class="reference",

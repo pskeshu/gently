@@ -50,9 +50,9 @@ def test_lineaging_role_class_is_reference():
 
 
 def test_lineaging_ui_color():
-    # Must be distinct from calibration (#00cccc) and test (#ff66cc)
+    # Must be distinct from calibration (#56b4e9) and test (#d55e00)
     color = REGISTRY["lineaging"].ui_color
-    assert color == "#33cc88"
+    assert color == "#009e73"
     assert color != REGISTRY["calibration"].ui_color
     assert color != REGISTRY["test"].ui_color
 
@@ -112,7 +112,7 @@ def test_get_role_unknown_raises_key_error():
 def test_test_role_fields_unchanged():
     role = REGISTRY["test"]
     assert role.name == "test"
-    assert role.ui_color == "#ff66cc"
+    assert role.ui_color == "#d55e00"
     assert role.ui_icon == "star"
     assert role.photodose_budget_multiplier == 1.0
     assert role.detector_name == "dopaminergic_signal"
@@ -122,7 +122,7 @@ def test_test_role_fields_unchanged():
 def test_calibration_role_fields_unchanged():
     role = REGISTRY["calibration"]
     assert role.name == "calibration"
-    assert role.ui_color == "#00cccc"
+    assert role.ui_color == "#56b4e9"
     assert role.ui_icon == "diamond"
     assert role.photodose_budget_multiplier == 10.0
     assert role.detector_name == "perception"
@@ -132,7 +132,7 @@ def test_calibration_role_fields_unchanged():
 def test_unassigned_role_fields_unchanged():
     role = REGISTRY["unassigned"]
     assert role.name == "unassigned"
-    assert role.ui_color == "#888888"
+    assert role.ui_color == "#999999"
     assert role.ui_icon == "circle"
     assert role.detector_name is None
     assert role.no_object_consecutive_terminal is None

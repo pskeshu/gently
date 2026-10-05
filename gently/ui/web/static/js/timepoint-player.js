@@ -618,18 +618,6 @@ const TimepointPlayer = {
         this.renderTimeline();
     },
 
-    // Stage color mapping
-    stageColors: {
-        'early': '#6b7280',      // gray
-        'bean': '#8b5cf6',       // violet
-        'comma': '#3b82f6',      // blue
-        '1.5fold': '#06b6d4',    // cyan
-        '2fold': '#10b981',      // emerald
-        '3fold': '#22c55e',      // green
-        'hatching': '#f59e0b',   // amber
-        'hatched': '#ef4444',    // red
-    },
-
     renderStageSegments(track, firstTp, range) {
         /**
          * Render colored segments on timeline based on VLM stage per timepoint
@@ -678,13 +666,15 @@ const TimepointPlayer = {
             segments.push(currentSegment);
         }
 
-        // Render each segment as a colored div
-        for (const seg of segments) {
-            const color = this.stageColors[seg.stage.toLowerCase()] || '#6b7280';
+        // Render each segment as a colored div. Every other segment gets a
+        // diagonal stripe so neighbours differ by pattern, not just hue.
+        segments.forEach((seg, i) => {
+            const color = stageColor(seg.stage);
             const startPct = ((seg.startTp - firstTp) / range) * 100;
             const endPct = ((seg.endTp - firstTp) / range) * 100;
             // Add small margin for segment visibility (at least 1% width)
             const width = Math.max(1, endPct - startPct);
+            const stripe = i % 2 ? 'repeating-linear-gradient(135deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 6px), ' : '';
 
             const segmentEl = document.createElement('div');
             segmentEl.className = 'timeline-stage-segment';
@@ -693,15 +683,24 @@ const TimepointPlayer = {
                 left: ${startPct}%;
                 width: ${width}%;
                 height: 100%;
-                background-color: ${color};
-                opacity: 0.4;
-                pointer-events: none;
+                background: ${stripe}color-mix(in srgb, ${color} 40%, transparent);
+                pointer-events: auto;
                 z-index: 0;
+                display: flex;
+                align-items: center;
+                padding: 0 3px;
+                box-sizing: border-box;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                font-size: 9px;
+                color: var(--text);
             `;
+            if (width > 6) segmentEl.textContent = seg.stage;
             segmentEl.title = `${seg.stage}: T${seg.startTp}-T${seg.endTp}`;
 
             track.appendChild(segmentEl);
-        }
+        });
     },
 
     renderTimeline() {

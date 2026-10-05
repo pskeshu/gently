@@ -94,14 +94,6 @@ const EmbryosManager = {
         'pretzel': 7, '3_fold': 7, 'hatching': 8, 'hatched': 9
     },
 
-    STAGE_COLORS: {
-        'early': '#8b949e', '1_cell': '#8b949e', '2_cell': '#8b949e', '4_cell': '#8b949e',
-        'bean': '#60a5fa', 'comma': '#60a5fa',
-        '1_5_fold': '#4ade80', '2_fold': '#4ade80',
-        'pretzel': '#c084fc', '3_fold': '#c084fc',
-        'hatching': '#fb923c', 'hatched': '#f472b6'
-    },
-
     // Badge state for new detection notifications
     newDetectionCount: 0,  // Count of NEW detections since user last viewed
     lastSeenDetectionTime: null,  // When user last viewed the Embryos tab
@@ -621,7 +613,7 @@ const EmbryosManager = {
                     <span class="board-status-dot ${status}">●</span>
                     <span class="board-embryo-name">${embryo.embryoId.replace(/embryo_?/i, 'E')}</span>
                 </span>
-                ${cols.includes('stage') ? `<span class="board-col board-col-stage"><span class="board-stage-badge" style="color:${this.STAGE_COLORS[stage] || 'var(--text)'}">${stageIcon} ${stageName}</span></span>` : ''}
+                ${cols.includes('stage') ? `<span class="board-col board-col-stage"><span class="board-stage-badge" style="color:${stageColor(stage)}">${stageIcon} ${stageName}</span></span>` : ''}
                 ${cols.includes('clock') ? `<span class="board-col board-col-clock">${clockText}</span>` : ''}
                 ${cols.includes('stereo') ? `<span class="board-col board-col-stereo">${stereoText}</span>` : ''}
                 ${cols.includes('pace') ? `<span class="board-col board-col-pace ${pace.className}">${pace.text}</span>` : ''}
@@ -743,7 +735,7 @@ const EmbryosManager = {
             const x = i * step;
             const y = height - (ord / maxOrd) * (height - 4) - 2;
             pathD += i === 0 ? `M${x},${y}` : `L${x},${y}`;
-            lastColor = this.STAGE_COLORS[item.stage] || '#8b949e';
+            lastColor = stageColor(item.stage);
         });
 
         return `<svg class="board-sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
@@ -873,9 +865,9 @@ const EmbryosManager = {
                 const imageUid = item.image_uid || item.projection_uid;
                 const isPending = item._pending === true;
                 const stage = item.stage || (isPending ? 'pending' : '—');
-                const stageColor = isPending
+                const thumbColor = isPending
                     ? 'var(--text-muted)'
-                    : (this.STAGE_COLORS[stage] || '#8b949e');
+                    : (stageColor(stage));
                 const confNorm = isPending
                     ? 'analyzing…'
                     : this.normalizeConfidence(item.confidence);
@@ -884,9 +876,9 @@ const EmbryosManager = {
 
                 html += `<div class="${cellClass}" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" title="T${item.timepoint} — ${stageLabel} — ${confNorm}">`;
                 if (imageUid) {
-                    html += `<img class="filmstrip-thumb" src="/api/images/${imageUid}/png?size=${thumbSize * 2}" loading="lazy" width="${thumbSize}" height="${thumbSize}" style="border-color:${stageColor}"/>`;
+                    html += `<img class="filmstrip-thumb" src="/api/images/${imageUid}/png?size=${thumbSize * 2}" loading="lazy" width="${thumbSize}" height="${thumbSize}" style="border-color:${thumbColor}"/>`;
                 } else {
-                    html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px;border-color:${stageColor}">T${item.timepoint}</div>`;
+                    html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px;border-color:${thumbColor}">T${item.timepoint}</div>`;
                 }
                 if (config.showStageLabels) {
                     html += `<span class="filmstrip-stage-label" style="color:${stageColor}">${stageLabel}</span>`;
@@ -1127,7 +1119,7 @@ const EmbryosManager = {
             const x = padLeft + (minutes / maxMinutes) * chartW;
             const y = stageY(item.stage);
             actualPath += i === 0 ? `M${x},${y}` : `L${x},${y}`;
-            const color = this.STAGE_COLORS[item.stage] || '#8b949e';
+            const color = stageColor(item.stage);
             pointsHtml += `<circle class="vitals-point" cx="${x}" cy="${y}" r="4" fill="${color}" stroke="var(--bg-card)" stroke-width="1.5" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" style="cursor:pointer"/>`;
         });
 
@@ -1148,7 +1140,7 @@ const EmbryosManager = {
             ${yLabels}
             ${xLabels}
             ${expectedPath ? `<path d="${expectedPath}" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.4"/>` : ''}
-            ${actualPath ? `<path d="${actualPath}" fill="none" stroke="${this.STAGE_COLORS[currentStage] || '#60a5fa'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+            ${actualPath ? `<path d="${actualPath}" fill="none" stroke="${stageColor(currentStage)}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
             ${pointsHtml}
         </svg>`;
 
@@ -1156,7 +1148,7 @@ const EmbryosManager = {
             <div class="vitals-strip" data-embryo-id="${embryo.embryoId}">
                 <div class="vitals-info">
                     <span class="vitals-name">${shortName}</span>
-                    <span class="vitals-stage" style="color:${this.STAGE_COLORS[currentStage] || 'var(--text)'}">${this.formatStageName(currentStage)}</span>
+                    <span class="vitals-stage" style="color:${stageColor(currentStage)}">${this.formatStageName(currentStage)}</span>
                     <span class="vitals-conf">${conf}</span>
                     <span class="vitals-rate">${rate}</span>
                     <span class="vitals-eta">${eta}</span>
@@ -2313,23 +2305,16 @@ const EmbryosManager = {
             : (item.findings && item.findings.has_hatched);
         if (claudeIntensity || claudeStructure || claudeHatched !== undefined) {
             const intensityColors = {
-                NONE: '#888', WEAK: '#7bb3d4', MEDIUM: '#ffba6b',
-                STRONG: '#ff8c42', SATURATING: '#ff5252',
+                NONE: 'var(--text-muted)', WEAK: 'var(--accent)', MEDIUM: 'var(--accent-amber)',
+                STRONG: 'var(--accent-orange)', SATURATING: 'var(--accent-red)',
             };
             const structureColors = {
-                NONE: '#888', PARTIAL: '#ffba6b', GOOD: '#4caf50',
+                NONE: 'var(--text-muted)', PARTIAL: 'var(--accent-amber)', GOOD: 'var(--accent-green)',
             };
-            const iColor = intensityColors[claudeIntensity] || '#aaa';
-            const sColor = structureColors[claudeStructure] || '#aaa';
-            const intensityChip = claudeIntensity
-                ? `<span class="finding-chip" style="background:${iColor}26;color:${iColor};border:1px solid ${iColor}">intensity: ${claudeIntensity}</span>`
-                : '';
-            const structureChip = claudeStructure
-                ? `<span class="finding-chip" style="background:${sColor}26;color:${sColor};border:1px solid ${sColor}">structure: ${claudeStructure}</span>`
-                : '';
-            const hatchedChip = claudeHatched
-                ? `<span class="finding-chip" style="background:#ff525226;color:#ff5252;border:1px solid #ff5252">hatched</span>`
-                : '';
+            const chip = (c, text) => `<span class="finding-chip" style="background:color-mix(in srgb, ${c} 15%, transparent);color:${c};border:1px solid ${c}">${text}</span>`;
+            const intensityChip = claudeIntensity ? chip(intensityColors[claudeIntensity] || 'var(--text-muted)', `intensity: ${claudeIntensity}`) : '';
+            const structureChip = claudeStructure ? chip(structureColors[claudeStructure] || 'var(--text-muted)', `structure: ${claudeStructure}`) : '';
+            const hatchedChip = claudeHatched ? chip(stageColor('hatched'), 'hatched') : '';
             detectorFindingsHtml = `
                 <div class="detail-claude-findings">
                     <div class="reasoning-label">Claude detector — ${this.escapeHtml(item.detector_name || 'unknown')}</div>
