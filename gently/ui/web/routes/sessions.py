@@ -327,6 +327,7 @@ def create_router(server) -> APIRouter:
                         "last_run": held.get("last_run"),
                         "dic_frames": _dic_count(store, sid),
                         "bytes": folder_bytes(store._session_dir(sid), fresh=sid == active_id),
+                        "brightfield_references": _reference_count(store, sid),
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
                             embryo_count=held.get("embryo_count", 0),
@@ -347,6 +348,15 @@ def create_router(server) -> APIRouter:
             logger.warning("Failed to list sessions from FileStore: %s", e)
             sessions = []
         return {"sessions": sessions}
+
+    def _reference_count(store, sid: str) -> int:
+        """Complete dark+flat reference sets the session holds."""
+        try:
+            from gently.app.brightfield import list_records
+
+            return sum(1 for r in list_records(store, sid) if r.get("dark") and r.get("flat"))
+        except Exception:
+            return 0
 
     def _dic_count(store, sid: str) -> int:
         try:

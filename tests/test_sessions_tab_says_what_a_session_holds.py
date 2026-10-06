@@ -100,6 +100,7 @@ class TestTheList:
         s = _client(store).get("/api/sessions").json()["sessions"][0]
         assert (s["embryo_count"], s["timepoints"], s["dic_frames"]) == (1, 3, 1)
         assert s["bytes"] > 0  # what the folder occupies on disk
+        assert s["brightfield_references"] == 0  # dark/flat sets, for the "has refs" chip
         # A finished run is described, but is not an interrupted one the gate would offer.
         assert s["run"] is None
         assert s["last_run"]["status"] == "completed" and s["last_run"]["total_timepoints"] == 3
@@ -318,3 +319,28 @@ class TestThePaneAgain:
         assert "stage-colors.js" in review_page, (
             "the stage bar needs the shared ramp on /review too"
         )
+
+
+class TestTheFilters:
+    def test_the_list_filters_by_what_a_session_holds_its_run_its_age_and_its_recordings(self):
+        panel = (WEB / "templates" / "_sessions_panel.html").read_text(encoding="utf-8")
+        assert 'id="session-filters"' in panel and "filter-with-content" not in panel
+        for needle in (
+            "FILTERS:",
+            "holds:",
+            "brightfield:",
+            "interrupted:",
+            "never:",
+            "today:",
+            "diagnostics:",
+            "references:",
+            "SORTS:",
+            "toggleChip(",
+            "resetFilters(",
+            "gently-session-filters",
+        ):
+            assert needle in REVIEW_JS, needle
+        # Every chip says how many sessions it would keep.
+        assert '<span class="n">${n}</span>' in REVIEW_JS
+        # Brightfield-only sessions are content: the old checkbox hid them.
+        assert "defaults: ['embryos', 'brightfield']" in REVIEW_JS
