@@ -891,7 +891,11 @@
                                them. Empty leaves the LED as it is. #}
                             <div class="op-field" id="op-plan-dic-led-field" hidden>
                               <label class="op-label" for="op-plan-dic-led">LED brightness (%)</label>
-                              <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" placeholder="as it is"></div>
+                              <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1" placeholder="as it is"></div>
+                            {# Dark and flat-field references for the frames: taken
+                               once per session at this light and exposure.
+                               panels/brightfield-refs.js owns the markup. #}
+                            <div id="op-bfref-host"></div>
                           </div>
                         </div>
 
@@ -1815,6 +1819,7 @@
     <script src="/static/js/panels/marking.js"></script>
     <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
+    <script src="/static/js/panels/brightfield-refs.js"></script>
     <script src="/static/js/acquisition-plan.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>
