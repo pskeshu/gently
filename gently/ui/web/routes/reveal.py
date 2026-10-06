@@ -47,6 +47,7 @@ WHAT: dict[str, str] = {
     "agent": "folder",
     "config": "folder",
     "settings_history": "file",
+    "export": "folder",
 }
 
 ACTIONS = ("show", "fiji", "path")
@@ -150,6 +151,16 @@ def create_router(server) -> APIRouter:
 
         if what == "embryo":
             return _embryo(store, req)[0]
+
+        if what == "export":
+            from gently.ui.web.routes.sessions import _EXPORTS
+
+            sd, sid = _session_dir(store, req)
+            job = _EXPORTS.get(sid) or {}
+            path = Path(job["path"]) if job.get("path") else root / "exports" / sd.name
+            if not path.is_dir():
+                raise _missing(f"Session {sid} has not been exported yet")
+            return path
 
         if what in ("timepoint", "volume", "projection"):
             _, sid, eid = _embryo(store, req)

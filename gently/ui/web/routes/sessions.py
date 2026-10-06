@@ -249,6 +249,7 @@ def _ask_model_for_a_name(client, summary: dict) -> tuple[str, str] | None:
     return name[:120], desc[:600]
 
 
+_EXPORTS: dict[str, dict] = {}
 _SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _SIZE_TTL_S = 900.0
 
@@ -965,6 +966,70 @@ def create_router(server) -> APIRouter:
         if not got:
             return {"name": derived, "description": None, "source": "derived"}
         return {"name": got[0], "description": got[1], "source": "model"}
+
+    # ---- export, for Fiji and for finding the experiment again -------------
+    # One job per session at a time, in a thread; the page polls.
+
+    @router.post("/api/sessions/{session_id}/export", dependencies=[Depends(require_control)])
+    async def start_export(session_id: str, body: dict | None = None):
+        """Begin exporting the session: one folder per embryo, files named so
+        a sort is time order, the record beside them (see gently.core.export).
+        ``{"dest": "<folder>"}`` puts it somewhere other than <root>/exports."""
+        import threading
+
+        from gently.core.export import export_session
+
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        if store.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        job = _EXPORTS.get(session_id)
+        if job and job.get("state") == "running":
+            return job
+        dest = (body or {}).get("dest")
+        dest_path = Path(str(dest)).expanduser() if dest else None
+        if dest_path is not None and not dest_path.is_absolute():
+            raise HTTPException(status_code=400, detail="dest must be an absolute folder path")
+        job = {
+            "session_id": session_id,
+            "state": "running",
+            "done": 0,
+            "total": 0,
+            "current": "",
+            "path": None,
+            "error": None,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        _EXPORTS[session_id] = job
+
+        def progress(done: int, total: int, what: str) -> None:
+            job["done"], job["total"], job["current"] = done, total, what
+
+        def run() -> None:
+            try:
+                out = export_session(store, session_id, dest_path, progress)
+                job["path"] = str(out)
+                job["state"] = "done"
+            except Exception as exc:
+                logger.exception("export of %s failed", session_id)
+                job["error"] = str(exc)
+                job["state"] = "error"
+
+        threading.Thread(target=run, name=f"export-{session_id}", daemon=True).start()
+        return job
+
+    @router.get("/api/sessions/{session_id}/export")
+    async def export_status(session_id: str):
+        """Where the export stands, and where it went when done."""
+        store = _file_store()
+        default = (
+            str(Path(store.root) / "exports")
+            if store is not None and getattr(store, "root", None) is not None
+            else None
+        )
+        job = _EXPORTS.get(session_id) or {"session_id": session_id, "state": "idle"}
+        return dict(job, default_dest=default)
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
     async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):

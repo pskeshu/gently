@@ -683,3 +683,11 @@
     border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer;
 }
 .session-new-btn:hover { background: var(--accent); color: var(--bg-dark); }
+
+/* Export */
+.session-export { margin-top: 10px; }
+.session-export-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.session-export-status { font-size: 13px; color: var(--text-muted); }
+.session-export-status code { font-size: 12px; color: var(--text); word-break: break-all; }
+.session-export-status.is-error { color: var(--accent-red); }
+.session-export-bar { max-width: 420px; margin-top: 6px; }
