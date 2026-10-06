@@ -135,11 +135,17 @@ const ReviewApp = {
         const list = document.getElementById('session-list');
         const filterCheckbox = document.getElementById('filter-with-content');
         const filterWithContent = filterCheckbox ? filterCheckbox.checked : true;
+        const searchBox = document.getElementById('session-search');
+        const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
 
-        // Filter sessions based on checkbox
+        // Filter sessions based on checkbox, then on the search box
         let filtered = this.sessions;
         if (filterWithContent) {
             filtered = this.sessions.filter(s => s.embryo_count > 0);
+        }
+        if (needle) {
+            filtered = filtered.filter(s => [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
+                .some(v => v && String(v).toLowerCase().includes(needle)));
         }
 
         if (this.sessions.length === 0) {
@@ -148,7 +154,9 @@ const ReviewApp = {
         }
 
         if (filtered.length === 0) {
-            list.innerHTML = `<div class="no-sessions">No sessions with content<br><small>${this.sessions.length} empty session${this.sessions.length !== 1 ? 's' : ''} hidden</small></div>`;
+            list.innerHTML = needle
+                ? `<div class="no-sessions">Nothing matches “${this.escapeHtml(needle)}”</div>`
+                : `<div class="no-sessions">No sessions with content<br><small>${this.sessions.length} empty session${this.sessions.length !== 1 ? 's' : ''} hidden</small></div>`;
             return;
         }
 
@@ -156,7 +164,7 @@ const ReviewApp = {
             const held = this.holdings(s);
             return `
             <div class="session-item ${s.active ? 'active-session' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
-                <div class="session-name">${this.escapeHtml(s.name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
+                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
                 <div class="session-meta">
                     <span>${this.formatDate(s.created_at)}</span>
                     ${held.map(h => `<span class="dot"></span><span>${h}</span>`).join('')}
@@ -200,10 +208,15 @@ const ReviewApp = {
         content.innerHTML = `
             <div class="session-header">
                 <div class="session-header-row">
-                    <h2>${this.escapeHtml(s.name || s.session_id)}</h2>
+                    <div class="session-title">
+                        <h2 class="${s.name ? '' : 'is-suggested'}" title="${s.name ? '' : 'Not named yet — read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}</h2>
+                        ${s.name ? '' : '<span class="session-title-hint">not named yet</span>'}
+                        <button class="session-edit-btn" onclick="ReviewApp.editName()" title="Name this session">${s.name ? 'Rename' : 'Name it'}</button>
+                    </div>
                     ${s.active ? '<span class="session-active-badge">live now</span>'
                         : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')">Resume in agent</button>`}
                 </div>
+                <div id="session-name-form"></div>
                 ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
@@ -227,6 +240,10 @@ const ReviewApp = {
                     Conversation
                     <span class="tab-count">${(s.conversation || []).length}</span>
                 </button>
+                <button class="tab ${this.currentTab === 'events' ? 'active' : ''}" data-tab="events">
+                    What happened
+                    <span class="tab-count">${(s.events || []).length}</span>
+                </button>
             </div>
 
             <div class="session-tab-content" id="session-tab-content">
@@ -235,7 +252,167 @@ const ReviewApp = {
         `;
 
         this.setupTabHandlers();
+        this.wireScrub();
         void frames;
+    },
+
+    // ---- naming -------------------------------------------------------------
+
+    editName(prefill) {
+        const s = this.currentSession;
+        const host = document.getElementById('session-name-form');
+        if (!host) return;
+        const name = prefill && prefill.name != null ? prefill.name : (s.name || s.suggested_name || '');
+        const desc = prefill && prefill.description != null ? prefill.description : (s.description || '');
+        host.innerHTML = `
+            <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.saveName()">
+                <input id="session-name-input" maxlength="120" value="${this.escapeHtml(name)}" placeholder="Name" autocomplete="off">
+                <textarea id="session-desc-input" maxlength="600" placeholder="One line about this session: what, why, how it went">${this.escapeHtml(desc)}</textarea>
+                <div class="session-name-form-row">
+                    <button type="submit" class="session-resume-btn">Save</button>
+                    <button type="button" class="session-edit-btn" id="session-suggest-btn" onclick="ReviewApp.suggestName()" title="Written by the model from what the session holds, or read off its facts when the agent has no API key">Suggest</button>
+                    <button type="button" class="session-edit-btn" onclick="document.getElementById('session-name-form').innerHTML = ''">Cancel</button>
+                    <span class="hint" id="session-name-hint"></span>
+                </div>
+            </form>`;
+        const input = document.getElementById('session-name-input');
+        if (input) { input.focus(); input.select(); }
+    },
+
+    async suggestName() {
+        const btn = document.getElementById('session-suggest-btn');
+        const hint = document.getElementById('session-name-hint');
+        if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+        try {
+            const resp = await fetch(`/api/sessions/${this.currentSession.session_id}/suggest-name`, { method: 'POST' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const d = await resp.json();
+            const input = document.getElementById('session-name-input');
+            const desc = document.getElementById('session-desc-input');
+            if (input && d.name) input.value = d.name;
+            if (desc && d.description) desc.value = d.description;
+            if (hint) hint.textContent = d.source === 'model' ? 'Suggested by the model — edit freely, then save.' : 'Read off the session (the agent has no API key for a written one).';
+        } catch (e) {
+            if (hint) hint.textContent = 'Could not suggest a name: ' + e;
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Suggest'; }
+        }
+    },
+
+    async saveName() {
+        const s = this.currentSession;
+        const input = document.getElementById('session-name-input');
+        const desc = document.getElementById('session-desc-input');
+        const hint = document.getElementById('session-name-hint');
+        const body = { name: input ? input.value : '', description: desc ? desc.value : '' };
+        try {
+            const resp = await fetch(`/api/sessions/${s.session_id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+            if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || ('HTTP ' + resp.status)); }
+            const d = await resp.json();
+            s.name = d.name; s.description = d.description;
+            const row = this.sessions.find(x => x.session_id === s.session_id);
+            if (row) { row.name = d.name; row.description = d.description; }
+            this.renderSessionContent();
+            this.renderSessionList();
+            this.highlightActiveSession(s.session_id);
+        } catch (e) {
+            if (hint) hint.textContent = 'Not saved: ' + e.message;
+        }
+    },
+
+    // ---- scrubbing through an embryo's timepoints ------------------------
+
+    wireScrub() {
+        document.querySelectorAll('.embryo-thumb[data-embryo]').forEach(el => {
+            const eid = el.dataset.embryo;
+            const e = (this.currentSession.embryos || []).find(x => x.embryo_id === eid);
+            const tps = e && e.projection_timepoints;
+            if (!tps || tps.length < 2) return;
+            el.classList.add('is-scrubbing');
+            const img = el.querySelector('img');
+            const cap = el.querySelector('.embryo-thumb-cap');
+            const show = t => {
+                const url = `/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
+                if (img && img.dataset.t !== String(t)) { img.src = url; img.dataset.t = String(t); el.href = url; }
+                if (cap) cap.textContent = `t${t} · ${tps.indexOf(t) + 1}/${tps.length}`;
+            };
+            el.addEventListener('mousemove', ev => {
+                const r = el.getBoundingClientRect();
+                const i = Math.min(tps.length - 1, Math.max(0, Math.floor(((ev.clientX - r.left) / r.width) * tps.length)));
+                show(tps[i]);
+            });
+            el.addEventListener('mouseleave', () => show(tps[tps.length - 1]));
+        });
+    },
+
+    stageBar(e) {
+        const preds = e.predictions || [];
+        if (!preds.length || typeof stageColor !== 'function') return '';
+        return `
+            <div class="stage-bar" title="Stage call per timepoint">
+                ${preds.map(p => `<span style="background:${stageColor(p.stage)}" title="t${p.timepoint} · ${this.escapeHtml(this.stageText(p.stage))}"></span>`).join('')}
+            </div>
+            <div class="stage-bar-key"><span>t${preds[0].timepoint} ${this.escapeHtml(this.stageText(preds[0].stage))}</span><span>${this.escapeHtml(this.stageText(preds[preds.length - 1].stage))} t${preds[preds.length - 1].timepoint}</span></div>`;
+    },
+
+    dose(e) {
+        if (e.dose_ms == null) return '';
+        const used = Number(e.dose_ms); const budget = Number(e.dose_budget_ms);
+        const fmt = ms => ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+        if (!Number.isFinite(budget) || budget <= 0) return `<div class="dose">Light dose ${fmt(used)}</div>`;
+        const frac = used / budget;
+        const cls = frac >= 1 ? ' is-over' : frac >= 0.75 ? ' is-high' : '';
+        return `
+            <div class="dose${cls}" title="Total exposure so far against the role's photodose budget">
+                Light dose ${fmt(used)} of ${fmt(budget)} (${Math.round(frac * 100)}%)
+                <div class="dose-bar"><span style="width:${Math.min(100, frac * 100).toFixed(0)}%"></span></div>
+            </div>`;
+    },
+
+    renderRemoved() {
+        const removed = this.currentSession.removed_embryos || [];
+        if (!removed.length) return '';
+        return `
+            <div class="session-removed">Set aside: ${removed.map(r =>
+                `<b>${this.escapeHtml(r.nickname || r.embryo_id)}</b>${r.reason ? ` (${this.escapeHtml(r.reason)})` : ''}${r.removed_at ? ` at ${this.formatDateTime(r.removed_at)}` : ''}`
+            ).join(' · ')}</div>`;
+    },
+
+    renderEventsTab() {
+        const s = this.currentSession;
+        const events = s.events || [];
+        const temp = s.temperature || [];
+        const spark = this.temperatureSpark(temp);
+        if (!events.length && !spark) return '<div class="empty-tab">Nothing recorded beyond the images</div>';
+        return `
+            ${spark}
+            ${events.length ? `<div class="event-list">
+                ${events.map(ev => `<time>${this.formatDateTime(ev.at)}</time><div class="${ev.level === 'warn' ? 'is-warn' : ev.level === 'error' ? 'is-error' : ''}">${this.escapeHtml(ev.text)}</div>`).join('')}
+            </div>` : '<div class="empty-tab">No notable events recorded</div>'}`;
+    },
+
+    temperatureSpark(samples) {
+        const pts = samples.filter(p => Number.isFinite(Number(p.water_c)));
+        if (pts.length < 2) return '';
+        const W = 600, H = 72, pad = 4;
+        const ys = pts.map(p => Number(p.water_c));
+        const sp = pts.map(p => Number(p.setpoint_c)).filter(Number.isFinite);
+        const lo = Math.min(...ys, ...sp) - 0.2, hi = Math.max(...ys, ...sp) + 0.2;
+        const x = i => pad + (i / (pts.length - 1)) * (W - 2 * pad);
+        const y = v => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
+        const line = ys.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+        const set = sp.length ? `<line x1="${pad}" x2="${W - pad}" y1="${y(sp[sp.length - 1]).toFixed(1)}" y2="${y(sp[sp.length - 1]).toFixed(1)}" stroke="var(--temp-setpoint-color)" stroke-dasharray="4 4" stroke-width="1"/>` : '';
+        const minV = Math.min(...ys), maxV = Math.max(...ys);
+        return `
+            <div class="session-temp">
+                <div class="session-temp-head">Water temperature <span>${minV.toFixed(1)}–${maxV.toFixed(1)} °C</span>${sp.length ? `<span>setpoint ${sp[sp.length - 1].toFixed(1)} °C</span>` : ''}<span>${this.formatDateTime(pts[0].t)} → ${this.formatDateTime(pts[pts.length - 1].t)}</span></div>
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Water temperature over the session">
+                    ${set}
+                    <polyline fill="none" stroke="var(--temp-water-color)" stroke-width="1.5" points="${line}"/>
+                </svg>
+            </div>`;
     },
 
     renderRun(run) {
@@ -295,6 +472,7 @@ const ReviewApp = {
                 document.querySelectorAll('.session-tabs .tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
+                this.wireScrub();
             });
         });
     },
@@ -304,6 +482,7 @@ const ReviewApp = {
             case 'embryos': return this.renderEmbryosTab();
             case 'detections': return this.renderDetectionsTab();
             case 'conversation': return this.renderConversationTab();
+            case 'events': return this.renderEventsTab();
             default: return '';
         }
     },
@@ -342,7 +521,7 @@ const ReviewApp = {
                     return `
                     <div class="embryo-card">
                         ${e.thumbnail
-                            ? `<a class="embryo-thumb" href="${e.thumbnail}" target="_blank" rel="noopener" title="Open timepoint ${e.latest_timepoint}"><img src="${e.thumbnail}" alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}" loading="lazy"><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
+                            ? `<a class="embryo-thumb" data-embryo="${this.escapeHtml(e.embryo_id)}" href="${e.thumbnail}" target="_blank" rel="noopener" title="Move across to scrub through the timepoints; click to open"><img src="${e.thumbnail}" alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}" loading="lazy"><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
                             : '<div class="embryo-thumb embryo-thumb-empty">no image</div>'}
                         <div class="embryo-header">
                             <h3>${this.escapeHtml(name)}${sub ? ` <small>${this.escapeHtml(sub)}</small>` : ''}</h3>
@@ -355,9 +534,12 @@ const ReviewApp = {
                             ${e.strain ? `<div class="detail"><span>Strain:</span> ${this.escapeHtml(e.strain)}</div>` : ''}
                             ${e.position && e.position.x != null ? `<div class="detail"><span>Position:</span> (${Number(e.position.x).toFixed(1)}, ${Number(e.position.y).toFixed(1)})</div>` : ''}
                         </div>
+                        ${this.stageBar(e)}
+                        ${this.dose(e)}
                     </div>`;
                 }).join('')}
             </div>
+            ${this.renderRemoved()}
         `;
     },
 

@@ -11,6 +11,8 @@
             </button>
         </div>
         <div class="sidebar-filter">
+            <input type="search" class="session-search" id="session-search" placeholder="Find a session…"
+                   aria-label="Find a session" oninput="ReviewApp.renderSessionList()">
             <label class="filter-toggle">
                 <input type="checkbox" id="filter-with-content" checked onchange="ReviewApp.renderSessionList()">
                 <span>Only with content</span>
