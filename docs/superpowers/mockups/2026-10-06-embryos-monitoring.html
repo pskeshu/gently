@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embryos tab — monitoring mockup</title>
+<link rel="stylesheet" href="../../../gently/ui/web/static/css/main.css">
+<style>
+  /* main.css pins body to the viewport for the app shell; this page scrolls. */
+  html, body { height: auto; overflow: auto; display: block; }
+  body { padding: 24px; font-size: 14px; line-height: 1.4; }
+
+  .mock-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; color: var(--text-muted); font-size: 13px; }
+  .mock-bar h1 { font-size: 15px; font-weight: 600; color: var(--text); margin-right: 8px; }
+  .mock-bar .seg { margin-left: auto; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; }
+  .seg button { font: inherit; font-size: 12px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+  .seg button.on { background: var(--bg-card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+
+  /* ---- the tab ---- */
+  .tab { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+  /* Header: badge, view control, stats. One row, baseline aligned. */
+  .run-header { display: flex; align-items: baseline; gap: 20px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .run-header h2 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; font-size: 0.95rem; font-weight: 500; }
+  .badge .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+  .badge.paused .dot { background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--accent-amber); }
+  .badge.done .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+  .badge.idle .dot { background: transparent; border: 1px dashed var(--text-muted); box-shadow: none; }
+  .badge.error .dot { border-radius: 1px; transform: rotate(45deg); background: var(--accent-red); box-shadow: none; }
+  .badge .when { color: var(--text-muted); font-weight: 400; }
+  .stats { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; align-items: baseline; }
+  .stat { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  .stat b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+  .stat b.next { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.25rem; color: var(--accent); }
+  .stat span { color: var(--text-muted); font-size: 0.85rem; }
+  .stat .ok { color: var(--accent-green); }
+  .stat .warn { color: var(--accent-amber); }
+  .stat a { color: var(--accent); text-decoration: none; }
+
+  /* Body */
+  .body { padding: 16px; display: grid; gap: 16px; }
+
+  /* ---- the stage ---- */
+  .bf-stage { display: grid; grid-template-columns: minmax(0, 1fr) 220px; grid-template-rows: auto auto; gap: 12px 16px; }
+  .bf-frame { grid-row: 1; aspect-ratio: 4 / 3; max-height: 62vh; width: 100%; border-radius: 6px; position: relative; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 55%, #3a3f47 0%, #262a31 55%, #1b1f25 100%); }
+  .bf-frame .ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .bf-frame .tag { position: absolute; top: 10px; left: 10px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--accent-green); border: 1px solid var(--accent-green); border-radius: 999px; padding: 1px 8px; background: rgba(0,0,0,.45); }
+  .bf-frame .tag.off { color: var(--text-muted); border-color: var(--text-muted); }
+  .bf-facts { grid-row: 1; display: grid; align-content: start; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.78rem; color: var(--text); }
+  .bf-facts .k { color: var(--text-muted); display: block; font-size: 0.68rem; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 1px; }
+  .bf-facts > div { padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .bf-facts > div:last-child { border: 0; }
+  .bf-facts .seg { margin-top: 4px; }
+  .bf-facts .ok { color: var(--accent-green); }
+  .bf-facts .refs-missing { color: var(--accent-amber); font-family: inherit; line-height: 1.45; }
+  .bf-facts .refs-missing::before { content: '◆ '; }
+  .bf-facts .refs-missing a { color: var(--accent); text-decoration: none; display: block; margin-top: 2px; }
+
+  .bf-timeline { grid-column: 1 / -1; display: grid; gap: 6px; }
+  .ticks { position: relative; height: 48px; border-radius: 6px; background: var(--bg-dark); border: 1px solid var(--border); cursor: ew-resize; overflow: hidden; }
+  .ticks i { position: absolute; top: 10px; bottom: 10px; width: 3px; border-radius: 1px; background: color-mix(in srgb, var(--text-muted) 55%, transparent); }
+  .ticks i.gap { background: color-mix(in srgb, var(--accent-amber) 60%, transparent); }
+  .ticks .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .thumbs { display: flex; gap: 6px; height: 64px; }
+  .thumbs i { flex: 1 1 0; border-radius: 4px; background: #2a2f36; border: 1px solid transparent; }
+  .thumbs i.on { border-color: var(--accent); }
+  .axis { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); padding-top: 12px; }
+  .transport { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+  .transport button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text); cursor: pointer; }
+  .transport button.live { border-color: var(--accent-green); color: var(--accent-green); }
+  .transport kbd { font-family: 'JetBrains Mono', monospace; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+  .transport .right { margin-left: auto; }
+
+  /* Folded stage (mixed run): one row, newest pinned, Open expands in place. */
+  .bf-folded { display: grid; gap: 6px; }
+  .bf-folded .row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); }
+  .bf-folded .row b { color: var(--text); font-weight: 600; font-size: 13px; }
+  .bf-folded .row .open { margin-left: auto; color: var(--accent); cursor: pointer; }
+  .bf-folded .thumbs { height: 96px; }
+  .bf-folded .thumbs i { flex: 0 0 128px; }
+  .bf-folded .thumbs i:last-child { border-color: var(--accent-green); }
+
+  /* ---- embryo tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, 160px); gap: 12px; }
+  .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--bg-dark); display: grid; gap: 8px; cursor: pointer; }
+  .tile.sel { border-color: var(--accent); }
+  .tile .name { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+  .tile .name small { color: var(--text-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .thumb { height: 96px; border-radius: 4px; background: #2a2f36; position: relative; cursor: ew-resize; }
+  .tile .thumb.empty { background: repeating-linear-gradient(45deg, #23272e 0 6px, #1e2228 6px 12px); }
+  .tile .thumb .cap { position: absolute; right: 4px; bottom: 3px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text); background: rgba(0,0,0,.55); padding: 0 4px; border-radius: 3px; }
+  .stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg-hover); }
+  .stage-bar span { flex: 1 1 0; min-width: 2px; }
+  .tile .line { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .tile .line .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .tile .live { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted); }
+  .tile .live b { color: var(--accent); font-weight: 500; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); flex: none; }
+  .dot.done { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+  .dot.paused { background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--accent-amber); }
+
+  /* ---- detail drawer ---- */
+  .drawer { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--bg-dark); display: grid; gap: 10px; }
+  .drawer .head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .drawer .head .sw { width: 10px; height: 10px; border-radius: 2px; }
+  .drawer .head .r { margin-left: auto; font-size: 12px; color: var(--accent); }
+  .drawer .stage-bar { height: 12px; cursor: pointer; }
+  .drawer .key { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
+  .drawer .trace { height: 140px; border-radius: 6px; background: repeating-linear-gradient(0deg, #1b1f25 0 24px, #1e2329 24px 48px); display: grid; place-items: center; color: var(--text-muted); font-size: 12px; }
+
+  /* ---- waiting lines in the stage ---- */
+  .wait { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 4px; color: var(--text); }
+  .wait b { font-size: 1.1rem; font-weight: 600; }
+  .wait b .n { font-family: 'JetBrains Mono', monospace; color: var(--accent); }
+  .wait span { color: var(--text-muted); font-size: 13px; }
+
+  /* ---- mode switching ---- */
+  [data-mode="bf"] .only-mixed, [data-mode="bf"] .only-done, [data-mode="bf"] .only-wait,
+  [data-mode="mixed"] .only-bf, [data-mode="mixed"] .only-done, [data-mode="mixed"] .only-wait,
+  [data-mode="done"] .only-bf, [data-mode="done"] .only-mixed, [data-mode="done"] .only-wait,
+  [data-mode="wait"] .only-mixed, [data-mode="wait"] .only-done { display: none !important; }
+
+  /* ---- copy gallery ---- */
+  .copy-gallery { margin-top: 28px; }
+  .copy-gallery h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .copy-gallery p { color: var(--text-muted); font-size: 13px; margin-bottom: 14px; }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .state { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); padding: 12px 14px; display: grid; gap: 8px; }
+  .state .badge { font-size: 0.9rem; }
+  .state b { font-size: 14px; font-weight: 600; }
+  .state p { margin: 0; color: var(--text-muted); font-size: 13px; }
+  .state .btn { justify-self: start; font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--accent); }
+  .state .where { font-size: 11px; color: var(--text-muted); letter-spacing: .05em; text-transform: uppercase; }
+</style>
+</head>
+<body data-mode="bf">
+
+<div class="mock-bar">
+  <h1>Embryos — monitoring</h1>
+  <span>mockup · images are placeholders · stage colours from <code>stage-colors.js</code></span>
+  <div class="seg" id="modes">
+    <button class="on" data-mode="bf">Brightfield-only</button>
+    <button data-mode="wait">Brightfield, first frame</button>
+    <button data-mode="mixed">Mixed</button>
+    <button data-mode="done">Finished</button>
+  </div>
+</div>
+
+<section class="tab">
+
+  <!-- ============ header ============ -->
+  <header class="run-header">
+    <h2>Embryos</h2>
+
+    <span class="badge only-bf"><span class="dot"></span>Running · brightfield</span>
+    <span class="badge only-wait"><span class="dot"></span>Running · brightfield</span>
+    <span class="badge only-mixed"><span class="dot"></span>Running</span>
+    <span class="badge done only-done"><span class="dot"></span>Complete <span class="when">· ended 09:12</span></span>
+
+    <span class="seg only-mixed"><button class="on">Watch</button><button>Table</button></span>
+    <span class="seg only-done"><button class="on">Watch</button><button>Table</button></span>
+
+    <!-- brightfield-only -->
+    <div class="stats only-bf">
+      <div class="stat"><b>48</b><span>frames</span></div>
+      <div class="stat"><b>every 10 min</b></div>
+      <div class="stat"><b class="next">3:12</b><span>next</span></div>
+      <div class="stat"><b>6 h 20</b><span>since 21:40</span></div>
+      <div class="stat"><b class="ok">dark/flat ✓</b></div>
+    </div>
+    <div class="stats only-wait">
+      <div class="stat"><b>0</b><span>frames</span></div>
+      <div class="stat"><b>every 10 min</b></div>
+      <div class="stat"><b class="next">0:42</b><span>first</span></div>
+      <div class="stat"><b>0 h 01</b><span>since 21:40</span></div>
+      <div class="stat"><b class="warn">no dark/flat</b></div>
+    </div>
+    <!-- mixed -->
+    <div class="stats only-mixed">
+      <div class="stat"><b>4</b><span>embryos, 3 going</span></div>
+      <div class="stat"><b>112</b><span>round</span></div>
+      <div class="stat"><b class="next">1:30</b><span>next volume</span></div>
+      <div class="stat"><b>38</b><span>overview frames</span></div>
+      <div class="stat"><b class="next">8:12</b><span>next overview</span></div>
+      <div class="stat"><b>6 h 20</b><span>since 21:40</span></div>
+    </div>
+    <!-- finished -->
+    <div class="stats only-done">
+      <div class="stat"><b>4</b><span>embryos</span></div>
+      <div class="stat"><b>112</b><span>timepoints</span></div>
+      <div class="stat"><b>38</b><span>frames</span></div>
+      <div class="stat"><b>18 h 40</b></div>
+      <div class="stat"><a href="#">Open in Sessions →</a></div>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ============ the stage, expanded (brightfield-only) ============ -->
+    <div class="bf-stage only-bf">
+      <div class="bf-frame">
+        <span class="tag">● live</span>
+        <span class="ph">overview frame 48 · corrected</span>
+      </div>
+      <aside class="bf-facts">
+        <div><span class="k">Frame</span>48 of 48</div>
+        <div><span class="k">Round</span>48</div>
+        <div><span class="k">Taken</span>03:12 · +6 h 20</div>
+        <div><span class="k">Stage</span>1 240, 860 µm</div>
+        <div><span class="k">Exposure</span>20 ms · room light</div>
+        <div><span class="k">References</span><span class="ok">dark/flat ✓</span> 21:38
+          <div class="seg"><button class="on">Corrected</button><button>Raw</button></div>
+        </div>
+      </aside>
+      <div class="bf-timeline">
+        <div class="ticks" id="ticks-bf"></div>
+        <div class="axis"><span>21:40</span><span>frame 1 … 48 · move across to scrub</span><span>03:12</span></div>
+        <div class="transport">
+          <button>‹</button><button>›</button><button>▶ play 8/s</button>
+          <button class="live">Latest</button>
+          <span><kbd>←</kbd> <kbd>→</kbd> step · <kbd>space</kbd> play · <kbd>end</kbd> latest</span>
+          <span class="right">1 frame missed at 00:20 (marked)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ the stage, waiting for the first frame ============ -->
+    <div class="bf-stage only-wait">
+      <div class="bf-frame">
+        <span class="tag off">waiting</span>
+        <div class="wait">
+          <b>First frame due in <span class="n">0:42</span>.</b>
+          <span>Then one every 10 minutes, under room light at 20 ms.</span>
+        </div>
+      </div>
+      <aside class="bf-facts">
+        <div><span class="k">Frame</span>—</div>
+        <div><span class="k">Stage</span>1 240, 860 µm</div>
+        <div><span class="k">Exposure</span>20 ms · room light</div>
+        <div><span class="k">References</span>
+          <div class="refs-missing">No dark or flat for 20 ms under room light.<a href="#">Take references →</a></div>
+        </div>
+      </aside>
+      <div class="bf-timeline">
+        <div class="ticks"></div>
+        <div class="axis"><span>21:40</span><span>frames appear here as they are taken</span><span></span></div>
+      </div>
+    </div>
+
+    <!-- ============ mixed run: stage folded, tiles, drawer ============ -->
+    <div class="bf-folded only-mixed">
+      <div class="row">
+        <b>Overview</b> <span>38 frames · every 10 min · next 8:12 · dark/flat ✓</span>
+        <span class="open">Open ⌄</span>
+      </div>
+      <div class="thumbs">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+    </div>
+
+    <div class="tiles only-mixed">
+      <div class="tile sel">
+        <div class="name"><span class="dot"></span>E1 <small>dauer-ctrl</small></div>
+        <div class="thumb"><span class="cap">t112</span></div>
+        <div class="stage-bar" data-stages="early:14,bean:22,comma:20,1_5_fold:18,2_fold:38"></div>
+        <div class="line"><span class="sw" style="background:#5ec962"></span>2-fold · t112</div>
+        <div class="live">next in <b>1:30</b></div>
+      </div>
+      <div class="tile">
+        <div class="name"><span class="dot"></span>E2</div>
+        <div class="thumb"><span class="cap">t112</span></div>
+        <div class="stage-bar" data-stages="early:16,bean:26,comma:24,1_5_fold:30,2_fold:16"></div>
+        <div class="line"><span class="sw" style="background:#5ec962"></span>2-fold · t112</div>
+        <div class="live">next in <b>1:30</b></div>
+      </div>
+      <div class="tile">
+        <div class="name"><span class="dot"></span>E3</div>
+        <div class="thumb"><span class="cap">t110</span></div>
+        <div class="stage-bar" data-stages="early:18,bean:30,comma:40,1_5_fold:22"></div>
+        <div class="line"><span class="sw" style="background:#27ad81"></span>1.5-fold · t110 · slow 1.6×</div>
+        <div class="live">next in <b>0:14</b></div>
+      </div>
+      <div class="tile">
+        <div class="name"><span class="dot done"></span>E4</div>
+        <div class="thumb"><span class="cap">t140</span></div>
+        <div class="stage-bar" data-stages="early:12,bean:20,comma:18,1_5_fold:16,2_fold:30,pretzel:28,hatching:10,hatched:6"></div>
+        <div class="line"><span class="sw" style="background:#fef3c7"></span>hatched · t140</div>
+        <div class="live">done · hatched at 02:48</div>
+      </div>
+    </div>
+
+    <div class="drawer only-mixed">
+      <div class="head">
+        <span class="dot"></span><b>E1</b>
+        <span class="sw" style="background:#5ec962"></span><span>2-fold since t98 · 112 timepoints</span>
+        <span class="r">Folder</span>
+      </div>
+      <div class="stage-bar" data-stages="early:14,bean:22,comma:20,1_5_fold:18,2_fold:38" title="Click a cell to open that timepoint"></div>
+      <div class="key"><span>t1 early</span><span>bean t15 · comma t37 · 1.5-fold t57 · 2-fold t98</span><span>2-fold t112</span></div>
+      <div class="trace">trace and chat for the selected timepoint (unchanged from today)</div>
+    </div>
+
+    <!-- ============ finished ============ -->
+    <div class="bf-folded only-done">
+      <div class="row"><b>Overview</b> <span>38 frames · 21:40 → 09:12</span><span class="open">Open ⌄</span></div>
+      <div class="thumbs"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="tiles only-done">
+      <div class="tile">
+        <div class="name"><span class="dot done"></span>E1 <small>dauer-ctrl</small></div>
+        <div class="thumb"><span class="cap">t112</span></div>
+        <div class="stage-bar" data-stages="early:14,bean:22,comma:20,1_5_fold:18,2_fold:38"></div>
+        <div class="line"><span class="sw" style="background:#5ec962"></span>2-fold · t112</div>
+        <div class="live">done · run ended</div>
+      </div>
+      <div class="tile">
+        <div class="name"><span class="dot done"></span>E4</div>
+        <div class="thumb"><span class="cap">t140</span></div>
+        <div class="stage-bar" data-stages="early:12,bean:20,comma:18,1_5_fold:16,2_fold:30,pretzel:28,hatching:10,hatched:6"></div>
+        <div class="line"><span class="sw" style="background:#fef3c7"></span>hatched · t140</div>
+        <div class="live">done · hatched at 02:48</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ copy gallery ============ -->
+<section class="copy-gallery">
+  <h2>Empty and error states — the copy</h2>
+  <p>Short declarative sentences. What is true now, then what happens next. Buttons only where there is somewhere to go.</p>
+  <div class="states">
+    <div class="state"><span class="where">no run</span>
+      <span class="badge idle"><span class="dot"></span>No run</span>
+      <b>Nothing is running.</b><p>Start a run from Calibration. Frames and embryos appear here as they are taken.</p>
+      <span class="btn">Go to Calibration</span></div>
+    <div class="state"><span class="where">connecting</span>
+      <span class="badge idle"><span class="dot"></span>Connecting</span>
+      <b>Connecting to the server.</b></div>
+    <div class="state"><span class="where">brightfield · before first frame</span>
+      <span class="badge"><span class="dot"></span>Running · brightfield</span>
+      <b>First frame due in 0:42.</b><p>Then one every 10 minutes, under room light at 20 ms.</p>
+      <p style="color:var(--accent-amber)">◆ No dark or flat for 20 ms under room light. <span style="color:var(--accent)">Take references →</span></p></div>
+    <div class="state"><span class="where">embryos · before first volume</span>
+      <span class="badge"><span class="dot"></span>Running</span>
+      <b>First volume due in 1:58.</b><p>4 embryos, one every 2 minutes. Stage calls start after the first volume.</p></div>
+    <div class="state"><span class="where">mixed · overview not yet taken</span>
+      <span class="badge"><span class="dot"></span>Running</span>
+      <b>First overview frame due in 9:40.</b><p>One every 10 minutes.</p></div>
+    <div class="state"><span class="where">paused</span>
+      <span class="badge paused"><span class="dot"></span>Paused</span>
+      <b>Paused at 03:12, after frame 48.</b><p>Nothing is taken until you resume from Operations.</p></div>
+    <div class="state"><span class="where">one frame failed · run continues</span>
+      <span class="badge"><span class="dot"></span>Running · brightfield</span>
+      <b style="color:var(--accent-amber)">◆ Frame 49 failed: camera timed out.</b><p>The run continues; the next frame is due in 8:10.</p></div>
+    <div class="state"><span class="where">run failed</span>
+      <span class="badge error"><span class="dot"></span>Failed</span>
+      <b>Stopped at 03:12: stage lost connection.</b><p>48 frames are saved. Resume from Sessions when the rig is back.</p>
+      <span class="btn">Open in Sessions</span></div>
+    <div class="state"><span class="where">complete</span>
+      <span class="badge done"><span class="dot"></span>Complete <span class="when">· ended 09:12</span></span>
+      <b>Finished.</b><p>112 frames over 18 h 40.</p>
+      <span class="btn">Open in Sessions</span></div>
+    <div class="state"><span class="where">stopped early</span>
+      <span class="badge paused"><span class="dot"></span>Stopped early <span class="when">· ended 03:12</span></span>
+      <b>Stopped after 48 of 112 frames.</b>
+      <span class="btn">Open in Sessions</span></div>
+    <div class="state"><span class="where">embryo · no stage calls yet (in drawer)</span>
+      <span class="badge"><span class="dot"></span>E1</span>
+      <b>No stage calls yet for E1.</b><p>The first comes after its first volume.</p></div>
+  </div>
+</section>
+
+<script>
+  // Mode toggle only. Everything else is static.
+  document.getElementById('modes').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.body.dataset.mode = b.dataset.mode;
+    document.querySelectorAll('#modes button').forEach(x => x.classList.toggle('on', x === b));
+  });
+
+  // Stage bars: the same ramp as stage-colors.js, painted from data-stages="name:count,...".
+  const RAMP = { early:'#440154', bean:'#3b528b', comma:'#21918c', '1_5_fold':'#27ad81', '2_fold':'#5ec962', pretzel:'#aadc32', hatching:'#fde725', hatched:'#fef3c7' };
+  document.querySelectorAll('.stage-bar[data-stages]').forEach(bar => {
+    bar.innerHTML = bar.dataset.stages.split(',').map(s => {
+      const [name, n] = s.split(':');
+      return `<span style="flex:${n} 1 0;background:${RAMP[name] || '#8b949e'}" title="${name.replace(/_/g,' ')}"></span>`;
+    }).join('');
+  });
+
+  // Timeline ticks: 48 frames on a time axis, one gap, playhead on the newest.
+  const t = document.getElementById('ticks-bf');
+  if (t) {
+    let html = '';
+    for (let i = 0; i < 48; i++) {
+      if (i === 16) { html += `<i class="gap" style="left:${(i / 48) * 100}%" title="frame 17 missed"></i>`; continue; }
+      html += `<i style="left:${(i / 48) * 100}%"></i>`;
+    }
+    html += `<span class="head" style="left:calc(${(47 / 48) * 100}% + 1px)" data-t="03:12"></span>`;
+    t.innerHTML = html;
+  }
+</script>
+</body>
+</html>

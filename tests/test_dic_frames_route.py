@@ -113,3 +113,60 @@ def test_no_session_means_no_frames_not_an_error(tmp_path):
     client, _ = _app([_frame(tmp_path, 1)], session_id=None)
     r = client.get("/api/dic/frames")
     assert r.status_code == 200 and r.json() == {"frames": [], "count": 0}
+
+
+# ── corrected frames ────────────────────────────────────────────────────────
+
+
+def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
+    """``?corrected=1`` divides the session's dark and flat out; the list
+    says which frames can be. A frame without them is a 404, not a guess."""
+    from gently.core.file_store import FileStore
+
+    store = FileStore(root=tmp_path / "data")
+    store.create_session("s1")
+    frame = (np.full((40, 60), 3000, dtype=np.uint16) + np.arange(60, dtype=np.uint16)).astype(
+        np.uint16
+    )
+    store.put_snapshot(
+        "s1",
+        "dic",
+        frame,
+        metadata={
+            "channel": "dic",
+            "frame": 1,
+            "light": "led",
+            "led_intensity_pct": 1,
+            "exposure_ms": 20.0,
+        },
+    )
+    stem = Path(store.list_snapshots("s1", "dic")[0]["file_path"]).stem
+    server = MagicMock()
+    server.agent_bridge.agent.session_id = "s1"
+    server.gently_store = store
+    app = FastAPI()
+    app.include_router(create_router(server))
+    c = TestClient(app)
+
+    assert c.get("/api/dic/frames").json()["frames"][0]["correctable"] is False
+    assert c.get(f"/api/dic/frames/{stem}.png", params={"corrected": 1}).status_code == 404
+
+    from gently.app import brightfield as bf
+
+    spec = bf.ReferenceSpec(light="led", led_intensity_pct=1, exposure_ms=20.0)
+    folder = bf.open_record(store, "s1", spec)
+    dark = np.full((40, 60), 100, dtype=np.uint16)
+    flat = np.full((40, 60), 2100, dtype=np.uint16)
+    bf.file_image(folder, "dark", dark, spec, {"stats": bf.stats(dark)})
+    bf.file_image(folder, "flat", flat, spec, {"stats": bf.stats(flat), "frames": 5})
+
+    listed = c.get("/api/dic/frames").json()["frames"][0]
+    assert (
+        listed["correctable"] is True and listed["light"] == "led" and listed["exposure_ms"] == 20.0
+    )
+    r = c.get(f"/api/dic/frames/{stem}.png", params={"corrected": 1})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    # The arithmetic itself, on the arrays: a flat field divides out.
+    corrected = bf.correct(frame, dark, flat)
+    assert corrected.dtype == np.uint16
+    assert abs(float(corrected.mean()) - float((frame.astype(float) - 100).mean())) < 1.0

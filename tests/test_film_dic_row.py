@@ -81,8 +81,8 @@ def test_a_dic_cell_opens_the_viewer_and_is_not_an_embryo_timepoint():
 
 
 def test_the_block_above_gives_way_in_the_film_and_comes_back():
-    strip = EMBRYOS[EMBRYOS.index("    renderDicStrip() {") :][:900]
-    assert "strip.hidden = all.length === 0 || inFilm;" in strip
+    strip = EMBRYOS[EMBRYOS.index("    renderDicStrip() {") :][:1800]
+    assert "strip.hidden = all.length === 0 || inFilm || expanded;" in strip
     assert "if (inFilm) { this.renderFilmstripView(); return; }" in strip
     switch = EMBRYOS[EMBRYOS.index("    switchView(viewName) {") :][:900]
     assert "this.renderDicStrip();" in switch

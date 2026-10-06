@@ -23,21 +23,40 @@ MAIN_CSS = (WEB / "static" / "css" / "main.css").read_text(encoding="utf-8")
 ROUTES_INIT = (WEB / "routes" / "__init__.py").read_text(encoding="utf-8")
 
 
-def test_a_frame_on_the_strip_is_a_button_to_the_full_frame():
-    render = EMBRYOS[EMBRYOS.index("renderDicStrip() {") :][:1600]
-    assert '<button type="button" class="dic-frame" data-dic-index=' in render, (
-        "a frame is not clickable"
-    )
-    assert "openDicViewer(" in EMBRYOS and 'id="dic-viewer"' in HTML
-    opener = EMBRYOS[EMBRYOS.index("openDicViewer(index) {") :][:1000]
-    assert "img.src = f.url || f.thumb" in opener, "the viewer shows the thumbnail, not the frame"
+def test_a_frame_on_the_strip_opens_the_stage_not_a_modal():
+    """ "It appears more like an icon than a clickable image." A frame on the
+    strip used to open a lightbox. Now it opens the overview stage in place —
+    the newest frame large, the series beneath — on that frame. There is no
+    modal: a frame you can see does not need a lightbox."""
+    assert 'id="dic-viewer"' not in HTML
+    assert 'id="embryos-overview"' in HTML and "panels/overview-stage.js" in HTML
+    assert "openDicViewer(index) {" in EMBRYOS
+    opener = EMBRYOS[EMBRYOS.index("openDicViewer(index) {") :][:400]
+    assert "this._overviewOpen = true;" in opener and "OverviewStage.go(index, true)" in opener
+    stage = (WEB / "static" / "js" / "panels" / "overview-stage.js").read_text(encoding="utf-8")
+    for needle in (
+        "ArrowRight",
+        "ArrowLeft",
+        "Home",
+        "End",
+        "' '",
+        "setPointerCapture",
+        "corrected=1",
+        "FOLLOWING NEWEST",
+    ):
+        assert needle in stage, needle
 
 
-def test_the_viewer_walks_the_series_and_closes():
-    wiring = EMBRYOS[EMBRYOS.index("_wireDicStrip() {") :][:1400]
-    for key in ("'Escape'", "'ArrowLeft'", "'ArrowRight'"):
-        assert key in wiring
-    assert "dic-viewer-close" in wiring
+def test_the_stage_walks_the_series_from_the_keyboard():
+    """The series is walked on the stage, not in a modal: arrows step, Shift
+    is ten, Home/End, Space plays, and a frame on the folded strip opens it."""
+    stage = (WEB / "static" / "js" / "panels" / "overview-stage.js").read_text(encoding="utf-8")
+    keys = stage[stage.index("function onKey(ev)") :][:1200]
+    for key in ("'ArrowLeft'", "'ArrowRight'", "'Home'", "'End'", "' '", "ev.shiftKey ? 10 : 1"):
+        assert key in keys, key
+    wiring = EMBRYOS[EMBRYOS.index("_wireDicStrip() {") :][:900]
+    assert "this.openDicViewer(Number(b.dataset.dicIndex))" in wiring
+    assert "dic-strip-open" in wiring
 
 
 def test_the_strip_hydrates_from_disk_for_a_page_that_opened_late():
@@ -84,7 +103,7 @@ def test_the_strip_counts_the_roster_and_hears_it_change():
 
 
 def test_hidden_actually_hides_the_viewer():
-    assert ".dic-viewer[hidden] { display: none; }" in MAIN_CSS
+    assert ".overview-stage[hidden] { display: none; }" in MAIN_CSS
 
 
 def test_the_interface_knows_when_it_is_acquiring():

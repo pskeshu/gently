@@ -79,7 +79,7 @@ def test_the_dic_strip_exists_and_is_fed_by_the_event():
     fn = EMBRYOS[EMBRYOS.index("handleDicFrame(data) {") :][:1400]
     assert "data.source !== 'dic'" in fn, "any IMAGE_ACQUIRED would land on the DIC strip"
     assert "data:image/png;base64," in fn
-    render = EMBRYOS[EMBRYOS.index("renderDicStrip() {") :][:1200]
+    render = EMBRYOS[EMBRYOS.index("renderDicStrip() {") :][:2400]
     assert "slice(-12)" in render, "the strip keeps every frame in the DOM"
 
 

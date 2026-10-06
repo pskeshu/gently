@@ -199,6 +199,53 @@ const EmbryosManager = {
         if (typeof SettingsStore !== 'undefined') SettingsStore.loadRigDefaults();
         this._wireDicStrip();
         this.refreshDicStrip();
+        this.refreshRun();
+        // The run's own account of itself — kind, cadence, next frame — is a
+        // poll, not the embryo state: a brightfield run has no embryos to
+        // carry it. Every 5 s while the page is shown.
+        setInterval(() => { if (document.visibilityState === 'visible') this.refreshRun(); }, 5000);
+    },
+
+    // ==========================================
+    // What kind of run this is
+    // ==========================================
+    // volumes:false with the DIC channel on is a brightfield run: the frames
+    // are the experiment and there are no embryo volumes. volumes:true with
+    // the channel on is a mixed run. The status route says which, with how
+    // many frames have landed, when the next is due, and whether they have a
+    // dark and flat.
+    run: null,
+
+    runKind() {
+        const r = this.run;
+        const embryos = Object.keys(this.state.embryos).length;
+        const live = r && r.status && r.status !== 'idle';
+        if (live) {
+            if (r.volumes === false && r.dic && r.dic.enabled) return 'brightfield';
+            if (r.dic && r.dic.enabled) return 'mixed';
+            return 'volumes';
+        }
+        // At rest, go by what the session holds: frames and no embryos means
+        // the frames are the experiment, and they get the stage.
+        if (this._dicFrames.length && !embryos) return 'brightfield';
+        return 'none';
+    },
+
+    runIsLive() {
+        const r = this.run;
+        return !!(r && r.status && r.status !== 'idle');
+    },
+
+    async refreshRun() {
+        try {
+            const r = await fetch('/api/devices/timelapse/status');
+            if (!r.ok) { if (r.status === 503) this.run = null; return; }
+            const d = await r.json();
+            const before = JSON.stringify([this.runKind(), (this.run || {}).status, ((this.run || {}).dic || {}).frames, ((this.run || {}).dic || {}).references]);
+            this.run = d;
+            const after = JSON.stringify([this.runKind(), d.status, (d.dic || {}).frames, (d.dic || {}).references]);
+            if (before !== after) this.render();
+        } catch (_) { /* the rig is away; the last answer stands */ }
     },
 
     // ==========================================
@@ -232,14 +279,19 @@ const EmbryosManager = {
             const d = await r.json();
             (d.frames || []).forEach(f => this._dicRemember({
                 stem: f.stem, frame: f.frame, url: f.url, when: f.captured_at, position: f.position,
+                round: f.round, exposure_ms: f.exposure_ms, light: f.light, led_intensity_pct: f.led_intensity_pct,
+                correctable: !!f.correctable,
                 thumb: `${f.url}?max=256`,
             }));
         } catch (_) { /* no session, or no frames yet */ }
         this.renderDicStrip();
+        this.renderStatusBadge();
+        this.renderSummary();
     },
 
     handleDicFrame(data) {
         if (!data || data.source !== 'dic') return;
+        this.refreshRun();
         const stem = this._dicStemOf(data.image_path);
         this._dicRemember({
             stem,
@@ -248,90 +300,104 @@ const EmbryosManager = {
             thumb: data.image_b64 ? `data:image/png;base64,${data.image_b64}` : (stem ? `/api/dic/frames/${stem}.png?max=256` : null),
             when: data.timestamp,
             position: data.position,
+            round: data.round,
+            exposure_ms: data.exposure_ms,
+            light: data.light,
+            led_intensity_pct: data.led_intensity_pct,
         });
         this.renderDicStrip();
+        // The list says whether the new frame can be corrected; ask it shortly.
+        clearTimeout(this._dicListTimer);
+        this._dicListTimer = setTimeout(() => this.refreshDicStrip(), 1500);
     },
+
+    // The overview frames. In a brightfield-only run they are the experiment
+    // and get the stage: the newest large, a timeline beneath (panels/
+    // overview-stage.js). In a mixed run the strip is the stage folded — one
+    // row of thumbnails — and opens in place. There is no modal: a frame you
+    // can see does not need a lightbox.
+    _overviewOpen: false,
+    _stageMounted: false,
 
     renderDicStrip() {
         const strip = document.getElementById('dic-strip');
         const frames = document.getElementById('dic-strip-frames');
         const count = document.getElementById('dic-strip-count');
+        const stage = document.getElementById('embryos-overview');
         if (!strip || !frames) return;
         const all = this._dicFrames;
-        // In the film the overview is a row of the film, not a block above it.
+        const kind = this.runKind();
         const inFilm = this.currentView === 'filmstrip';
-        strip.hidden = all.length === 0 || inFilm;
+        const expanded = all.length > 0 && !inFilm && (kind === 'brightfield' || this._overviewOpen);
+        if (stage) {
+            stage.hidden = !expanded;
+            if (expanded) this._mountStage();
+        }
+        strip.hidden = all.length === 0 || inFilm || expanded;
+        // A brightfield run with no embryos has nothing for the rail and the
+        // drawer to show; the stage takes the body.
+        const def = document.getElementById('view-default');
+        if (def) def.classList.toggle('is-overview-only', kind === 'brightfield' && Object.keys(this.state.embryos).length === 0);
         if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}`;
         if (inFilm) { this.renderFilmstripView(); return; }
-        // The last dozen on the strip; the viewer walks the whole series.
+        if (strip.hidden) return;
         const shown = all.slice(-12);
         frames.innerHTML = shown.map(f => {
-            const when = f.when ? new Date(f.when) : null;
-            const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const t = f.when ? this.formatTime(f.when) : '';
             const idx = all.indexOf(f);
-            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Open frame ${f.frame}">` +
+            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${t ? `, ${t}` : ''} — open">` +
                 (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
                 `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
         }).join('');
         frames.scrollLeft = frames.scrollWidth;
     },
 
-    openDicViewer(index) {
-        const all = this._dicFrames;
-        if (!all.length) return;
-        this._dicViewerAt = Math.max(0, Math.min(all.length - 1, index));
-        const f = all[this._dicViewerAt];
-        const v = document.getElementById('dic-viewer');
-        const img = document.getElementById('dic-viewer-img');
-        const cap = document.getElementById('dic-viewer-cap');
-        if (!v || !img) return;
-        img.src = f.url || f.thumb || '';
-        const when = f.when ? new Date(f.when) : null;
-        const pos = f.position && f.position.x != null ? ` · ${Math.round(f.position.x)}, ${Math.round(f.position.y)} µm` : '';
-        if (cap) cap.textContent = `DIC overview · frame ${f.frame} of ${all.length}` +
-            (when && !isNaN(when) ? ` · ${when.toLocaleString()}` : '') + pos;
-        v.hidden = false;
-        if (typeof Reveal !== 'undefined') {
-            Reveal.fill(document.getElementById('dic-viewer-reveal'),
-                f.stem ? { what: 'dic', stem: f.stem } : null);
+    _mountStage() {
+        if (typeof OverviewStage === 'undefined') return;
+        if (!this._stageMounted) {
+            OverviewStage.mount('embryos-overview', {
+                frames: () => this._dicFrames,
+                references: () => (this.run && this.run.dic && this.run.dic.references) || null,
+                onFold: this.runKind() === 'brightfield' ? null : () => this.closeOverview(),
+                onTakeReferences: () => {
+                    if (typeof switchTab === 'function') switchTab('devices');
+                    if (typeof OperateManager !== 'undefined' && OperateManager.roster) OperateManager.roster.goTo('acquire');
+                },
+            });
+            this._stageMounted = true;
+        } else {
+            OverviewStage.framesChanged();
         }
-        const prev = document.getElementById('dic-viewer-prev'), next = document.getElementById('dic-viewer-next');
-        if (prev) prev.disabled = this._dicViewerAt === 0;
-        if (next) next.disabled = this._dicViewerAt === all.length - 1;
     },
 
-    closeDicViewer() {
-        const v = document.getElementById('dic-viewer');
-        if (v) v.hidden = true;
-        this._dicViewerAt = -1;
+    /** A frame on the folded strip was chosen: open the stage on it. */
+    openDicViewer(index) {
+        this._overviewOpen = true;
+        this.renderDicStrip();
+        if (typeof OverviewStage !== 'undefined') OverviewStage.go(index, true);
+    },
+
+    closeOverview() {
+        this._overviewOpen = false;
+        this.renderDicStrip();
+    },
+
+    formatTime(iso) {
+        const d = new Date(iso);
+        return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     },
 
     _wireDicStrip() {
         const frames = document.getElementById('dic-strip-frames');
-        if (frames) frames.addEventListener('click', e => {
-            const b = e.target.closest('[data-dic-index]');
-            if (b) this.openDicViewer(Number(b.dataset.dicIndex));
-        });
-        const v = document.getElementById('dic-viewer');
-        if (!v) return;
-        v.addEventListener('click', e => {
-            if (e.target === v || e.target.id === 'dic-viewer-close') this.closeDicViewer();
-        });
-        const prev = document.getElementById('dic-viewer-prev'), next = document.getElementById('dic-viewer-next');
-        if (prev) prev.addEventListener('click', () => this.openDicViewer(this._dicViewerAt - 1));
-        if (next) next.addEventListener('click', () => this.openDicViewer(this._dicViewerAt + 1));
-        document.addEventListener('keydown', e => {
-            if (v.hidden) return;
-            if (e.key === 'Escape') this.closeDicViewer();
-            else if (e.key === 'ArrowLeft') this.openDicViewer(this._dicViewerAt - 1);
-            else if (e.key === 'ArrowRight') this.openDicViewer(this._dicViewerAt + 1);
-        });
+        if (frames) {
+            frames.addEventListener('click', ev => {
+                const b = ev.target.closest('[data-dic-index]');
+                if (b) this.openDicViewer(Number(b.dataset.dicIndex));
+            });
+        }
+        const open = document.getElementById('dic-strip-open');
+        if (open) open.addEventListener('click', () => this.openDicViewer(this._dicFrames.length - 1));
     },
-
-
-    // ==========================================
-    // View Switching System
-    // ==========================================
 
     _setupViewSwitcher() {
         const switcher = document.getElementById('view-switcher');
@@ -645,7 +711,7 @@ const EmbryosManager = {
         const ta = latest?.temporal_analysis;
         if (!ta || !ta.current_stage) return null;
         const stage = ta.current_stage;
-        const stageStart = this.STAGE_TIMING[stage];
+        const stageStart = this.STAGE_TIMING[this._sk(stage)];
         if (stageStart == null) return null;
 
         const expDur = Number(ta.expected_duration_min) || 0;
@@ -731,7 +797,7 @@ const EmbryosManager = {
         let pathD = '';
         let lastColor = '#8b949e';
         items.forEach((item, i) => {
-            const ord = this.STAGE_ORDINAL[item.stage] ?? 0;
+            const ord = this.STAGE_ORDINAL[this._sk(item.stage)] ?? 0;
             const x = i * step;
             const y = height - (ord / maxOrd) * (height - 4) - 2;
             pathD += i === 0 ? `M${x},${y}` : `L${x},${y}`;
@@ -881,7 +947,7 @@ const EmbryosManager = {
                     html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px;border-color:${thumbColor}">T${item.timepoint}</div>`;
                 }
                 if (config.showStageLabels) {
-                    html += `<span class="filmstrip-stage-label" style="color:${stageColor}">${stageLabel}</span>`;
+                    html += `<span class="filmstrip-stage-label" style="color:${stageColor(stage)}">${stageLabel}</span>`;
                 }
                 html += `</div>`;
             }
@@ -1061,8 +1127,8 @@ const EmbryosManager = {
 
         // ETA
         let eta = '—';
-        if (currentStage && this.STAGE_TIMING[currentStage] != null) {
-            const remaining = (this.STAGE_TIMING['hatched'] || 570) - this.STAGE_TIMING[currentStage];
+        if (currentStage && this.STAGE_TIMING[this._sk(currentStage)] != null) {
+            const remaining = (this.STAGE_TIMING['hatched'] || 570) - this.STAGE_TIMING[this._sk(currentStage)];
             if (remaining > 0) eta = `~${(remaining / 60).toFixed(1)}h`;
             else eta = 'done';
         }
@@ -1088,7 +1154,7 @@ const EmbryosManager = {
         const stages = ['early', 'bean', 'comma', '1_5_fold', '2_fold', 'pretzel', 'hatching', 'hatched'];
         const stageLabels = ['Early', 'Bean', 'Comma', '1.5F', '2-Fold', 'Pretzel', 'Hatch', 'Done'];
         const stageY = (stageName) => {
-            const ord = this.STAGE_ORDINAL[stageName] ?? 0;
+            const ord = this.STAGE_ORDINAL[this._sk(stageName)] ?? 0;
             return padTop + chartH - (ord / 9) * chartH;
         };
 
@@ -1792,72 +1858,90 @@ const EmbryosManager = {
     renderStatusBadge() {
         const statusEl = document.getElementById('timelapse-status');
         const textEl = document.getElementById('timelapse-status-text');
-
         if (!statusEl || !textEl) return;
-
-        // Remove all status classes
-        statusEl.classList.remove('running', 'paused', 'completed', 'idle');
-
-        if (this.state.status === 'IDLE' || Object.keys(this.state.embryos).length === 0) {
+        statusEl.classList.remove('running', 'paused', 'completed', 'stopped', 'idle');
+        const kind = this.runKind();
+        const status = (this.run && this.run.status) ? String(this.run.status).toUpperCase() : this.state.status;
+        // What the run says of itself, never the embryo count: a brightfield
+        // run has no embryos and is running all the same.
+        if (!status || status === 'IDLE') {
             statusEl.classList.add('idle');
-            textEl.textContent = 'No active timelapse';
-        } else {
-            statusEl.classList.add(this.state.status.toLowerCase());
-            textEl.textContent = this.state.status === 'RUNNING' ? 'Running' :
-                                 this.state.status === 'PAUSED' ? 'Paused' :
-                                 this.state.status === 'COMPLETED' ? 'Completed' :
-                                 this.state.status === 'STOPPED' ? 'Stopped' : this.state.status;
+            textEl.textContent = 'No run';
+            return;
         }
+        const word = status === 'RUNNING' ? 'Running' : status === 'PAUSED' ? 'Paused'
+            : status === 'COMPLETED' ? 'Done' : status === 'STOPPED' ? 'Stopped' : status.charAt(0) + status.slice(1).toLowerCase();
+        statusEl.classList.add(status.toLowerCase());
+        textEl.textContent = kind === 'brightfield' ? `${word} · brightfield` : word;
     },
 
     renderSummary() {
-        // Invalidate countdown cache since we're rebuilding DOM
         this._countdownCache = null;
-
         const statsEl = document.getElementById('header-stats');
         if (!statsEl) return;
-
+        const kind = this.runKind();
+        const r = this.run || {};
+        const dic = r.dic || {};
         const embryos = Object.values(this.state.embryos);
-        if (embryos.length === 0) {
-            statsEl.innerHTML = '';
+        const stat = (value, label, id, cls) => `
+            <div class="header-stat${cls ? ` ${cls}` : ''}">
+                <span class="stat-value"${id ? ` id="${id}"` : ''}>${value}</span>
+                <span class="stat-label">${label}</span>
+            </div>`;
+        const startedAt = this.state.startedAt || (r.started_at ? new Date(r.started_at) : null);
+        const elapsed = startedAt ? stat(this.formatDuration(Date.now() - startedAt.getTime()), 'elapsed', 'summary-duration') : '';
+        const refs = dic.enabled
+            ? stat(dic.references && dic.references.dark && dic.references.flat ? '✓' : '✕', 'dark/flat', null, dic.references && dic.references.dark ? 'is-ok' : 'is-missing')
+            : '';
+        if (kind === 'none') { statsEl.innerHTML = ''; return; }
+        if (kind === 'brightfield') {
+            const live = this.runIsLive();
+            statsEl.innerHTML = [
+                stat(live ? (dic.frames ?? this._dicFrames.length) : this._dicFrames.length, 'frames'),
+                dic.every_seconds ? stat(`every ${this.fmtEvery(dic.every_seconds)}`, 'cadence') : '',
+                live ? stat(this.getOverviewCountdown(), 'next frame', 'summary-next-countdown', 'is-live') : '',
+                live ? elapsed : '',
+                this._dicFrames.some(f => f.correctable) || (dic.references && dic.references.dark)
+                    ? stat('✓', 'dark/flat', null, 'is-ok')
+                    : stat('✕', 'dark/flat', null, 'is-missing'),
+            ].join('');
             return;
         }
+        const going = embryos.filter(e => !e.isComplete).length;
+        const done = embryos.filter(e => e.isComplete).length;
+        statsEl.innerHTML = [
+            stat(embryos.length, `embryo${embryos.length !== 1 ? 's' : ''}`),
+            going ? stat(going, 'going') : '',
+            done ? stat(done, 'done') : '',
+            r.current_round != null ? stat(r.current_round, 'round') : stat(this.state.totalTimepoints, 'timepoints'),
+            going ? stat(this.getNextCountdown(), 'next volume', 'summary-next-countdown', 'is-live') : '',
+            kind === 'mixed' ? stat(dic.frames ?? this._dicFrames.length, 'overview frames') : '',
+            kind === 'mixed' ? stat(this.getOverviewCountdown(), 'next frame', 'summary-next-overview') : '',
+            elapsed,
+            refs,
+        ].join('');
+    },
 
-        const active = embryos.filter(e => !e.isComplete).length;
-        const completed = embryos.filter(e => e.isComplete).length;
+    fmtEvery(sec) {
+        const s = Number(sec);
+        if (!Number.isFinite(s) || s <= 0) return '';
+        if (s < 60) return `${s} s`;
+        if (s < 3600) return `${Math.round(s / 60)} min`;
+        return `${(s / 3600).toFixed(s % 3600 ? 1 : 0)} h`;
+    },
 
-        statsEl.innerHTML = `
-            <div class="header-stat">
-                <span class="stat-value">${this.state.totalTimepoints}</span>
-                <span class="stat-label">TP</span>
-            </div>
-            <div class="header-stat">
-                <span class="stat-value">${active}</span>
-                <span class="stat-label">Active</span>
-            </div>
-            <div class="header-stat">
-                <span class="stat-value">${completed}</span>
-                <span class="stat-label">Done</span>
-            </div>
-            ${this.state.startedAt ? `
-            <div class="header-stat">
-                <span class="stat-value" id="summary-duration">${this.formatDuration(Date.now() - this.state.startedAt.getTime())}</span>
-                <span class="stat-label">Dur</span>
-            </div>
-            ` : ''}
-            ${active > 0 ? `
-            <div class="header-stat">
-                <span class="stat-value" id="summary-next-countdown">${this.getNextCountdown()}</span>
-                <span class="stat-label">Next</span>
-            </div>
-            ` : ''}
-        `;
+    getOverviewCountdown() {
+        const dic = (this.run && this.run.dic) || {};
+        let secs = dic.seconds_until_next;
+        if (dic.next_due_at) secs = Math.max(0, (new Date(dic.next_due_at).getTime() - Date.now()) / 1000);
+        if (!Number.isFinite(Number(secs))) return '—';
+        return this.formatCountdown(Math.floor(Number(secs)));
     },
 
     getNextCountdown() {
         const embryos = Object.values(this.state.embryos);
         const activeEmbryos = embryos.filter(e => !e.isComplete);
-        if (activeEmbryos.length === 0) return '--:--';
+        if (activeEmbryos.length === 0) return '—';
 
         let minSeconds = Infinity;
         activeEmbryos.forEach(embryo => {
@@ -1870,7 +1954,7 @@ const EmbryosManager = {
             }
         });
 
-        if (minSeconds === Infinity) return '--:--';
+        if (minSeconds === Infinity) return '—';
         return this.formatCountdown(Math.floor(minSeconds));
     },
 
@@ -1885,66 +1969,117 @@ const EmbryosManager = {
         }
         const countdownEl = document.getElementById('summary-next-countdown');
         if (countdownEl) {
-            countdownEl.textContent = this.getNextCountdown();
+            countdownEl.textContent = this.runKind() === 'brightfield' ? this.getOverviewCountdown() : this.getNextCountdown();
         }
+        const overviewEl = document.getElementById('summary-next-overview');
+        if (overviewEl) overviewEl.textContent = this.getOverviewCountdown();
     },
 
     renderEmbryoCards() {
-        // Invalidate countdown cache since we're rebuilding embryo card DOM
         this._countdownCache = null;
-
         const container = document.getElementById('embryo-cards');
         if (!container) return;
-
         const embryos = Object.values(this.state.embryos);
-
         if (embryos.length === 0) {
-            container.innerHTML = '';
+            const kind = this.runKind();
+            container.innerHTML = kind === 'brightfield'
+                ? '<div class="tile-empty">Overview only. Embryos appear when a volume arrives.</div>'
+                : kind === 'none' ? '<div class="tile-empty">No embryos.</div>'
+                : '<div class="tile-empty">No embryos registered.</div>';
             return;
         }
-
-        // Sort: running first, then by embryo ID
         embryos.sort((a, b) => {
             if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
             return a.embryoId.localeCompare(b.embryoId);
         });
-
         container.innerHTML = embryos.map(embryo => this.renderEmbryoCard(embryo)).join('');
-
-        // Add click handlers for selection
-        container.querySelectorAll('.embryo-rail-item').forEach(card => {
-            card.addEventListener('click', () => {
-                this.selectEmbryo(card.dataset.embryoId);
-            });
+        container.querySelectorAll('.embryo-tile').forEach(tile => {
+            tile.addEventListener('click', () => this.selectEmbryo(tile.dataset.embryoId));
         });
+        this._wireTileScrub(container);
     },
 
-    // Compact rail item for embryo switcher
+    // One tile per embryo: status shape, a thumbnail that scrubs through its
+    // timepoints, the stage history as a bar on the ordinal ramp, the current
+    // stage with its swatch, and one live line. No emoji: a pretzel is not
+    // visibly later than a comma, and the glyphs differ by OS.
     renderEmbryoCard(embryo) {
         const status = embryo.isComplete ? 'complete' :
                        embryo.lastError ? 'error' :
                        this.state.status === 'PAUSED' ? 'paused' : 'running';
-
         const isSelected = this.selectedEmbryoId === embryo.embryoId;
-
-        // Stage info
-        const stageIcon = embryo.current_stage ? this.getStageIcon(embryo.current_stage) : '🔬';
-        const stageName = embryo.current_stage ? this.formatStageName(embryo.current_stage) : 'Acquiring';
-
-        // Short label: extract number from embryo_3 → "E3"
+        const reasoning = [...(this.detectionReasoning[embryo.embryoId] || [])]
+            .filter(r => r && r.timepoint != null)
+            .sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+        const latest = reasoning.length ? reasoning[reasoning.length - 1] : null;
+        const stage = (latest && latest.stage) || embryo.current_stage || null;
+        const stageName = stage ? this.formatStageName(stage) : 'no call yet';
+        const color = (typeof stageColor === 'function') ? stageColor(stage) : '#8b949e';
         const shortLabel = embryo.embryoId.replace(/embryo_?/i, 'E');
-
+        const tp = Number(embryo.timepoints) || (latest ? latest.timepoint : 0) || 0;
+        const sid = this.currentSessionId;
+        const thumb = sid && tp > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryo.embryoId)}&t=${tp}` : null;
+        const bar = reasoning.length
+            ? `<span class="stage-bar" aria-hidden="true">${reasoning.map(r => `<span style="background:${(typeof stageColor === 'function') ? stageColor(r.stage) : '#8b949e'}" title="t${r.timepoint} · ${this.escapeHtml(this.formatStageName(r.stage || ''))}"></span>`).join('')}</span>`
+            : '<span class="stage-bar is-empty" aria-hidden="true"><span></span></span>';
+        const live = embryo.isComplete
+            ? `done${embryo.completionReason ? ` · ${this.escapeHtml(String(embryo.completionReason).split(/[.;(]/)[0].trim().toLowerCase())}` : ''}`
+            : embryo.lastError ? `error · ${this.escapeHtml(String(embryo.lastError).slice(0, 40))}`
+            : this.state.status === 'PAUSED' ? 'paused'
+            : !this.runIsLive() ? (tp ? `last t${tp}` : 'no volume yet')
+            : `next in <span class="tile-countdown" data-embryo-id="${embryo.embryoId}">${this.getEmbryoCountdown(embryo)}</span>`;
         return `
-            <div class="embryo-rail-item ${status} ${isSelected ? 'selected' : ''}"
-                 data-embryo-id="${embryo.embryoId}"
-                 title="${embryo.embryoId} — ${stageName} — ${embryo.timepoints} TP">
-                <span class="rail-icon">${stageIcon}</span>
-                <span class="rail-label">${shortLabel}</span>
-            </div>
+            <button type="button" class="embryo-tile ${status}${isSelected ? ' is-selected' : ''}"
+                    data-embryo-id="${embryo.embryoId}" aria-pressed="${isSelected ? 'true' : 'false'}"
+                    title="${this.escapeHtml(embryo.embryoId)} · ${this.escapeHtml(stageName)} · ${tp} timepoint${tp !== 1 ? 's' : ''}">
+                <span class="tile-head"><span class="tile-dot ${status}" aria-hidden="true"></span><span class="tile-id">${shortLabel}</span>${embryo.nickname ? `<span class="tile-nick">${this.escapeHtml(embryo.nickname)}</span>` : ''}</span>
+                <span class="tile-thumb" data-embryo="${embryo.embryoId}" data-tp="${tp}">
+                    ${thumb ? `<img src="${thumb}" alt="${this.escapeHtml(shortLabel)}, timepoint ${tp}" loading="lazy"><span class="tile-thumb-cap">t${tp}</span>` : `<span class="tile-thumb-empty">${tp ? `t${tp}` : 'no volume yet'}</span>`}
+                </span>
+                ${bar}
+                <span class="tile-stage"><i class="tile-swatch" style="background:${color}" aria-hidden="true"></i>${this.escapeHtml(stageName)}${tp ? ` · t${tp}` : ''}</span>
+                <span class="tile-live">${live}</span>
+            </button>
         `;
     },
 
+    getEmbryoCountdown(embryo) {
+        if (!embryo || embryo.isComplete) return '—';
+        let remaining = null;
+        if (embryo.lastAcquired && embryo.intervalSeconds) {
+            const elapsed = (Date.now() - new Date(embryo.lastAcquired).getTime()) / 1000;
+            remaining = Math.max(0, embryo.intervalSeconds - elapsed);
+        } else if (embryo.intervalSeconds) remaining = embryo.intervalSeconds;
+        return remaining == null ? '—' : this.formatCountdown(Math.floor(remaining));
+    },
+
+    // Moving across a tile's thumbnail walks its timepoints; leaving snaps back.
+    _wireTileScrub(container) {
+        const sid = this.currentSessionId;
+        if (!sid) return;
+        container.querySelectorAll('.tile-thumb[data-tp]').forEach(el => {
+            const n = Number(el.dataset.tp) || 0;
+            if (n < 2) return;
+            const eid = el.dataset.embryo;
+            const img = el.querySelector('img'), cap = el.querySelector('.tile-thumb-cap');
+            const show = t => {
+                if (img && img.dataset.t !== String(t)) { img.src = `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`; img.dataset.t = String(t); }
+                if (cap) cap.textContent = `t${t}`;
+            };
+            el.addEventListener('mousemove', ev => {
+                const r = el.getBoundingClientRect();
+                const t = Math.min(n, Math.max(1, 1 + Math.floor(((ev.clientX - r.left) / r.width) * n)));
+                show(t);
+            });
+            el.addEventListener('mouseleave', () => show(n));
+        });
+    },
+
     // Legacy full embryo card (keeping for reference, not used)
+    // Python says "1.5fold" and "1_5_fold" both; every map here is keyed the
+    // one way stage-colors.js spells it.
+    _sk(stage) { return (typeof stageKey === 'function') ? stageKey(stage) : String(stage || '').toLowerCase(); },
+
     getStageIcon(stage) {
         const icons = {
             'early': '🥚',
@@ -1959,7 +2094,7 @@ const EmbryosManager = {
             'arrested': '⏸️',
             'no_object': '⬜',
         };
-        return icons[stage?.toLowerCase()] || '🔬';
+        return icons[this._sk(stage).replace('1_5_fold', '1.5fold').replace('2_fold', '2fold').replace('3_fold', '3fold')] || '○';
     },
 
     // Format stage name for display
@@ -1978,7 +2113,7 @@ const EmbryosManager = {
             'arrested': 'Arrested',
             'no_object': 'Empty',
         };
-        return names[stage.toLowerCase()] || stage;
+        return names[this._sk(stage).replace('1_5_fold', '1.5fold').replace('2_fold', '2fold').replace('3_fold', '3fold')] || String(stage).replace(/_/g, ' ');
     },
 
     // Render verification status for embryo card
@@ -1996,8 +2131,10 @@ const EmbryosManager = {
         this._setSelectedEmbryo(embryoId);
 
         // Update card selection styles
-        document.querySelectorAll('.embryo-rail-item').forEach(card => {
-            card.classList.toggle('selected', card.dataset.embryoId === embryoId);
+        document.querySelectorAll('.embryo-tile').forEach(card => {
+            const on = card.dataset.embryoId === embryoId;
+            card.classList.toggle('is-selected', on);
+            card.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
 
         // Render reasoning panel
@@ -2028,11 +2165,7 @@ const EmbryosManager = {
         if (!this.hasReconciledWithServer) {
             panel.innerHTML = `
                 <div class="reasoning-empty">
-                    <div class="reasoning-empty-icon">&#x23F3;</div>
-                    <div class="reasoning-empty-text">Connecting to server...</div>
-                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
-                        Syncing with experiment data
-                    </div>
+                    <div class="reasoning-empty-text">Connecting to the server.</div>
                 </div>
             `;
             return;
@@ -2045,11 +2178,7 @@ const EmbryosManager = {
             if (hasEmbryos) {
                 panel.innerHTML = `
                     <div class="reasoning-empty">
-                        <div class="reasoning-empty-icon">&#x1F441;</div>
-                        <div class="reasoning-empty-text">Select an embryo to view its detection analysis</div>
-                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            Click on any embryo card in the left panel
-                        </div>
+                        <div class="reasoning-empty-text">Select an embryo. Its stage calls appear here.</div>
                     </div>
                 `;
             } else {
@@ -2101,56 +2230,50 @@ const EmbryosManager = {
 
         // Build quick jump badges (stage transitions for perception, positive detections for legacy)
         let quickJumpsHtml;
+        const sw = stage => `<i class="tile-swatch" style="background:${(typeof stageColor === 'function') ? stageColor(stage) : '#8b949e'}" aria-hidden="true"></i>`;
         if (isPerceptionData && stageTransitions.length > 0) {
             quickJumpsHtml = stageTransitions.map(t => `
-                <span class="quick-jump-badge stage-jump" onclick="EmbryosManager.scrollToDetection(${t.timepoint}, '${t.detector_name}')" title="Jump to ${this.formatStageName(t.stage)}">
-                    <span class="stage-icon">${this.getStageIcon(t.stage)}</span>
-                    ${this.formatStageName(t.stage)} @ T${t.timepoint}
-                </span>
+                <button type="button" class="quick-jump-badge stage-jump" onclick="EmbryosManager.scrollToDetection(${t.timepoint}, '${t.detector_name}')" title="First ${this.escapeHtml(this.formatStageName(t.stage).toLowerCase())} call">
+                    ${sw(t.stage)} ${this.escapeHtml(this.formatStageName(t.stage))} <span class="quick-jump-t">t${t.timepoint}</span>
+                </button>
             `).join('');
         } else if (positiveDetections.length > 0) {
             quickJumpsHtml = positiveDetections.map(d => `
-                <span class="quick-jump-badge" onclick="EmbryosManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Jump to detection">
-                    <span class="detector-icon">${this.getDetectorIcon(d.detector_name)}</span>
-                    ${this.formatDetectorName(d.detector_name)} @ T${d.timepoint}
-                </span>
+                <button type="button" class="quick-jump-badge" onclick="EmbryosManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Detection">
+                    ${this.escapeHtml(this.formatDetectorName(d.detector_name))} <span class="quick-jump-t">t${d.timepoint}</span>
+                </button>
             `).join('');
         } else {
-            quickJumpsHtml = '<span style="font-size: 0.8rem; color: var(--text-muted);">No stage transitions yet</span>';
+            quickJumpsHtml = '';
         }
 
         // Build empty state if no evaluations
         const emptyStateHtml = totalEvaluations === 0 ? `
             <div class="no-detections">
-                <div class="no-detections-icon">&#x1F9EC;</div>
-                <div class="no-detections-text">No stage evaluations yet</div>
-                <div class="no-detections-hint">
-                    Stage analysis will appear here as the embryo develops.
-                </div>
+                <div class="no-detections-text">No stage calls yet for ${this.escapeHtml(embryo.embryoId.replace(/embryo_?/i, 'E'))}.</div>
+                <div class="no-detections-hint">The first comes after its first volume.</div>
             </div>
         ` : `
             <div class="eval-hint">
-                <span>Click on any evaluation dot above to view the full VLM analysis</span>
+                <span>Select a timepoint to read its analysis.</span>
             </div>
         `;
 
         // Merged compact info bar: embryo name + stage + stats + quick-jumps
-        const stageBadge = isPerceptionData && currentStage
-            ? `<span class="stage-icon">${this.getStageIcon(currentStage)}</span> ${this.formatStageName(currentStage)}`
-            : '';
-        const transitionsText = isPerceptionData
-            ? `${stageTransitions.length} transitions`
-            : `${positiveDetections.length} detections`;
+        // One sentence: who, what stage since when, how many timepoints.
+        const since = isPerceptionData && currentStage && stageTransitions.length
+            ? stageTransitions[stageTransitions.length - 1].timepoint : null;
+        const sentence = isPerceptionData && currentStage
+            ? `${sw(currentStage)} ${this.escapeHtml(this.formatStageName(currentStage))}${since != null ? ` since t${since}` : ''} · ${embryo.timepoints} timepoint${embryo.timepoints !== 1 ? 's' : ''}`
+            : `${positiveDetections.length} detection${positiveDetections.length !== 1 ? 's' : ''} · ${embryo.timepoints} timepoint${embryo.timepoints !== 1 ? 's' : ''}`;
+        void statusIcon;
 
         panel.innerHTML = `
             <div class="reasoning-header">
                 <div class="reasoning-embryo-info">
-                    <span class="reasoning-status-dot ${statusClass}">${statusIcon}</span>
-                    <span class="reasoning-embryo-name">${embryo.embryoId}</span>
-                    ${stageBadge ? `<span class="reasoning-condition">${stageBadge}</span>` : ''}
-                    <span class="stat" style="margin-left: 0.5rem;">${transitionsText}</span>
-                    <span class="stat">${totalEvaluations} evals</span>
-                    <span class="stat">${embryo.timepoints} tp</span>
+                    <span class="tile-dot ${statusClass}" aria-hidden="true"></span>
+                    <span class="reasoning-embryo-name">${this.escapeHtml(embryo.embryoId.replace(/embryo_?/i, 'E'))}</span>
+                    <span class="reasoning-sentence">${sentence}</span>
                     ${typeof Reveal !== 'undefined' ? Reveal.button(
                         { what: 'embryo', embryo_id: embryo.embryoId }, 'show',
                         { label: 'Folder', title: 'Open this embryo’s folder: volumes, projections, calibration' }) : ''}
@@ -2884,42 +3007,41 @@ const EmbryosManager = {
      * @param {string} targetSelector - CSS selector for where to insert the hint
      */
     renderSmartEmptyState(type) {
+        const kind = this.runKind();
+        const dic = (this.run && this.run.dic) || {};
+        const every = dic.every_seconds ? this.fmtEvery(dic.every_seconds) : null;
         const states = {
-            'no-embryos': {
-                icon: '&#x1F52C;',  // Microscope
-                title: 'No embryos yet',
-                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Calibration tab.',
-                action: { label: 'Go to Calibration', tab: 'calibration' }
-            },
+            'no-embryos': kind === 'brightfield'
+                ? {
+                    title: 'Overview only.',
+                    message: `This run takes one frame of the dish${every ? ` every ${every}` : ''} and no volumes. Embryos appear here when a volume arrives.`,
+                    action: null,
+                }
+                : {
+                    title: 'No embryos registered.',
+                    message: 'Mark embryos on Operate and start the run. They appear here as volumes arrive.',
+                    action: { label: 'Open Operate', tab: 'devices' },
+                },
             'no-detections': {
-                icon: '&#x1F441;',  // Eye
-                title: 'No detections yet',
-                message: 'The AI will analyze each timepoint and notify you when developmental events are detected. Typical first detection: 2-4 hours after start.',
-                action: null
+                title: 'No stage calls yet.',
+                message: 'Each volume is read as it arrives. The first call follows the first volume.',
+                action: null,
             },
             'experiment-idle': {
-                icon: '&#x23F8;',  // Pause
-                title: 'Experiment not running',
-                message: 'No active timelapse. Configure and start an experiment to begin automated embryo monitoring.',
-                action: { label: 'Go to Calibration', tab: 'calibration' }
+                title: 'No run.',
+                message: 'Start one from Operate. Frames and embryos appear here as they are taken.',
+                action: { label: 'Open Operate', tab: 'devices' },
             },
-            'waiting-first': {
-                icon: '&#x23F3;',  // Hourglass
-                title: 'Waiting for first acquisition',
-                message: 'The timelapse has started. The first volume should arrive shortly.',
-                action: null
-            }
+            'waiting-first': kind === 'brightfield'
+                ? { title: 'Run started.', message: `The first frame arrives at the end of the first interval${every ? ` (${every})` : ''}.`, action: null }
+                : { title: 'Run started.', message: 'The first volume arrives at the end of the first interval. Stage calls start after it.', action: null },
         };
-
         const state = states[type] || states['no-embryos'];
-
         const actionHtml = state.action
-            ? `<button class="empty-action" onclick="switchTab('${state.action.tab}')">${state.action.label}</button>`
+            ? `<button type="button" class="empty-action" onclick="switchTab('${state.action.tab}')">${state.action.label}</button>`
             : '';
-
         return `
             <div class="smart-empty-state">
-                <div class="empty-icon">${state.icon}</div>
                 <div class="empty-title">${state.title}</div>
                 <div class="empty-message">${state.message}</div>
                 ${actionHtml}
@@ -3014,20 +3136,20 @@ const EmbryosManager = {
 
             // For perception data, use stage-based coloring
             if (isPerceptionData && stage) {
-                const stageClass = `stage-${stage.toLowerCase().replace('.', '')}`;
-                const stageIcon = this.getStageIcon(stage);
+                const stageClass = `stage-${this._sk(stage)}`;
+                const colour = (typeof stageColor === 'function') ? stageColor(stage) : '#8b949e';
                 const title = isHatching
-                    ? `T${tp}: ${this.formatStageName(stage)} - HATCHING!`
-                    : `T${tp}: ${this.formatStageName(stage)}`;
+                    ? `t${tp} · hatching`
+                    : `t${tp} · ${this.formatStageName(stage).toLowerCase()}`;
 
                 const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || 'perception';
-                return `<div class="eval-dot ${stageClass} ${isHatching ? 'hatching' : ''}"
-                             title="${title}"
+                return `<button type="button" class="eval-dot ${stageClass} ${isHatching ? 'hatching' : ''}"
+                             title="${title}" aria-label="${title}"
                              data-timepoint="${tp}"
                              data-detector="${detectorName}"
                              onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp}, true)">
-                            <span class="eval-dot-icon">${stageIcon}</span>
-                        </div>`;
+                            <span class="eval-dot-swatch" style="background:${colour}" aria-hidden="true"></span>
+                        </button>`;
             }
 
             // Legacy detection behavior
