@@ -92,7 +92,7 @@ def contrast(a: tuple[float, float, float], b: tuple[float, float, float]) -> fl
 
 def parse_css_tokens(path: Path, selector_prefix: str) -> dict[str, str]:
     """``--name: #hex;`` tokens from the first ``{...}`` block whose selector starts with prefix."""
-    css = path.read_text()
+    css = path.read_text(encoding="utf-8")  # main.css carries glyphs; Windows defaults to cp1252
     m = re.search(re.escape(selector_prefix) + r"[^{]*\{(.*?)\}", css, re.S)
     if not m:
         raise ValueError(f"no block for {selector_prefix!r} in {path}")
