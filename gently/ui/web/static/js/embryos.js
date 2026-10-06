@@ -1278,6 +1278,11 @@ const EmbryosManager = {
         if (serverHasNewSession || serverIsIdleButClientHasData) {
             console.log(`Session changed: ${this.currentSessionId} → ${serverSessionId || '(none)'}`);
             this.clearAllState();
+            // The overview strip is the session's too: drop the old session's
+            // frames and read the new one's from disk. A restored session has
+            // its frames under snapshots/ but fires no ACQUISITION_STARTED.
+            this._dicFrames = [];
+            this.refreshDicStrip();
         } else {
             console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);
         }

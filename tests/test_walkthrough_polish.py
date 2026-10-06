@@ -47,6 +47,18 @@ def test_the_strip_hydrates_from_disk_for_a_page_that_opened_late():
     assert "create_dic_router" in ROUTES_INIT, "the DIC routes are not registered"
 
 
+def test_a_restored_session_brings_its_own_frames_to_the_strip():
+    """A restored session fires no ACQUISITION_STARTED, and the page may have
+    opened before the agent had a session at all. The session boundary is the
+    one event both paths share: there the old session's frames go and the new
+    session's are read from disk."""
+    boundary = EMBRYOS[
+        EMBRYOS.index("if (serverHasNewSession || serverIsIdleButClientHasData) {") :
+    ][:600]
+    assert "this._dicFrames = [];" in boundary
+    assert "this.refreshDicStrip();" in boundary
+
+
 def test_frames_on_the_strip_read_as_pictures_not_icons():
     m = re.search(r"\.dic-frame img[^{]*\{[^}]*height:\s*(\d+)px", MAIN_CSS)
     assert m and int(m.group(1)) >= 96, "strip frames are icon-sized again"
