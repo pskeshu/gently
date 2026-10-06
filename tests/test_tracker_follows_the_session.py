@@ -39,6 +39,15 @@ class TestARestoredSessionReplacesTheTracker:
         assert t.session_id == "old00001"
         assert t.status == "IDLE" and t.embryos == {} and t.total_timepoints == 0
 
+    def test_the_event_arriving_after_rehydration_keeps_what_rehydration_filled(self):
+        # The async event handler can run after the resume endpoint already
+        # rehydrated the tracker for the same session; it must not wipe it.
+        t = TimelapseTracker()
+        t.session_id = "new00002"
+        t.embryos = {"embryo_1": {"embryo_id": "embryo_1", "timepoints": 3}}
+        t.handle_event("SESSION_RESTORED", {"session_id": "new00002"})
+        assert list(t.embryos) == ["embryo_1"]
+
     def test_rehydration_lists_the_sessions_own_embryos_and_no_others(self, tmp_path):
         store = FileStore(root=tmp_path)
         _session_with_volumes(store, "aaaa0001", ["embryo_1", "embryo_2", "embryo_3"])

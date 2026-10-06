@@ -46,6 +46,7 @@ const OverviewStage = (() => {
     let loadSeq = 0;
     const cache = new Map();    // url -> HTMLImageElement (decoded), LRU by insertion
     const CACHE_MAX = 160;
+    let lastKey = '';           // what the file buttons and references line were last built for
 
     const $ = id => host && host.querySelector('#' + id);
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
@@ -68,7 +69,11 @@ const OverviewStage = (() => {
         if (cache.has(url)) { const im = cache.get(url); cache.delete(url); cache.set(url, im); return Promise.resolve(im); }
         return new Promise(resolve => {
             const im = new Image();
-            im.onload = () => { cache.set(url, im); while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); resolve(im); };
+            im.onload = () => {
+                cache.set(url, im); while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+                // decoded before it is swapped in, or the swap itself flashes
+                (im.decode ? im.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(im));
+            };
             im.onerror = () => resolve(null);
             im.src = url;
         });
@@ -86,6 +91,7 @@ const OverviewStage = (() => {
         const refs = opts.references ? opts.references() : null;
         const canCorrect = !!f.correctable;
         if (!host.querySelector('.ov')) {
+            lastKey = '';
             host.innerHTML = `
                 <div class="ov" tabindex="0" aria-label="Overview frames: drag the bar or use arrow keys to scrub, space to play">
                     <div class="ov-stage" id="ov-stage">
@@ -94,25 +100,33 @@ const OverviewStage = (() => {
                         <div class="ov-divider" id="ov-divider" hidden><span></span></div>
                         <span class="ov-live" id="ov-live"></span>
                     </div>
-                    <div class="ov-meta" id="ov-meta"></div>
-                    <div class="ov-bar-wrap">
-                        <div class="ov-preview" id="ov-preview"><img id="ov-pv-img" alt=""><span id="ov-pv-cap"></span></div>
-                        <canvas class="ov-bar" id="ov-bar" height="44" aria-hidden="true"></canvas>
-                    </div>
-                    <div class="ov-controls">
-                        <button type="button" class="op-btn" id="ov-play" title="Space"></button>
-                        <select id="ov-fps" class="op-sel" title="Frames per second"><option>2</option><option>5</option><option selected>10</option><option>20</option></select><span class="ov-keys">fps</span>
-                        <button type="button" class="op-btn" id="ov-loop" title="Play again from the start">Loop</button>
-                        <button type="button" class="op-btn" id="ov-corr" title="C — divide the session's dark and flat out"></button>
-                        <button type="button" class="op-btn" id="ov-cmp" title="Frame 1 under a divider you can drag — drift and growth show at the line">Compare with first</button>
-                        <span class="ov-gap"></span>
-                        <span class="ov-reveal" id="ov-reveal"></span>
-                        <button type="button" class="op-btn" id="ov-newest" title="N — the newest frame, and the ones that follow"></button>
-                        ${opts.onFold ? '<button type="button" class="op-btn" id="ov-fold" title="Back to the row of thumbnails">Fold ⌃</button>' : ''}
+                    <div class="ov-side">
+                        <div class="ov-meta" id="ov-meta"></div>
+                        <div class="ov-controls">
+                            <button type="button" class="op-btn" id="ov-play" title="Space"></button>
+                            <select id="ov-fps" class="op-sel" title="Frames per second"><option>2</option><option>5</option><option selected>10</option><option>20</option></select><span class="ov-keys">fps</span>
+                            <button type="button" class="op-btn" id="ov-loop" title="Play again from the start">Loop</button>
+                            <button type="button" class="op-btn" id="ov-corr" title="C — divide the session's dark and flat out"></button>
+                            <button type="button" class="op-btn" id="ov-cmp" title="Frame 1 under a divider you can drag — drift and growth show at the line">Compare with first</button>
+                            <button type="button" class="op-btn" id="ov-newest" title="N — the newest frame, and the ones that follow"></button>
+                            ${opts.onFold ? '<button type="button" class="op-btn" id="ov-fold" title="Back to the row of thumbnails">Fold ⌃</button>' : ''}
+                        </div>
+                        <div class="ov-controls">
+                            <span class="ov-reveal" id="ov-reveal"></span>
+                            <span class="ov-refs" id="ov-refs"></span>
+                        </div>
                         <span class="ov-keys"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> ×10 · <kbd>Space</kbd> play · <kbd>N</kbd> newest · <kbd>C</kbd> corrected</span>
+                        <div class="ov-bar-wrap">
+                            <div class="ov-preview" id="ov-preview"><img id="ov-pv-img" alt=""><span id="ov-pv-cap"></span></div>
+                            <canvas class="ov-bar" id="ov-bar" height="44" aria-hidden="true"></canvas>
+                        </div>
                     </div>
-                    <div class="ov-refs" id="ov-refs"></div>
                 </div>`;
+            // The frame keeps its own aspect: as tall as the stage, as wide as that makes it.
+            $('ov-img').addEventListener('load', ev => {
+                const im = ev.target;
+                if (im.naturalWidth && im.naturalHeight) $('ov-stage').style.aspectRatio = `${im.naturalWidth} / ${im.naturalHeight}`;
+            });
             wire();
         }
         $('ov-live').textContent = follow ? 'FOLLOWING NEWEST' : `FRAME ${cur + 1} / ${all.length}`;
@@ -134,9 +148,15 @@ const OverviewStage = (() => {
             $('ov-divider').style.left = `${(divider * 100).toFixed(2)}%`;
         }
         renderMeta(f, all);
-        renderRefs(f, refs);
-        if (typeof Reveal !== 'undefined' && $('ov-reveal')) {
-            Reveal.fill($('ov-reveal'), f.stem ? { what: 'dic', stem: f.stem } : null);
+        // Rebuilt only when the frame (or its correction) changes: rebuilding
+        // these every tick of playback made the controls flicker.
+        const key = `${f.stem}|${canCorrect}|${corrected}|${refs && refs.record}`;
+        if (!playing && key !== lastKey) {
+            lastKey = key;
+            renderRefs(f, refs);
+            if (typeof Reveal !== 'undefined' && $('ov-reveal')) {
+                Reveal.fill($('ov-reveal'), f.stem ? { what: 'dic', stem: f.stem } : null);
+            }
         }
         drawBar();
         show(f);
@@ -150,8 +170,7 @@ const OverviewStage = (() => {
         const gap = prev && prev.when && f.when ? new Date(f.when) - new Date(prev.when) : 0;
         const typical = all.length > 2 && first && first.when && all[1].when ? Math.abs(new Date(all[1].when) - new Date(first.when)) : 0;
         const bits = [
-            `<span>frame <b>${cur + 1}</b>/${all.length}</span>`,
-            t && !isNaN(t) ? `<span><b>${fmtT(f.when)}</b></span>` : '',
+            `<span class="ov-now">${t && !isNaN(t) ? `<b>${fmtT(f.when)}</b> · ` : ''}frame <b>${cur + 1}</b>/${all.length}</span>`,
             t && t1 && !isNaN(t) && !isNaN(t1) ? `<span>elapsed <b>${fmtEl(t - t1)}</b></span>` : '',
             f.round != null ? `<span>round <b>${esc(f.round)}</b></span>` : '',
             f.position && f.position.x != null ? `<span>stage <b>${Math.round(f.position.x)}, ${Math.round(f.position.y)}</b> µm</span>` : '',
@@ -184,13 +203,20 @@ const OverviewStage = (() => {
         const quick = urlFor(f, SCRUB_MAX);
         load(quick).then(im => { if (seq === loadSeq && im) img.src = im.src; });
         clearTimeout(settleTimer);
+        const all = frames();
+        if (playing) {
+            // Playing shows the scrub size only — swapping each frame to its
+            // full-size file a moment later made every frame draw twice. The
+            // full frame comes when playback stops. The next frames load now.
+            [cur + 1, cur + 2, cur + 3].forEach(i => { if (all[i]) load(urlFor(all[i], SCRUB_MAX)); });
+            return;
+        }
         settleTimer = setTimeout(() => {
             if (seq !== loadSeq) return;
             load(urlFor(f, null)).then(im => { if (seq === loadSeq && im) img.src = im.src; });
             // neighbours, for the next step
-            const all = frames();
             [cur - 1, cur + 1, cur + 2].forEach(i => { if (all[i]) load(urlFor(all[i], SCRUB_MAX)); });
-        }, playing ? 0 : SETTLE_MS);
+        }, SETTLE_MS);
         if (compare) {
             const first = frames()[0];
             load(urlFor(first, SCRUB_MAX)).then(im => { if (im) $('ov-img-b').src = im.src; });

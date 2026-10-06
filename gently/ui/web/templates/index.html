@@ -284,7 +284,6 @@
                    the newest frame large with a timeline beneath (panels/
                    overview-stage.js). A mixed run gets the strip — the stage
                    folded to one row — and Open expands it in place. #}
-                <div class="overview-stage" id="embryos-overview" hidden></div>
                 <div class="dic-strip" id="dic-strip" hidden>
                     <div class="dic-strip-head">
                         <span class="dic-strip-title">DIC overview</span>
@@ -298,6 +297,10 @@
             <div class="embryos-body" id="embryos-body">
                 <!-- Default view: rail + reasoning (original layout) -->
                 <div class="view-default" id="view-default">
+                    {# The overview frames, open: the frame at the left, the
+                       timeline and controls beside it. A brightfield run with
+                       no embryos gets the whole view. #}
+                    <div class="overview-stage" id="embryos-overview" hidden></div>
                     <!-- Left sidebar: Embryo list -->
                     <div class="embryo-list" id="embryo-list">
                         <div class="embryo-cards" id="embryo-cards">

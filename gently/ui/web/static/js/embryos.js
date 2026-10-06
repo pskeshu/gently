@@ -331,7 +331,6 @@ const EmbryosManager = {
         const expanded = all.length > 0 && !inFilm && (kind === 'brightfield' || this._overviewOpen);
         if (stage) {
             stage.hidden = !expanded;
-            stage.classList.toggle('is-only', kind === 'brightfield' && Object.keys(this.state.embryos).length === 0);
             if (expanded) this._mountStage();
         }
         strip.hidden = all.length === 0 || inFilm || expanded;
@@ -441,7 +440,7 @@ const EmbryosManager = {
         // Show active view
         const activeEl = document.getElementById(`view-${viewName}`);
         if (activeEl) {
-            activeEl.style.display = viewName === 'default' ? 'flex' : '';
+            activeEl.style.display = viewName === 'default' ? 'grid' : '';
         }
         // Update buttons
         this._updateViewButtons();
@@ -2038,7 +2037,7 @@ const EmbryosManager = {
                     ${thumb ? `<img src="${thumb}" alt="${this.escapeHtml(shortLabel)}, timepoint ${tp}" loading="lazy"><span class="tile-thumb-cap">t${tp}</span>` : `<span class="tile-thumb-empty">${tp ? `t${tp}` : 'no volume yet'}</span>`}
                 </span>
                 ${bar}
-                <span class="tile-stage"><i class="tile-swatch" style="background:${color}" aria-hidden="true"></i>${this.escapeHtml(stageName)}${tp ? ` · t${tp}` : ''}</span>
+                <span class="tile-stage"><i class="tile-swatch" style="background:${color}" aria-hidden="true"></i>${this.escapeHtml(stageName)}</span>
                 <span class="tile-live">${live}</span>
             </button>
         `;

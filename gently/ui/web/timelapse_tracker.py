@@ -48,15 +48,20 @@ class TimelapseStateTracker:
         elif event_type == "SESSION_RESTORED":
             # The agent made a saved session live: nothing of the previous
             # session's run stays. rehydrate_session fills in the saved one's
-            # embryos and stage calls right after.
-            self.session_id = data.get("session_id")
-            self.status = "IDLE"
-            self.started_at = None
-            self.embryos = {}
-            self.detection_reasoning = {}
-            self.projection_uids = {}
-            self.volume_paths = {}
-            self.total_timepoints = 0
+            # embryos and stage calls — and because this handler runs on the
+            # event loop, it may run *after* that fill. Clear only when the
+            # tracker is still on another session; if it already holds this
+            # one, what it holds is this session's.
+            sid = data.get("session_id")
+            if sid != self.session_id:
+                self.session_id = sid
+                self.status = "IDLE"
+                self.started_at = None
+                self.embryos = {}
+                self.detection_reasoning = {}
+                self.projection_uids = {}
+                self.volume_paths = {}
+                self.total_timepoints = 0
 
         elif event_type == "ACQUISITION_STARTED":
             # Use session_id from prior SESSION_STARTED/SESSION_RESTORED event
