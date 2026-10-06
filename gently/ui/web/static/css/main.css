@@ -4114,6 +4114,12 @@ kbd {
 .timelapse-status.stopped .status-indicator {
     background: var(--text-muted);
 }
+.timelapse-status.idle .status-indicator {
+    background: transparent;
+    border: 1px dashed var(--text-muted);
+    box-sizing: border-box;
+}
+.timelapse-status .status-text { font-size: 0.95rem; }
 
 .timelapse-status .status-text {
     color: var(--text);
@@ -4136,6 +4142,14 @@ kbd {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.1); }
 }
+
+/* Embryos header: nouns for labels, the live number larger */
+.embryos-header-panel .header-stat .stat-label { text-transform: none; letter-spacing: 0; font-size: 0.72rem; }
+.header-stat.is-live .stat-value { font-size: 1.35rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.header-stat.is-ok .stat-value { color: var(--accent-green); }
+.header-stat.is-missing .stat-value { color: var(--accent-amber); }
+.embryos-header-bar:hover { background: inherit; }
+.view-btn:focus-visible, .empty-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Embryos Summary Bar */
 .embryos-summary {
@@ -4460,18 +4474,50 @@ kbd {
     overflow: hidden;
 }
 
-/* Left Rail - Compact Embryo Switcher */
+/* Left column: one tile per embryo (was a 64px rail of emoji) */
 .embryo-list {
-    width: 64px;
+    width: 200px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
     background: var(--bg-card);
     border-right: 1px solid var(--border);
     overflow-y: auto;
     overflow-x: hidden;
+    padding: 10px;
+    gap: 10px;
 }
+.embryo-cards { display: grid; gap: 10px; }
+.tile-empty { font-size: 0.8rem; color: var(--text-muted); padding: 6px 2px; line-height: 1.4; }
+.embryo-tile {
+    display: grid; gap: 6px; text-align: left; width: 100%;
+    font: inherit; color: var(--text); background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px; cursor: pointer;
+}
+.embryo-tile:hover { border-color: var(--border-strong); }
+.embryo-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.embryo-tile.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-hover)); }
+.tile-head { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+.tile-id { font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.tile-nick { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* status by shape as well as colour (STATUS SHAPES) */
+.tile-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-green); flex: none; }
+.tile-dot.paused { background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--accent-amber); }
+.tile-dot.complete { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+.tile-dot.error { background: var(--accent-red); border-radius: 1px; transform: rotate(45deg); }
+.tile-thumb { position: relative; display: block; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--img-bg); cursor: ew-resize; }
+.tile-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile-thumb-cap { position: absolute; right: 5px; bottom: 5px; font: 10px 'JetBrains Mono', ui-monospace, monospace; color: #e7eef4; background: rgba(0,0,0,.55); padding: 1px 5px; border-radius: 3px; }
+.tile-thumb-empty { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 0.72rem; color: var(--text-muted); }
+.embryo-tile .stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg-card); }
+.embryo-tile .stage-bar span { flex: 1 1 0; min-width: 1px; }
+.embryo-tile .stage-bar.is-empty span { background: var(--border); }
+.tile-stage { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; }
+.tile-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.tile-live { font-size: 0.74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tile-live .tile-countdown { color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* a brightfield run with no embryos: the stage takes the body */
+.view-default.is-overview-only .embryo-list, .view-default.is-overview-only .reasoning-panel { display: none; }
 
 .embryo-list-header {
     padding: 0.5rem 0;
@@ -11456,7 +11502,11 @@ body.modal-open {
 .dic-strip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .dic-strip-title { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
 .dic-strip-count { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; opacity: 0.75; }
-.dic-strip-hint { margin-left: auto; font-size: 0.66rem; opacity: 0.55; }
+.dic-strip-open {
+    margin-left: auto; font: inherit; font-size: 0.7rem; padding: 2px 8px; border-radius: 5px;
+    border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.dic-strip-open:hover, .dic-strip-open:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
 .dic-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 /* A frame on the strip is a button to the full frame, and looks like one:
    tall enough to read as a picture, with a hover the eye can find. */
@@ -11475,26 +11525,6 @@ body.modal-open {
 .dic-frame:hover, .dic-frame:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
 .dic-frame img, .dic-frame-blank { height: 110px; width: auto; min-width: 110px; display: block; border-radius: 3px; background: #000; }
 .dic-frame-cap { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; }
-
-.dic-viewer {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: grid;
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.82);
-}
-.dic-viewer[hidden] { display: none; }
-.dic-viewer-fig { margin: 0; display: grid; justify-items: center; gap: 8px; }
-.dic-viewer-fig img { max-width: 100%; max-height: 86vh; object-fit: contain; background: #000; border-radius: 4px; }
-.dic-viewer-fig figcaption { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #e6e8ec; }
-.dic-viewer-nav, .dic-viewer-close {
-    font: inherit; font-size: 1.6rem; line-height: 1;
-    background: none; border: 0; color: #e6e8ec; cursor: pointer; opacity: 0.8;
-}
-.dic-viewer-nav:disabled { opacity: 0.2; cursor: default; }
-.dic-viewer-close { position: fixed; top: 12px; right: 16px; }
 
 /* ── Home: the recent-images strip opens ─────────────────────────────────── */
 button.home-image {
@@ -11757,3 +11787,53 @@ a.settings-btn { display: inline-block; text-decoration: none; }
 .embryo-card.paused,
 .embryo-card.minimal.paused,
 .embryo-rail-item.paused { border-left-style: dashed; }
+
+/* ── Overview stage (panels/overview-stage.js) — the brightfield frames, large ── */
+.overview-stage { margin: 6px 0 2px; }
+.overview-stage[hidden] { display: none; }
+.ov { display: grid; gap: 8px; outline: none; }
+.ov:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; }
+.ov-stage { position: relative; background: var(--img-bg); border-radius: 8px; overflow: hidden; height: min(54vh, 680px); touch-action: none; }
+.ov-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.ov-img-b { pointer-events: none; }
+.ov-divider { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); pointer-events: none; }
+.ov-divider span { position: absolute; top: 10px; left: -14px; width: 28px; height: 20px; border-radius: 10px; background: var(--accent); color: var(--bg-dark); font: 600 10px/20px system-ui, sans-serif; text-align: center; }
+.ov-divider span::before { content: '⇔'; }
+.ov-live { position: absolute; top: 10px; left: 10px; font: 600 11px/1 'JetBrains Mono', ui-monospace, monospace; letter-spacing: .08em; padding: 5px 8px; border-radius: 4px; background: rgba(0,0,0,.55); color: #c9d1d9; }
+.ov-live.is-on { color: var(--accent-green); }
+.ov-live.is-on::before { content: '● '; }
+.ov-meta { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 2px; font-size: 12px; color: var(--text-muted); }
+.ov-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ov-warn { color: var(--accent-amber); }
+.ov-warn::before { content: '! '; font-weight: 700; }
+.ov-bar-wrap { position: relative; padding-top: 6px; }
+.ov-bar { display: block; width: 100%; height: 44px; border-radius: 6px; cursor: ew-resize; touch-action: none; }
+.ov-preview { position: absolute; top: -118px; transform: translateX(-50%); pointer-events: none; display: none; text-align: center; z-index: 2; }
+.ov-preview img { width: 96px; height: 96px; object-fit: cover; display: block; border: 1px solid var(--border-strong); border-radius: 4px; background: #000; }
+.ov-preview span { display: inline-block; margin-top: 3px; font: 11px/1.3 'JetBrains Mono', ui-monospace, monospace; color: var(--text); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); white-space: nowrap; }
+.ov-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.ov-controls .op-btn, .ov-controls .op-sel { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-hover); color: var(--text); cursor: pointer; }
+.ov-controls .op-btn:disabled { opacity: .5; cursor: default; }
+.ov-controls .op-btn.is-on { border-color: var(--accent); color: var(--accent); }
+.ov-controls .op-btn.is-follow { border-color: var(--accent-green); color: var(--accent-green); }
+.ov-controls .op-btn:focus-visible, .ov-controls .op-sel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-gap { flex: 1; }
+.ov-keys { color: var(--text-muted); font-size: 11px; }
+.ov-keys kbd { border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--text); }
+.ov-refs { font-size: 12px; }
+.ov-ok { color: var(--accent-green); }
+.ov-missing { color: var(--accent-amber); }
+.ov-link { font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { .ov-live.is-on { animation: none; } }
+
+/* ── Embryos drawer: one sentence, swatches not emoji ────────────────────── */
+.reasoning-sentence { color: var(--text-muted); font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px; }
+.reasoning-sentence .tile-swatch { width: 10px; height: 10px; }
+button.quick-jump-badge { font: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+button.quick-jump-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.quick-jump-t { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.7rem; opacity: .8; }
+button.eval-dot { font: inherit; cursor: pointer; padding: 0; }
+button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.eval-dot-swatch { display: block; width: 12px; height: 12px; border-radius: 3px; margin: auto; }
+.no-detections-text { font-weight: 600; }
+.no-detections-hint { color: var(--text-muted); font-size: 0.85rem; }

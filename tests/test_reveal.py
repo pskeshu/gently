@@ -438,10 +438,11 @@ class TestWhereTheButtonsAre:
         return (JS / name).read_text(encoding="utf-8")
 
     def test_both_viewers(self):
-        assert 'id="lightbox-reveal"' in INDEX and 'id="dic-viewer-reveal"' in INDEX
+        assert 'id="lightbox-reveal"' in INDEX
+        stage = (WEB / "static" / "js" / "panels" / "overview-stage.js").read_text(encoding="utf-8")
+        assert "what: 'dic', stem: f.stem" in stage  # the stage reveals the frame it shows
         lightbox = self._js("lightbox.js")
         assert lightbox.count("this.showReveal(img);") == 2, "one of the two ways of showing forgot"
-        assert "{ what: 'dic', stem: f.stem }" in self._js("embryos.js")
 
     def test_an_embryo_and_a_timepoint(self):
         embryos = self._js("embryos.js")

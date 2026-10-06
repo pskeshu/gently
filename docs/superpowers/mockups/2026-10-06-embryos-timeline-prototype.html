@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Embryos — overview timeline prototype</title>
+<link rel="stylesheet" href="../../../gently/ui/web/static/css/main.css">
+<style>
+  /* Prototype-only styles; everything else comes from main.css tokens. */
+  body { padding: 20px; max-width: 1240px; margin: 0 auto; }
+  .tl-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .tl-stage { position: relative; background: var(--img-bg); border-radius: 8px; overflow: hidden; aspect-ratio: 1; max-height: 620px; margin: 0 auto; }
+  .tl-stage canvas { width: 100%; height: 100%; display: block; }
+  .tl-live { position: absolute; top: 10px; left: 10px; font: 600 11px/1 ui-monospace, monospace; letter-spacing: .08em; padding: 5px 8px; border-radius: 4px; background: rgba(0,0,0,.55); color: var(--text-muted); }
+  .tl-live.is-on { color: var(--accent-green); } .tl-live.is-on::before { content: "● "; }
+  .tl-meta { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 10px 2px 6px; font-size: 12px; color: var(--text-muted); }
+  .tl-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tl-meta .warn { color: var(--accent-amber); }
+  /* The timeline bar: one canvas, frame-indexed, with a hover preview above it. */
+  .tl-bar-wrap { position: relative; margin-top: 8px; padding-top: 118px; }
+  .tl-bar { display: block; width: 100%; height: 44px; border-radius: 6px; cursor: ew-resize; touch-action: none; outline: none; }
+  .tl-bar:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .tl-preview { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; display: none; text-align: center; }
+  .tl-preview canvas { width: 96px; height: 96px; display: block; border: 1px solid var(--border-strong); border-radius: 4px; background: #000; }
+  .tl-preview span { display: inline-block; margin-top: 3px; font: 11px/1.3 ui-monospace, monospace; color: var(--text); background: var(--bg-card); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); white-space: nowrap; }
+  .tl-controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; font-size: 13px; }
+  .tl-controls button, .tl-controls select { background: var(--bg-hover); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer; }
+  .tl-controls button.is-on { border-color: var(--accent); color: var(--accent); }
+  .tl-controls button.is-follow { border-color: var(--accent-green); color: var(--accent-green); }
+  .tl-controls .sp { flex: 1; }
+  .tl-keys { color: var(--text-muted); font-size: 11px; }
+  .tl-keys kbd { border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font: 11px ui-monospace, monospace; color: var(--text); }
+</style>
+</head>
+<body>
+<div class="tl-card">
+  <div class="tl-stage">
+    <canvas id="big" width="900" height="900"></canvas>
+    <span class="tl-live" id="live">FOLLOWING NEWEST</span>
+  </div>
+  <div class="tl-meta" id="meta"></div>
+  <div class="tl-bar-wrap">
+    <div class="tl-preview" id="preview"><canvas width="192" height="192"></canvas><span id="pv-cap"></span></div>
+    <canvas class="tl-bar" id="bar" height="44" tabindex="0" aria-label="Overview timeline: drag or use arrow keys to scrub, space to play"></canvas>
+  </div>
+  <div class="tl-controls">
+    <button id="play" title="Space">▶ Play</button>
+    <select id="fps" title="Playback speed"><option>2</option><option>5</option><option selected>10</option><option>20</option></select><span class="tl-keys">fps</span>
+    <button id="loop" title="Loop at the end">Loop</button>
+    <button id="corr" title="C — toggle dark/flat correction (fake)">Corrected</button>
+    <span class="sp"></span>
+    <button id="newest" title="N — jump to the newest frame and follow new ones">Newest ⤓</button>
+    <span class="tl-keys"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> ×10 · <kbd>Home</kbd>/<kbd>End</kbd> · <kbd>Space</kbd> play · <kbd>N</kbd> newest · <kbd>C</kbd> corrected</span>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+// ---- fake data: a dish with embryos, one frame every 6 min, one 40-min pause at frame 60 ----
+const INTERVAL = 6 * 60e3, PAUSE_AT = 60, PAUSE_MS = 40 * 60e3;
+const t0 = Date.now() - 160 * INTERVAL - PAUSE_MS;
+const frames = [];
+const warn = new Set([23, 24, 97]);   // frames the backend flagged (e.g. light left on, stage off target)
+const EMBRYOS = Array.from({ length: 7 }, (_, k) => ({ a: k / 7 * Math.PI * 2, r: 0.28 + 0.1 * Math.sin(k * 3) }));
+function addFrame() {
+  const i = frames.length;
+  frames.push({ i, when: t0 + i * INTERVAL + (i > PAUSE_AT ? PAUSE_MS : 0), exp: 20, light: 'led 35%', pos: { x: 12040 + (i % 3), y: 8870 } });
+}
+for (let i = 0; i < 160; i++) addFrame();
+
+// Draw frame i into ctx of size s. "corrected" removes the vignette the flat would divide out.
+function drawFrame(ctx, i, s, corrected) {
+  ctx.fillStyle = corrected ? '#8a8a8a' : '#6e6e6e'; ctx.fillRect(0, 0, s, s);
+  if (!corrected) { const g = ctx.createRadialGradient(s / 2, s / 2, s * .2, s / 2, s / 2, s * .75); g.addColorStop(0, 'rgba(255,255,255,.18)'); g.addColorStop(1, 'rgba(0,0,0,.45)'); ctx.fillStyle = g; ctx.fillRect(0, 0, s, s); }
+  ctx.beginPath(); ctx.arc(s / 2, s / 2, s * .46, 0, 7); ctx.strokeStyle = '#333'; ctx.lineWidth = s * .01; ctx.stroke();
+  const drift = i * s * 0.0004;   // slow stage drift, visible first-vs-now
+  for (const e of EMBRYOS) {
+    const x = s / 2 + Math.cos(e.a) * e.r * s + drift, y = s / 2 + Math.sin(e.a) * e.r * s;
+    const grow = s * (0.045 + 0.00015 * i);
+    ctx.beginPath(); ctx.ellipse(x, y, grow * 1.3, grow, e.a, 0, 7); ctx.fillStyle = '#3a3a3a'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, grow * (0.25 + 0.5 * Math.abs(Math.sin(i / 9 + e.a))), 0, 7); ctx.fillStyle = '#9c9c9c'; ctx.fill();
+  }
+  if (!corrected) for (let k = 0; k < 40; k++) { ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect((k * 379) % s, (k * 211) % s, s * .006, s * .006); } // dust on the sensor
+}
+// ponytail: thumbs cached as tiny canvases; a real build caches ?max=128 Image objects, capped by LRU.
+const thumbs = new Map();
+function thumb(i) {
+  let c = thumbs.get(i);
+  if (!c) { c = document.createElement('canvas'); c.width = c.height = 128; drawFrame(c.getContext('2d'), i, 128, corrected); thumbs.set(i, c); if (thumbs.size > 400) thumbs.delete(thumbs.keys().next().value); }
+  return c;
+}
+
+// ---- state ----
+let cur = frames.length - 1, follow = true, playing = false, loop = false, corrected = false, hover = -1, timer = null;
+const $ = id => document.getElementById(id);
+const big = $('big'), bar = $('bar'), preview = $('preview'), pv = preview.querySelector('canvas');
+const fmtT = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtEl = ms => `${Math.floor(ms / 36e5)}h ${String(Math.floor(ms / 6e4) % 60).padStart(2, '0')}m`;
+
+function render() {
+  const f = frames[cur];
+  drawFrame(big.getContext('2d'), cur, big.width, corrected);
+  $('live').textContent = follow ? 'FOLLOWING NEWEST' : `FRAME ${cur + 1} / ${frames.length}`;
+  $('live').classList.toggle('is-on', follow);
+  const gap = cur > 0 ? f.when - frames[cur - 1].when : 0;
+  $('meta').innerHTML = `<span>frame <b>${cur + 1}</b>/${frames.length}</span><span><b>${fmtT(f.when)}</b></span>` +
+    `<span>elapsed <b>${fmtEl(f.when - frames[0].when)}</b></span><span>round <b>${cur + 1}</b></span>` +
+    `<span>stage <b>${f.pos.x}, ${f.pos.y}</b> µm</span><span>exposure <b>${f.exp} ms</b> · ${f.light}</span>` +
+    `<span>${corrected ? 'corrected · dark 20ms, flat led-35pct' : 'raw'}</span>` +
+    (gap > INTERVAL * 2 ? `<span class="warn">paused ${fmtEl(gap)} before this frame</span>` : '') +
+    (warn.has(cur) ? '<span class="warn">⚠ light was on at exposure</span>' : '');
+  $('play').textContent = playing ? '❚❚ Pause' : '▶ Play';
+  $('loop').classList.toggle('is-on', loop); $('corr').classList.toggle('is-on', corrected); $('newest').classList.toggle('is-follow', follow);
+  drawBar();
+}
+
+// Frame-indexed bar: every frame gets an equal slot; pauses are a tick mark, not a gap.
+function drawBar() {
+  const W = bar.width = bar.clientWidth * devicePixelRatio, H = bar.height = 44 * devicePixelRatio, n = frames.length, slot = W / n;
+  const ctx = bar.getContext('2d'), css = getComputedStyle(document.body), tok = v => css.getPropertyValue(v).trim();
+  ctx.fillStyle = tok('--bg-hover'); ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = tok('--border'); for (let i = 0; i < n; i++) if (slot >= 4 * devicePixelRatio) ctx.fillRect(i * slot + slot / 2 - .5, H * .35, 1, H * .3);   // per-frame ticks when they fit
+  frames.forEach((f, i) => { if (i && f.when - frames[i - 1].when > INTERVAL * 2) { ctx.fillStyle = tok('--text-muted'); ctx.fillRect(i * slot - 1, 0, 2, H); } });  // pause marks
+  ctx.fillStyle = tok('--accent-amber'); warn.forEach(i => ctx.fillRect(i * slot, H - 6 * devicePixelRatio, Math.max(slot, 2), 6 * devicePixelRatio));
+  ctx.fillStyle = tok('--accent-green'); ctx.fillRect(W - Math.max(slot, 3), 0, Math.max(slot, 3), H);  // newest
+  if (hover >= 0) { ctx.fillStyle = tok('--text-muted'); ctx.fillRect(hover * slot, 0, Math.max(slot, 2), H); }
+  ctx.fillStyle = tok('--accent'); ctx.fillRect(cur * slot, 0, Math.max(slot, 3), H);  // current
+}
+
+function go(i, byUser) {
+  cur = Math.max(0, Math.min(frames.length - 1, i));
+  if (byUser) follow = false;      // any scrub disengages following; the Newest button re-engages
+  render();
+}
+function idxAt(ev) { const r = bar.getBoundingClientRect(); return Math.min(frames.length - 1, Math.max(0, Math.floor((ev.clientX - r.left) / r.width * frames.length))); }
+function showPreview(ev, i) {
+  const r = bar.getBoundingClientRect(); hover = i;
+  preview.style.display = 'block'; preview.style.left = `${Math.min(r.width - 50, Math.max(50, ev.clientX - r.left))}px`;
+  pv.getContext('2d').drawImage(thumb(i), 0, 0, 192, 192);
+  $('pv-cap').textContent = `${i + 1} · ${fmtT(frames[i].when)}`; drawBar();
+}
+
+// pointer: hover previews, press-and-drag scrubs
+bar.addEventListener('pointermove', ev => { const i = idxAt(ev); showPreview(ev, i); if (ev.buttons) go(i, true); });
+bar.addEventListener('pointerdown', ev => { bar.setPointerCapture(ev.pointerId); bar.focus(); stop(); go(idxAt(ev), true); });
+bar.addEventListener('pointerleave', () => { hover = -1; preview.style.display = 'none'; drawBar(); });
+
+// keys: Frame.io / YouTube conventions, arrows step like the DIC viewer already does
+document.addEventListener('keydown', ev => {
+  if (ev.target.tagName === 'SELECT') return;
+  const k = ev.key, step = ev.shiftKey ? 10 : 1;
+  if (k === 'ArrowRight' || k === '.') go(cur + step, true);
+  else if (k === 'ArrowLeft' || k === ',') go(cur - step, true);
+  else if (k === 'Home') go(0, true); else if (k === 'End') go(frames.length - 1, true);
+  else if (k === ' ') toggle(); else if (k === 'n' || k === 'N') newest(); else if (k === 'c' || k === 'C') corr();
+  else return;
+  ev.preventDefault();
+});
+
+function tick() {
+  if (cur >= frames.length - 1) { if (loop) go(0); else { stop(); return; } } else go(cur + 1);
+}
+function play() { if (playing) return; playing = true; follow = false; if (cur >= frames.length - 1) cur = 0; timer = setInterval(tick, 1000 / Number($('fps').value)); render(); }
+function stop() { playing = false; clearInterval(timer); render(); }
+function toggle() { playing ? stop() : play(); }
+function newest() { stop(); follow = true; go(frames.length - 1); }
+function corr() { corrected = !corrected; thumbs.clear(); render(); }
+$('play').onclick = toggle; $('newest').onclick = newest; $('corr').onclick = corr;
+$('loop').onclick = () => { loop = !loop; render(); };
+$('fps').onchange = () => { if (playing) { stop(); play(); } };
+addEventListener('resize', drawBar);
+
+// a new frame "arrives" every 4 s, as it would over the websocket
+setInterval(() => { addFrame(); if (follow) cur = frames.length - 1; render(); }, 4000);
+render();
+})();
+</script>
+</body>
+</html>

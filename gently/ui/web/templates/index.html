@@ -261,16 +261,15 @@
             <div class="embryos-header-panel" id="embryos-header-panel">
                 <div class="embryos-header-bar">
                     <div class="header-left">
-                        <h2 class="embryos-title">Embryo Monitoring</h2>
-                        <div class="timelapse-status" id="timelapse-status">
+                        <div class="timelapse-status idle" id="timelapse-status">
                             <span class="status-indicator" id="timelapse-indicator"></span>
-                            <span class="status-text" id="timelapse-status-text">No active timelapse</span>
+                            <span class="status-text" id="timelapse-status-text">No run</span>
                         </div>
                         <div class="view-switcher" id="view-switcher">
-                            <button class="view-btn active" data-view="default" title="Default view (1)">Default</button>
-                            <button class="view-btn" data-view="board" title="Status Board (2)">Board</button>
-                            <button class="view-btn" data-view="filmstrip" title="Filmstrip (3)">Film</button>
-                            <button class="view-btn" data-view="vitals" title="Vital Signs (4)">Vitals</button>
+                            <button class="view-btn active" data-view="default" title="Tiles and analysis (1)" aria-pressed="true">Watch</button>
+                            <button class="view-btn" data-view="board" title="Table (2)" aria-pressed="false">Table</button>
+                            <button class="view-btn" data-view="filmstrip" title="Film (3)" aria-pressed="false">Film</button>
+                            <button class="view-btn" data-view="vitals" title="Vitals (4)" aria-pressed="false">Vitals</button>
                         </div>
                     </div>
                     <div class="header-stats" id="header-stats">
@@ -281,25 +280,18 @@
                    round. Frames arrive on IMAGE_ACQUIRED{source: dic} with a
                    thumbnail; the count comes from the run's status. Hidden
                    until a run has one. #}
+                {# The overview frames. A brightfield-only run gets the stage:
+                   the newest frame large with a timeline beneath (panels/
+                   overview-stage.js). A mixed run gets the strip — the stage
+                   folded to one row — and Open expands it in place. #}
+                <div class="overview-stage" id="embryos-overview" hidden></div>
                 <div class="dic-strip" id="dic-strip" hidden>
                     <div class="dic-strip-head">
                         <span class="dic-strip-title">DIC overview</span>
                         <span class="dic-strip-count" id="dic-strip-count"></span>
-                        <span class="dic-strip-hint">click a frame to view it</span>
+                        <button type="button" class="dic-strip-open" id="dic-strip-open" title="The newest frame large, with the whole series beneath">Open ⌄</button>
                     </div>
                     <div class="dic-strip-frames" id="dic-strip-frames"></div>
-                </div>
-                {# The frame, full size, rendered from the TIFF on disk. Arrow
-                   keys walk the series; Esc or a click outside closes. #}
-                <div class="dic-viewer" id="dic-viewer" hidden role="dialog" aria-label="DIC overview frame">
-                    <button class="dic-viewer-nav dic-viewer-prev" id="dic-viewer-prev" type="button" aria-label="Previous frame">‹</button>
-                    <figure class="dic-viewer-fig">
-                        <img id="dic-viewer-img" alt="DIC overview frame">
-                        <figcaption id="dic-viewer-cap"></figcaption>
-                        <div class="dic-viewer-reveal" id="dic-viewer-reveal"></div>
-                    </figure>
-                    <button class="dic-viewer-nav dic-viewer-next" id="dic-viewer-next" type="button" aria-label="Next frame">›</button>
-                    <button class="dic-viewer-close" id="dic-viewer-close" type="button" aria-label="Close">×</button>
                 </div>
             </div>
 
@@ -308,16 +300,14 @@
                 <div class="view-default" id="view-default">
                     <!-- Left sidebar: Embryo list -->
                     <div class="embryo-list" id="embryo-list">
-                        <div class="embryo-list-header">Embryos</div>
                         <div class="embryo-cards" id="embryo-cards">
-                            <div class="empty-state" id="embryos-empty">No active timelapse</div>
+                            <div class="tile-empty" id="embryos-empty">No embryos.</div>
                         </div>
                     </div>
-                    <!-- Right panel: VLM analysis detail -->
+                    <!-- Right panel: the selected embryo's stage calls and trace -->
                     <div class="reasoning-panel" id="reasoning-panel">
                         <div class="reasoning-empty">
-                            <div class="reasoning-empty-icon">&#x1F50D;</div>
-                            <div class="reasoning-empty-text">Select an embryo to view analysis history</div>
+                            <div class="reasoning-empty-text">Select an embryo. Its stage calls appear here.</div>
                         </div>
                     </div>
                 </div>
@@ -1829,6 +1819,7 @@
     <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/panels/brightfield-refs.js"></script>
     <script src="/static/js/panels/stage-pad.js"></script>
+    <script src="/static/js/panels/overview-stage.js"></script>
     <script src="/static/js/acquisition-plan.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>

@@ -354,3 +354,11 @@ class TestReferencesTakenAfterTheRun:
             (row,) = list(csv.DictReader(fh))
         assert row["dark"] == f"references/{folder.name}/dark_20ms.tif"
         assert row["flat"] == f"references/{folder.name}/flat_led-1pct_20ms.tif"
+
+
+class TestTheStatusSaysWhatTheChannelHasDone:
+    def test_the_status_carries_frames_due_time_and_references(self):
+        assert "dic=self._dic_status()," in ORCH
+        helper = ORCH[ORCH.index("def _dic_status(self)") :][:1200]
+        for needle in ('"frames": self._dic_frames', '"next_due_at"', '"last_at"', '"references"'):
+            assert needle in helper, needle

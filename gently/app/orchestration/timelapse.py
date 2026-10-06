@@ -1091,6 +1091,9 @@ class TimelapseOrchestrator:
             "seconds_until_next": (
                 max(0.0, (nxt - datetime.now()).total_seconds()) if nxt else None
             ),
+            # The dark/flat record the frames name, so the tab can say whether
+            # the run is correctable and offer to take them if not.
+            "references": getattr(self, "_dic_references", None),
         }
 
     def _reschedule(self, embryo, *, from_now: bool = True) -> None:

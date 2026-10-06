@@ -324,6 +324,54 @@ def matching(records: list[dict], spec: ReferenceSpec) -> dict | None:
     return None
 
 
+def spec_of_frame(meta: dict) -> ReferenceSpec:
+    """The light and exposure a filed frame was taken under, from its metadata."""
+    light = str(meta.get("light") or "room")
+    pct = meta.get("led_intensity_pct") if light == "led" else None
+    return ReferenceSpec(
+        light=light,
+        led_intensity_pct=int(pct) if pct else None,
+        exposure_ms=meta.get("exposure_ms"),
+    )
+
+
+def references_for_frame(meta: dict, records: list[dict]) -> dict | None:
+    """What a frame should be corrected with: what it names, else the newest
+    complete record taken for its own light and exposure — so references
+    taken after the run reach the frames taken before them."""
+    named = meta.get("references") or {}
+    if named.get("dark") and named.get("flat"):
+        return dict(named)
+    return for_frame(matching(records, spec_of_frame(meta)))
+
+
+def resolve_reference_paths(session_dir: Path, refs: dict | None) -> tuple[Path, Path] | None:
+    """The dark and flat files on disk for a frame's references, both present."""
+    if not refs or not refs.get("dark") or not refs.get("flat"):
+        return None
+    dark = Path(session_dir) / str(refs["dark"])
+    flat = Path(session_dir) / str(refs["flat"])
+    if dark.is_file() and flat.is_file():
+        return dark, flat
+    return None
+
+
+def correct(frame: np.ndarray, dark: np.ndarray, flat: np.ndarray) -> np.ndarray:
+    """(frame − dark) / (flat − dark) · mean(flat − dark), in the frame's dtype.
+    Shapes must agree; a flat that equals the dark anywhere leaves that pixel
+    at the frame's own value rather than dividing by zero."""
+    f = np.asarray(frame, dtype=np.float64)
+    d = np.asarray(dark, dtype=np.float64)
+    g = np.asarray(flat, dtype=np.float64) - d
+    scale = float(g.mean()) if g.size else 1.0
+    safe = np.where(np.abs(g) < 1e-9, 1.0, g)
+    out = np.where(np.abs(g) < 1e-9, f, (f - d) / safe * scale)
+    if np.issubdtype(np.asarray(frame).dtype, np.integer):
+        info = np.iinfo(np.asarray(frame).dtype)
+        return np.clip(np.rint(out), info.min, info.max).astype(np.asarray(frame).dtype)
+    return out.astype(np.asarray(frame).dtype)
+
+
 def for_frame(record: dict | None) -> dict | None:
     """What a frame's metadata carries: enough to find the files from the
     session folder, wherever the session folder goes."""
