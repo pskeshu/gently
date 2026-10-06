@@ -125,9 +125,12 @@
     font-size: 12px;
     color: var(--text-muted);
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 2px 6px;
 }
+.session-meta > span:not(.dot):not(.session-run-badge),
+.session-meta { white-space: nowrap; }
 
 .session-meta .dot {
     width: 3px;
@@ -253,10 +256,142 @@
     color: white;
 }
 
-/* Tab content */
-.tab-content {
+/* Tab content. Its own name: main.css hides every .tab-content that is
+   not the active app tab, which kept this pane blank inside the app. */
+.session-tab-content {
     min-height: 200px;
 }
+
+/* What a session holds, before it is restored */
+.session-run-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 1px 7px;
+    border-radius: 9px;
+    border: 1px solid currentColor;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.session-run-badge.is-interrupted { color: var(--accent-amber); border-style: dashed; }
+.session-run-badge.is-complete { color: var(--accent); }
+.session-run-badge.is-stopped { color: var(--text-muted); border-style: dashed; }
+.session-item.active .session-run-badge { color: inherit; }
+
+.session-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.session-resume-main { margin: 0; font-size: 13px; padding: 6px 14px; }
+.session-run { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+
+.session-plan {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 12px 0 16px;
+}
+.session-plan-empty { color: var(--text-muted); font-size: 13px; }
+.session-plan-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+.session-plan-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    margin: 0;
+    font-size: 13px;
+}
+.session-plan-grid dt { color: var(--text-muted); }
+.session-plan-grid dd { margin: 0; }
+
+.session-dic { margin-bottom: 16px; }
+.session-dic-head {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+.session-dic-count { font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 6px; }
+.session-dic-frames { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.session-dic-frame { flex: none; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--text-muted); }
+.session-dic-frame img {
+    width: 160px;
+    height: 108px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--img-bg);
+    display: block;
+}
+.session-dic-cap { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.embryo-thumb {
+    position: relative;
+    display: block;
+    aspect-ratio: 4 / 3;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--img-bg);
+    border: 1px solid var(--border);
+    margin-bottom: 10px;
+}
+.embryo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.embryo-thumb-cap {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #e7eef4;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.embryo-thumb-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.embryo-header h3 small { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 4px; }
+
+.stage-calls { display: flex; flex-wrap: wrap; gap: 6px; }
+.stage-call {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    text-decoration: none;
+}
+.stage-call:hover { border-color: var(--accent); }
+.stage-call-t { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); }
+.stage-call-conf { color: var(--text-muted); }
+
+.message.tool { opacity: 0.85; }
+.message.tool .message-role { color: var(--text-muted); }
+.message-content p { margin: 0 0 6px; }
+.message-content p:last-child { margin-bottom: 0; }
+.msg-tool, .msg-tool-result {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    word-break: break-word;
+}
+.msg-tool code { font-size: 11px; opacity: 0.9; }
 
 .empty-tab {
     text-align: center;

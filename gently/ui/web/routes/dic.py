@@ -78,33 +78,35 @@ def create_router(server) -> APIRouter:
         rec = next((r for r in _records() if _stem(r) == stem), None)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"no DIC frame {stem!r} in this session")
-        path = Path(rec["file_path"])
-        if not path.exists():
-            raise HTTPException(status_code=404, detail=f"DIC frame {stem!r} is no longer on disk")
-        try:
-            import tifffile
-            from PIL import Image
-
-            from gently.core.imaging import downsample_mean, normalize_to_uint8
-
-            arr = tifffile.imread(str(path))
-            if arr.ndim > 2:  # a stack or a colour plane: the first 2D frame
-                arr = arr.reshape(-1, *arr.shape[-2:])[0]
-            if max and max > 0:
-                # Averaged, not sampled: see downsample_mean.
-                arr = downsample_mean(arr, int(max))
-            png = io.BytesIO()
-            Image.fromarray(normalize_to_uint8(arr)).save(png, format="PNG")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("DIC frame render failed for %s", path)
-            raise HTTPException(
-                status_code=502, detail=f"could not render {stem!r}: {exc}"
-            ) from exc
-        return Response(png.getvalue(), media_type="image/png", headers=_IMMUTABLE)
+        return tiff_png_response(Path(rec["file_path"]), stem, max)
 
     return router
+
+
+def tiff_png_response(path: Path, stem: str, max: int | None = None) -> Response:
+    """A filed TIFF as a PNG response; ``max`` bounds the longer side for a
+    thumbnail. Shared by the live-session DIC routes and the Sessions tab's
+    per-session snapshot route."""
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"frame {stem!r} is no longer on disk")
+    try:
+        import tifffile
+        from PIL import Image
+
+        from gently.core.imaging import downsample_mean, normalize_to_uint8
+
+        arr = tifffile.imread(str(path))
+        if arr.ndim > 2:  # a stack or a colour plane: the first 2D frame
+            arr = arr.reshape(-1, *arr.shape[-2:])[0]
+        if max and max > 0:
+            # Averaged, not sampled: see downsample_mean.
+            arr = downsample_mean(arr, int(max))
+        png = io.BytesIO()
+        Image.fromarray(normalize_to_uint8(arr)).save(png, format="PNG")
+    except Exception as exc:
+        logger.exception("frame render failed for %s", path)
+        raise HTTPException(status_code=502, detail=f"could not render {stem!r}: {exc}") from exc
+    return Response(png.getvalue(), media_type="image/png", headers=_IMMUTABLE)
 
 
 # ``max`` is shadowed by the query parameter above, on purpose — it is the
