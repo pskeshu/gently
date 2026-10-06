@@ -2885,10 +2885,19 @@ const OperateManager = (function () {
         BrightfieldRefs.mount('op-bfref-host');
     }
 
+    let _stagePadMounted = false;
+    function mountStagePad() {
+        if (_stagePadMounted || typeof StagePad === 'undefined') return;
+        if (!$('op-stage-host')) return;
+        _stagePadMounted = true;
+        StagePad.mount('op-stage-host');
+    }
+
     let _panelsMounted = false;
     function mountPanels() {
         if (_panelsMounted) return;
         mountBrightfieldRefs();
+        mountStagePad();
         _panelsMounted = true;
         if (typeof MarkingPanel !== 'undefined' && $('op-marking-host')) {
             MarkingPanel.mount('op-marking-host');

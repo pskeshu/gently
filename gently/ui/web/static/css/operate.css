@@ -1780,3 +1780,16 @@
 .bf-row { display: flex; align-items: center; gap: var(--op-2); flex-wrap: wrap; }
 .bf-thumb { width: 160px; max-width: 100%; border: 1px solid var(--op-rule); border-radius: 4px; background: #000; display: block; }
 .bf-warn { color: var(--op-warn); font-size: 12px; }
+
+/* ── XY stage pad (panels/stage-pad.js) ───────────────────────────────── */
+.sp { display: grid; gap: var(--op-2); outline: none; }
+.sp:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 6px; }
+.sp-row { display: flex; align-items: baseline; gap: var(--op-2); flex-wrap: wrap; }
+.sp-pos { font-size: 12px; color: var(--op-ink-dim); }
+.sp-pos .op-num { color: var(--op-ink); }
+.sp-locked { font-size: 12px; color: var(--op-warn); }
+.sp-grid { display: grid; grid-template-columns: repeat(3, max-content); gap: var(--op-1); justify-content: start; align-items: center; }
+.sp-btn { min-width: 56px; }
+.sp-mid { font-size: 11px; color: var(--op-ink-dim); text-align: center; min-width: 56px; }
+.sp-steps .is-on { border-color: var(--accent); color: var(--op-ink); }
+.sp-note { max-width: 320px; }

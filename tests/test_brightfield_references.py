@@ -316,3 +316,41 @@ class TestThePane:
             "no embryo",
         ):
             assert needle in PANEL, needle
+
+
+class TestReferencesTakenAfterTheRun:
+    def test_frames_taken_before_the_references_existed_still_find_them_in_the_export(self, store):
+        # The run's frames first, with no references to name …
+        store.put_snapshot(
+            "s1",
+            "dic",
+            np.zeros((6, 9), dtype=np.uint16),
+            metadata={
+                "channel": "dic",
+                "frame": 1,
+                "captured_at": "2026-10-06T21:00:00",
+                "light": "led",
+                "led_intensity_pct": 1,
+                "exposure_ms": 20.0,
+                "references": None,
+            },
+        )
+        # … then the dark and flat, after the run, at the same light and exposure.
+        spec = bf.ReferenceSpec(light="led", led_intensity_pct=1, exposure_ms=20.0)
+        folder = bf.open_record(store, "s1", spec)
+        img = np.full((4, 4), 100, dtype=np.uint16)
+        bf.file_image(folder, "dark", img, spec, {"stats": bf.stats(img)})
+        bf.file_image(folder, "flat", img * 20, spec, {"stats": bf.stats(img * 20), "frames": 5})
+        # A set for a different exposure must not be picked.
+        other = bf.ReferenceSpec(light="led", led_intensity_pct=1, exposure_ms=50.0)
+        f2 = bf.open_record(store, "s1", other)
+        bf.file_image(f2, "dark", img, other, {"stats": bf.stats(img)})
+        bf.file_image(f2, "flat", img * 20, other, {"stats": bf.stats(img * 20), "frames": 5})
+
+        out = export_session(store, "s1")
+        import csv
+
+        with open(out / "dic" / "dic.csv", newline="", encoding="utf-8") as fh:
+            (row,) = list(csv.DictReader(fh))
+        assert row["dark"] == f"references/{folder.name}/dark_20ms.tif"
+        assert row["flat"] == f"references/{folder.name}/flat_led-1pct_20ms.tif"

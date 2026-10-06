@@ -120,12 +120,49 @@ def _write_csv(path: Path, rows: list[dict], columns: list[str]) -> None:
             w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in columns})
 
 
-def _ref_path(meta: dict, kind: str) -> str:
-    """Where a frame's dark or flat is, inside the export."""
+def _ref_path(meta: dict, kind: str, records: list[dict] | None = None) -> str:
+    """Where a frame's dark or flat is, inside the export. A frame taken
+    before the references existed names none; then the newest complete set
+    taken for the frame's own light and exposure stands in — references can
+    be taken after the run, and this is how they reach the frames."""
     refs = meta.get("references") or {}
+    if not refs.get(kind) and records:
+        refs = _references_for(meta, records) or {}
     if not refs.get(kind):
         return ""
     return f"references/{refs.get('record')}/{Path(str(refs[kind])).name}"
+
+
+def _references_for(meta: dict, records: list[dict]) -> dict | None:
+    """The newest complete record whose spec matches the frame's light,
+    LED brightness and exposure."""
+    light = meta.get("light") or "room"
+    pct = meta.get("led_intensity_pct") if light == "led" else None
+    exp = meta.get("exposure_ms")
+
+    def key(spec: dict) -> tuple:
+        sp_light = spec.get("light") or "room"
+        sp_pct = spec.get("led_intensity_pct") if sp_light == "led" else None
+        sp_exp = spec.get("exposure_ms")
+        return (
+            sp_light,
+            int(sp_pct) if sp_pct else None,
+            round(float(sp_exp), 3) if sp_exp is not None else None,
+        )
+
+    want = (light, int(pct) if pct else None, round(float(exp), 3) if exp is not None else None)
+    for doc in reversed(records):
+        if not (doc.get("dark") and doc.get("flat")):
+            continue
+        if key(doc.get("spec") or {}) != want:
+            continue
+        rec = doc.get("record")
+        return {
+            "record": rec,
+            "dark": f"calibration/brightfield/{rec}/{doc['dark'].get('file')}",
+            "flat": f"calibration/brightfield/{rec}/{doc['flat'].get('file')}",
+        }
+    return None
 
 
 def plan_lines(plan: dict | None) -> list[str]:
@@ -445,8 +482,8 @@ def export_session(
                     "led_intensity_pct": meta.get("led_intensity_pct"),
                     "width": rec.get("width"),
                     "height": rec.get("height"),
-                    "dark": _ref_path(meta, "dark"),
-                    "flat": _ref_path(meta, "flat"),
+                    "dark": _ref_path(meta, "dark", ref_records),
+                    "flat": _ref_path(meta, "flat", ref_records),
                 }
             )
     if dic_rows:
