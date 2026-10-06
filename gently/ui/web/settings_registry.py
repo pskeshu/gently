@@ -64,7 +64,7 @@ CATEGORIES: list[dict[str, str]] = [
     {
         "id": "assistant",
         "label": "Assistant",
-        "blurb": "The AI assistant: whether it runs, and which models it uses.",
+        "blurb": "The AI assistant: whether it runs, its models, and how its panel starts.",
     },
     {
         "id": "system",
@@ -604,6 +604,24 @@ SETTINGS: list[Setting] = [
         reach=RIG,
         applies=RESTART,
         source="models.fast",
+    ),
+    Setting(
+        key="assistant.panel",
+        label="Agent panel on load",
+        help="How the chat starts when the page loads. 'As it was left' remembers "
+        "whether you closed it. Ctrl+J and the × fold or open it any time.",
+        category="assistant",
+        group="Panel",
+        type="choice",
+        default="collapsed",
+        applies=LOAD,
+        store="prefs:agentPanel",
+        choices=(
+            ("collapsed", "Collapsed"),
+            ("open", "Open"),
+            ("remember", "As it was left"),
+        ),
+        readers=((f"{_JS}/agent-chat.js", "SettingsStore.get('agentPanel'"),),
     ),
     # ── System ───────────────────────────────────────────────────────────
     Setting(

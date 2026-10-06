@@ -9,7 +9,9 @@ the line was never written — or if it is reverted. These tests fail then.
 - #140 A roster push that no longer carried the selected embryo moved the
   selection to embryo 1 with nobody touching the list.
 - #133 One close of the agent panel was remembered, so "open by default" was
-  false on that machine for good.
+  false on that machine for good. (How the panel starts has since become a
+  setting, collapsed by default; the memory of a close is now one of its
+  choices rather than a side effect. See the test below.)
 - #131 The agent's question card was in normal flow, so asking a question
   pushed the instrument's controls down and off the panel. (The stage this
   first fixed was then replaced by the slot and the overlay; see
@@ -58,11 +60,17 @@ def test_a_selection_is_only_picked_for_the_operator_on_first_population() -> No
     assert "_selected = _embryos.length ? _embryos[0].id : null;" not in src
 
 
-def test_the_agent_panel_opens_on_every_load() -> None:
-    """#133: the collapse is for the session; nothing remembers it."""
+def test_the_agent_panel_starts_as_the_setting_says() -> None:
+    """#133 made the panel open on every load by deleting the memory of a close.
+    The start is a setting now (Settings -> Assistant -> Agent panel), collapsed
+    unless told otherwise. A close is remembered only under 'As it was left',
+    so one close still cannot change the chosen default for good."""
     src = CHAT.read_text(encoding="utf-8")
-    assert "gently-chat-open" not in src, (
-        "the panel's collapse state is persisted again; one close on the scope PC "
-        "defeats 'open by default' for good"
-    )
-    assert "togglePanel(true);" in _js_function(src, "restorePrefs")
+    assert "SettingsStore.get('agentPanel', 'collapsed')" in _js_function(src, "panelMode")
+    assert "togglePanel(startOpen());" in _js_function(src, "restorePrefs")
+    remember = _js_function(src, "rememberPanel")
+    assert "if (panelMode() !== 'remember') return;" in remember
+    # The one write of the remembered state is the guarded one.
+    assert src.count("localStorage.setItem(PANEL_OPEN_KEY") == 1
+    assert "localStorage.setItem(PANEL_OPEN_KEY" in remember
+    assert "localStorage.setItem('gently-chat-open'" not in src
