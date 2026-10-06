@@ -45,21 +45,26 @@ def create_router(server) -> APIRouter:
         if store is None:
             return {"sessions": []}
         active_id = _active_session_id()
-        sessions = []
-        try:
+
+        def gather() -> list[dict]:
+            out = []
             for s in store.list_sessions():
                 sid = s.get("session_id")
-                try:
-                    count = len(store.list_embryos(sid) or [])
-                except Exception:
-                    count = 0
-                sessions.append(
+                # Directory names and one checkpoint per session, no image
+                # decoded: what there is before a restore, in the list itself.
+                held = _what_a_session_holds(store, sid) or {}
+                out.append(
                     {
                         "session_id": sid,
                         "name": s.get("name") or sid,
                         "created_at": s.get("created_at", ""),
                         "last_active": s.get("last_active", ""),
-                        "embryo_count": count,
+                        "embryo_count": held.get("embryo_count", 0),
+                        "timepoints": held.get("timepoints", 0),
+                        "last_image_at": held.get("last_image_at"),
+                        "run": held.get("run"),
+                        "last_run": held.get("last_run"),
+                        "dic_frames": _dic_count(store, sid),
                         "description": s.get("description", ""),
                         "active": sid == active_id,
                         "advanced_diagnostics": bool(
@@ -67,9 +72,34 @@ def create_router(server) -> APIRouter:
                         ),
                     }
                 )
+            return out
+
+        try:
+            sessions = await asyncio.to_thread(gather)
         except Exception as e:
             logger.warning("Failed to list sessions from FileStore: %s", e)
+            sessions = []
         return {"sessions": sessions}
+
+    def _dic_count(store, sid: str) -> int:
+        try:
+            return len(store.list_snapshots(sid, "dic") or [])
+        except Exception:
+            return 0
+
+    def _checkpoint(store, sid: str) -> dict:
+        """The session's timelapse.yaml, or {}."""
+        try:
+            folder = store._session_dir(sid)
+            path = Path(folder) / "timelapse.yaml" if folder is not None else None
+            if path is not None and path.is_file():
+                import yaml
+
+                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                return doc if isinstance(doc, dict) else {}
+        except Exception:
+            logger.debug("checkpoint of %s could not be read", sid, exc_info=True)
+        return {}
 
     def _what_a_session_holds(store, sid: str) -> dict | None:
         """What there is to carry on with in a session, read from its folder:
@@ -99,25 +129,26 @@ def create_router(server) -> APIRouter:
             except OSError:
                 pass
 
+        # ``run`` is only an interrupted run — the launch gate offers those to
+        # carry on. ``last_run`` is whatever the checkpoint says, for the
+        # Sessions tab to describe a session before it is restored.
         run = None
-        try:
-            folder = store._session_dir(sid)
-            checkpoint = Path(folder) / "timelapse.yaml" if folder is not None else None
-            if checkpoint is not None and checkpoint.is_file():
-                import yaml
-
-                state = yaml.safe_load(checkpoint.read_text(encoding="utf-8")) or {}
-                rows = state.get("embryos") or {}
-                going = [k for k, v in rows.items() if not (v or {}).get("is_complete")]
-                if state.get("status") in ("running", "paused") and going:
-                    run = {
-                        "status": "interrupted",
-                        "embryos_going": len(going),
-                        "saved_at": state.get("saved_at"),
-                        "started_at": state.get("started_at"),
-                    }
-        except Exception:
-            logger.debug("checkpoint of %s could not be read", sid, exc_info=True)
+        last_run = None
+        state = _checkpoint(store, sid)
+        if state:
+            rows = state.get("embryos") or {}
+            going = [k for k, v in rows.items() if not (v or {}).get("is_complete")]
+            last_run = {
+                "status": state.get("status"),
+                "embryos_going": len(going),
+                "saved_at": state.get("saved_at"),
+                "started_at": state.get("started_at"),
+                "rounds": state.get("current_round"),
+                "total_timepoints": state.get("total_timepoints"),
+                "interval_seconds": state.get("base_interval_seconds"),
+            }
+            if state.get("status") in ("running", "paused") and going:
+                run = dict(last_run, status="interrupted")
 
         info = store.get_session(sid) or {}
         return {
@@ -132,6 +163,7 @@ def create_router(server) -> APIRouter:
                 else None
             ),
             "run": run,
+            "last_run": last_run,
         }
 
     @router.get("/api/sessions/resumable")
@@ -395,15 +427,115 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="Session not found")
         snapshot = store.load_session_snapshot(session_id) or {}
         experiment = snapshot.get("experiment_data", {}) or {}
+        held = await asyncio.to_thread(_what_a_session_holds, store, session_id)
+        embryos, dic_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
         return {
             "session_id": session_id,
             "name": info.get("name") or session_id,
             "description": info.get("description", ""),
             "created_at": info.get("created_at", ""),
             "last_active": info.get("last_active", ""),
+            "run": (held or {}).get("run"),
+            "last_run": (held or {}).get("last_run"),
+            "acquisition": store.get_acquisition_plan(session_id),
+            "embryos": embryos,
+            "dic_frames": dic_frames,
             "embryo_states": experiment.get("embryos", {}) or {},
             "conversation": snapshot.get("conversation_history", []) or [],
             "detection_history": {},
         }
+
+    def _what_to_look_at(store, sid: str) -> tuple[list[dict], list[dict]]:
+        """Per embryo: its latest projection and last predicted stage. Per
+        DIC frame: where to fetch it. Paths never leave the server; the
+        client gets URLs the routes below resolve through the store."""
+        embryos: list[dict] = []
+        states = ((store.load_session_snapshot(sid) or {}).get("experiment_data", {}) or {}).get(
+            "embryos", {}
+        ) or {}
+        for e in store.list_embryos(sid) or []:
+            eid = e.get("embryo_id")
+            try:
+                tps = store.list_projection_timepoints(sid, eid) or []
+            except Exception:
+                tps = []
+            latest = max(tps) if tps else None
+            try:
+                preds = store.get_predictions(sid, eid) or []
+            except Exception:
+                preds = []
+            last = preds[-1] if preds else None
+            st = states.get(eid) or {}
+            pos = e.get("position_coarse") or (
+                {"x": e.get("position_x"), "y": e.get("position_y")}
+                if e.get("position_x") is not None
+                else None
+            )
+            embryos.append(
+                {
+                    "embryo_id": eid,
+                    "nickname": e.get("nickname"),
+                    "role": e.get("role"),
+                    "strain": e.get("strain"),
+                    "position": pos,
+                    "timepoints": len(tps),
+                    "latest_timepoint": latest,
+                    "thumbnail": (
+                        f"/api/sessions/{sid}/projection?embryo={eid}&t={latest}"
+                        if latest is not None
+                        else None
+                    ),
+                    "stage": (last or {}).get("predicted_stage") or st.get("current_stage"),
+                    "stage_confidence": (last or {}).get("confidence"),
+                    "is_complete": bool(st.get("is_complete")),
+                    "predictions": [
+                        {
+                            "timepoint": p.get("timepoint"),
+                            "stage": p.get("predicted_stage"),
+                            "confidence": p.get("confidence"),
+                        }
+                        for p in preds
+                    ],
+                }
+            )
+        frames: list[dict] = []
+        try:
+            recs = store.list_snapshots(sid, "dic") or []
+        except Exception:
+            recs = []
+        for rec in recs:
+            fp = rec.get("file_path")
+            if not fp:
+                continue
+            stem = Path(fp).stem
+            meta = rec.get("metadata") or {}
+            frames.append(
+                {
+                    "stem": stem,
+                    "frame": meta.get("frame"),
+                    "captured_at": meta.get("captured_at") or rec.get("captured_at"),
+                    "url": f"/api/sessions/{sid}/snapshot/{stem}.png",
+                }
+            )
+        return embryos, frames
+
+    @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
+    async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):
+        """One of the session's filed snapshots (DIC overview) as a PNG,
+        ``?max=N`` for a thumbnail. Found through the store's own listing,
+        never from a path in the request."""
+        from gently.ui.web.routes.dic import tiff_png_response
+
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        try:
+            recs = store.list_snapshots(session_id) or []
+        except Exception:
+            recs = []
+        rec = next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
+        return tiff_png_response(Path(rec["file_path"]), stem, max)
 
     return router
