@@ -1665,6 +1665,87 @@ def create_router(server) -> APIRouter:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
 
+    # The pane calls the sample "at the objective" when the F-drive is within
+    # this of its floor (operate-math.js ENGAGED_WITHIN_UM); an XY move then
+    # drags the sample across the head. The jog refuses under the same rule.
+    ENGAGED_WITHIN_UM = 1000.0
+
+    @router.post("/api/devices/stage/jog", dependencies=[Depends(require_control)])
+    async def stage_jog(payload: dict = Body(...)):  # noqa: B008
+        """Move the stage by {"dx", "dy"} µm from where it is — the bottom
+        camera's pad. Refuses while the sample is at the objective (409),
+        and keeps the target inside the XY envelope when one is enforced
+        (said back as ``clamped``). Returns where the stage went."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            dx = float(payload.get("dx") or 0.0)
+            dy = float(payload.get("dy") or 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="dx and dy must be numbers (µm)") from None
+        if abs(dx) > 20000 or abs(dy) > 20000:
+            raise HTTPException(status_code=400, detail="a jog is at most 20 mm")
+        if dx == 0 and dy == 0:
+            raise HTTPException(status_code=400, detail="nothing to move by")
+        try:
+            fd = await client.get_fdrive()
+        except Exception:
+            fd = None
+        floor = (fd or {}).get("distance_to_floor") if isinstance(fd, dict) else None
+        if isinstance(floor, (int, float)) and floor < ENGAGED_WITHIN_UM:
+            raise HTTPException(
+                status_code=409,
+                detail=f"the sample is at the objective ({floor:.0f} µm to floor): XY is locked. "
+                "Back the head off first.",
+            )
+        try:
+            x0, y0 = await client.get_stage_position()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"stage position unknown: {exc}") from exc
+        tx, ty = float(x0) + dx, float(y0) + dy
+        clamped = False
+        try:
+            env = await client.get_stage_envelope()
+        except Exception:
+            env = None
+        if isinstance(env, dict) and env.get("enforced", True):
+            lo_x, hi_x = _num(env.get("x_min")), _num(env.get("x_max"))
+            lo_y, hi_y = _num(env.get("y_min")), _num(env.get("y_max"))
+            if lo_x is not None and hi_x is not None and lo_x <= hi_x:
+                nx = min(max(tx, lo_x), hi_x)
+                clamped = clamped or nx != tx
+                tx = nx
+            if lo_y is not None and hi_y is not None and lo_y <= hi_y:
+                ny = min(max(ty, lo_y), hi_y)
+                clamped = clamped or ny != ty
+                ty = ny
+        if abs(tx - float(x0)) < 1e-9 and abs(ty - float(y0)) < 1e-9:
+            return {
+                "success": True,
+                "x": float(x0),
+                "y": float(y0),
+                "clamped": True,
+                "moved": False,
+            }
+        try:
+            res = await client.move_to_position(tx, ty)
+        except Exception as exc:
+            logger.exception("Stage jog failed")
+            raise HTTPException(status_code=502, detail=f"stage jog failed: {exc}") from exc
+        if isinstance(res, dict) and res.get("success") is False:
+            raise HTTPException(
+                status_code=502, detail=f"stage jog failed: {res.get('error') or res}"
+            )
+        return {
+            "success": True,
+            "x": tx,
+            "y": ty,
+            "from": [float(x0), float(y0)],
+            "clamped": clamped,
+            "moved": True,
+        }
+
     def _num(v):
         try:
             return float(v)

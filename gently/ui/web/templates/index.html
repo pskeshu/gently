@@ -489,6 +489,14 @@
                            camera, rather than opening a second one about it. -->
                       <div id="op-cam-panel-bottom"></div>
                     </div>
+                    <!-- The XY stage, from here: there was no way to move it
+                         while looking at the dish. panels/stage-pad.js owns the
+                         markup; the server refuses while the sample is at the
+                         objective and keeps the target inside the envelope. -->
+                    <div class="op-block">
+                      <div class="op-block-head">Stage</div>
+                      <div id="op-stage-host"></div>
+                    </div>
 
                     <!-- The Light panel again, showing only the LED: this camera
                          is lit by it, and the laser has no part here. A card of
@@ -1820,6 +1828,7 @@
     <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/panels/brightfield-refs.js"></script>
+    <script src="/static/js/panels/stage-pad.js"></script>
     <script src="/static/js/acquisition-plan.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>
