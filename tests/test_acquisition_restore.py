@@ -141,8 +141,9 @@ def test_a_missing_checkpoint_is_not_a_failure():
 def test_the_agent_restores_on_both_resume_paths():
     boot = AGENT[AGENT.index("self._init_timelapse_orchestrator()") :][:400]
     assert "if session_id:\n            self._restore_acquisition_state()" in boot
-    resume = AGENT[AGENT.index("def resume_session(self, session_id: str)") :][:600]
-    assert "self._restore_acquisition_state()" in resume
+    switch = AGENT[AGENT.index("def switch_session(self, session_id: str | None)") :]
+    assert "self._restore_acquisition_state()" in switch[: switch.index("return {")]
+    assert "return bool(self.switch_session(session_id)" in AGENT  # resume goes through it
 
 
 # ── the start route keeps the plan; a GET serves it back ─────────────────

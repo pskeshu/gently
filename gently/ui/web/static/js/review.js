@@ -97,6 +97,7 @@ const ReviewApp = {
         if (s.embryo_count) parts.push(`${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}`);
         if (s.timepoints) parts.push(`${s.timepoints} timepoint${s.timepoints !== 1 ? 's' : ''}`);
         if (s.dic_frames) parts.push(`${s.dic_frames} DIC`);
+        if (s.bytes) parts.push(this.fmtBytes(s.bytes));
         return parts;
     },
 
@@ -171,7 +172,7 @@ const ReviewApp = {
                     ${this.runBadge(this.runOf(s))}
                 </div>
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
-                ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')">Resume in agent</button>`}
+                ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 ${typeof Reveal !== 'undefined' ? Reveal.button(
                     { what: 'session', session_id: s.session_id }, 'show',
                     { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
@@ -179,21 +180,48 @@ const ReviewApp = {
         }).join('');
     },
 
+    // Two intents, said apart. Looking at a session is this tab: nothing
+    // changes. Making one live is the button, and it says what that means.
     async resumeSession(sessionId) {
-        if (!confirm('Switch the live agent to this session?\nThe current session is saved first.')) return;
+        const s = this.sessions.find(x => x.session_id === sessionId) || {};
+        const what = [
+            `Make “${s.name || s.suggested_name || sessionId}” the live session?`,
+            '',
+            'From then on, new images, the chat and the stage targets belong to it.',
+            s.embryo_count ? `Its ${s.embryo_count} embryo position${s.embryo_count !== 1 ? 's' : ''} come from the sample that was on the scope then — re-centre before trusting them.` : '',
+            'The current session is saved first. To just look, you are already in the right place.',
+        ].filter(Boolean).join('\n');
+        if (!confirm(what)) return;
+        await this._switchTo(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, 'Could not make it live');
+    },
+
+    async newSession() {
+        if (!confirm('Open a new, empty session?\n\nThe current session is saved. New images and the chat go to the new one.')) return;
+        await this._switchTo('/api/sessions/new', 'Could not open a new session');
+    },
+
+    async _switchTo(url, failure) {
         try {
-            const resp = await fetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' });
+            const resp = await fetch(url, { method: 'POST' });
             if (resp.ok) {
                 // Server broadcasts session_changed to reload all clients; we
-                // navigate home as well so the operator lands on the new session.
+                // navigate home as well so the operator lands on the session.
                 window.location.href = '/';
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert('Resume failed: ' + (d.detail || ('HTTP ' + resp.status)));
+                alert(failure + ': ' + (d.detail || ('HTTP ' + resp.status)));
             }
         } catch (e) {
-            alert('Resume failed: ' + e);
+            alert(failure + ': ' + e);
         }
+    },
+
+    fmtBytes(n) {
+        if (n == null || !Number.isFinite(Number(n))) return '';
+        const units = ['B', 'kB', 'MB', 'GB', 'TB'];
+        let v = Number(n), i = 0;
+        while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+        return `${i === 0 ? v : v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
     },
 
     // ---- one session, before restoring ------------------------------------
@@ -214,13 +242,14 @@ const ReviewApp = {
                         <button class="session-edit-btn" onclick="ReviewApp.editName()" title="Name this session">${s.name ? 'Rename' : 'Name it'}</button>
                     </div>
                     ${s.active ? '<span class="session-active-badge">live now</span>'
-                        : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')">Resume in agent</button>`}
+                        : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 </div>
                 <div id="session-name-form"></div>
                 ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
                     ${s.last_active ? `<span>Last active: ${this.formatDateTime(s.last_active)}</span>` : ''}
+                    ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
                 </div>
                 ${this.renderRun(this.runOf(s))}
             </div>
