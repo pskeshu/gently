@@ -148,15 +148,18 @@
     white-space: nowrap;
 }
 
-.no-sessions,
-.loading,
-.error {
+/* Scoped to the panel: index.html links this sheet too, and `error` is also
+   a state class on the header rig dot, the Devices tab dot and the chat
+   bubble. Unscoped, the 24px padding turned a 6px dot into a 48px blob. */
+.review-container .no-sessions,
+.review-container .loading,
+.review-container .error {
     text-align: center;
     padding: 24px;
     color: var(--text-muted);
 }
 
-.error {
+.review-container .error {
     color: var(--accent-red);
 }
 
