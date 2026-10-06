@@ -331,6 +331,7 @@ const EmbryosManager = {
         const expanded = all.length > 0 && !inFilm && (kind === 'brightfield' || this._overviewOpen);
         if (stage) {
             stage.hidden = !expanded;
+            stage.classList.toggle('is-only', kind === 'brightfield' && Object.keys(this.state.embryos).length === 0);
             if (expanded) this._mountStage();
         }
         strip.hidden = all.length === 0 || inFilm || expanded;
