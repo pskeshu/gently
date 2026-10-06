@@ -559,13 +559,86 @@ class MicroscopyAgent:
         return self.sessions.list_sessions()
 
     def resume_session(self, session_id: str) -> bool:
-        """Resume a session (public interface for CLI)."""
-        ok = self.sessions.resume_session(
-            session_id, self.experiment, self.conversation, self._update_system_prompt
-        )
-        if ok:
-            self._restore_acquisition_state()
-        return ok
+        """Make a saved session live again (public interface for CLI)."""
+        return bool(self.switch_session(session_id).get("ok"))
+
+    def switch_session(self, session_id: str | None) -> dict:
+        """Leave the live session and make another one live — a saved one
+        (``session_id``) or a fresh one (``None``).
+
+        Making a session live means: new images, the transcript and the
+        stage targets belong to it from here on. So the current session is
+        saved first; the live embryo list is cleared (resume used to merge
+        the saved embryos into whatever was there); the per-session logs —
+        events, decisions, timeline, interaction log — are closed and
+        reopened in the new folder (they used to keep writing to the old
+        one); and the orchestrator is pointed at the session and given its
+        checkpoint back. A live run is never switched out from under:
+        RuntimeError, stop it first.
+
+        Positions restored from a saved session belong to the sample that
+        was on the scope then; ``experiment.metadata["restored_from"]`` says
+        so, for anything that is about to drive the stage to one.
+        """
+        orch = getattr(self, "timelapse_orchestrator", None)
+        status = getattr(getattr(orch, "_status", None), "value", None)
+        if status in ("running", "paused"):
+            raise RuntimeError(f"a run is {status}; stop it before switching sessions")
+
+        previous = self.sessions.session_id
+        if previous:
+            self.sessions.save_session(self.experiment, self.conversation.conversation_history, "")
+        self.stop_event_capture()
+        self.stop_decision_log()
+        tm = getattr(self, "timeline_manager", None)
+        if tm is not None:
+            try:
+                tm.stop()
+            except Exception:
+                logging.getLogger(__name__).debug("timeline stop failed", exc_info=True)
+
+        # The live state is the session's. Nothing of the old one carries over.
+        self.experiment.embryos.clear()
+        self.experiment.active_plan_item_id = None
+        self.experiment.start_time = None
+        self.experiment.acquisition_status = "idle"
+        self.experiment.metadata.pop("restored_from", None)
+        self.conversation.conversation_history = []
+
+        if session_id is None:
+            self.sessions.create_session()
+            ok = True
+            self._emit_event(EventType.SESSION_STARTED, {"session_id": self.sessions.session_id})
+        else:
+            ok, history = self.sessions._resume_session(session_id, self.experiment)
+            if ok:
+                self.conversation.conversation_history = history
+                if self.experiment.embryos:
+                    self.experiment.metadata["restored_from"] = {
+                        "session_id": session_id,
+                        "at": datetime.now().isoformat(timespec="seconds"),
+                        "embryos": sorted(self.experiment.embryos),
+                    }
+            self._emit_event(
+                EventType.SESSION_RESTORED,
+                {
+                    "session_id": session_id,
+                    "embryo_count": len(self.experiment.embryos),
+                    "message_count": len(self.conversation.conversation_history),
+                },
+            )
+        self.experiment.notify_embryos_changed()
+        self._update_system_prompt()
+
+        # The per-session logs follow the session.
+        self._init_interaction_logger()
+        if getattr(self, "conversation", None) is not None:
+            self.conversation.interaction_logger = self.interaction_logger
+        self._init_event_capture()
+        self._init_decision_log()
+        self._init_timeline_manager()
+        self._restore_acquisition_state()
+        return {"ok": ok, "session_id": self.sessions.session_id, "previous": previous}
 
     def _restore_acquisition_state(self) -> None:
         from gently.app.orchestration.resume import restore_acquisition_state

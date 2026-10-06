@@ -99,6 +99,7 @@ class TestTheList:
         _session_with_a_run(store)
         s = _client(store).get("/api/sessions").json()["sessions"][0]
         assert (s["embryo_count"], s["timepoints"], s["dic_frames"]) == (1, 3, 1)
+        assert s["bytes"] > 0  # what the folder occupies on disk
         # A finished run is described, but is not an interrupted one the gate would offer.
         assert s["run"] is None
         assert s["last_run"]["status"] == "completed" and s["last_run"]["total_timepoints"] == 3

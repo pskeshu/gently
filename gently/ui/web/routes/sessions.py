@@ -249,6 +249,38 @@ def _ask_model_for_a_name(client, summary: dict) -> tuple[str, str] | None:
     return name[:120], desc[:600]
 
 
+_SIZE_CACHE: dict[str, tuple[float, int]] = {}
+_SIZE_TTL_S = 900.0
+
+
+def folder_bytes(folder: Path | None, *, fresh: bool = False) -> int | None:
+    """What a session folder occupies on disk, summed over every file.
+    Cached for fifteen minutes per folder unless ``fresh``: a walk reads
+    metadata only, but the list asks for every session at once."""
+    if folder is None:
+        return None
+    import os
+    import time
+
+    key = str(folder)
+    now = time.monotonic()
+    hit = _SIZE_CACHE.get(key)
+    if hit and not fresh and now - hit[0] < _SIZE_TTL_S:
+        return hit[1]
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(folder):
+            for name in files:
+                try:
+                    total += os.stat(os.path.join(root, name)).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    _SIZE_CACHE[key] = (now, total)
+    return total
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -293,6 +325,7 @@ def create_router(server) -> APIRouter:
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),
                         "dic_frames": _dic_count(store, sid),
+                        "bytes": folder_bytes(store._session_dir(sid), fresh=sid == active_id),
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
                             embryo_count=held.get("embryo_count", 0),
@@ -545,14 +578,47 @@ def create_router(server) -> APIRouter:
             headers["ETag"] = etag
         return FileResponse(str(resolved), media_type="image/jpeg", headers=headers)
 
+    def _switch(agent, session_id: str | None) -> dict:
+        """Make a session live through the agent's one switching path. A
+        live run is a 409: the operator stops it first, on purpose."""
+        try:
+            return agent.switch_session(session_id)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except Exception as e:
+            logger.exception("Session switch failed")
+            raise HTTPException(status_code=500, detail=f"switch failed: {e}") from e
+
+    @router.post("/api/sessions/new", dependencies=[Depends(require_control)])
+    async def new_session():
+        """Open a fresh session from inside the app — until now that meant
+        closing Gently and opening it again. The current session is saved;
+        the embryo list, transcript and per-session logs start empty; a
+        live run refuses (409). Every browser reloads onto it."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None:
+            raise HTTPException(status_code=503, detail="Agent not ready")
+        got = _switch(agent, None)
+        sid = got.get("session_id")
+        try:
+            server.rehydrate_session(sid)
+        except Exception:
+            logger.debug("rehydrate of a fresh session failed", exc_info=True)
+        server.gate_passed = True
+        try:
+            await server.manager.broadcast({"type": "session_changed", "session_id": sid})
+        except Exception:
+            pass
+        return {"ok": True, "session_id": sid, "previous": got.get("previous")}
+
     @router.post("/api/sessions/{session_id}/resume", dependencies=[Depends(require_control)])
     async def resume_session(session_id: str):
-        """Switch the live agent to a different saved session.
-
-        Reuses the same machinery as CLI resume (saves the current session,
-        loads the target's embryos + conversation). Then nudges all browser
-        clients to reload so they pick up the new session's state and
-        transcript.
+        """Make a saved session live: new images, the transcript and the
+        stage targets belong to it from here on. Viewing a session needs
+        none of this — the Sessions tab reads the folder. The current
+        session is saved first; a live run refuses (409). Then every
+        browser is told to reload onto the new session.
         """
         bridge = getattr(server, "agent_bridge", None)
         agent = bridge.agent if bridge is not None else None
@@ -568,12 +634,8 @@ def create_router(server) -> APIRouter:
                 "active": True,
                 "note": "already active",
             }
-        try:
-            ok = agent.resume_session(session_id)
-        except Exception as e:
-            logger.exception("Session resume failed")
-            raise HTTPException(status_code=500, detail=f"resume failed: {e}") from e
-        if not ok:
+        got = _switch(agent, session_id)
+        if not got.get("ok"):
             raise HTTPException(status_code=500, detail="resume returned false")
         # Rehydrate the viz image store from disk so the resumed session's
         # projections/filmstrips show (pixels load lazily from the FileStore).
@@ -681,6 +743,9 @@ def create_router(server) -> APIRouter:
             "last_active": info.get("last_active", ""),
             "run": (held or {}).get("run"),
             "last_run": (held or {}).get("last_run"),
+            "bytes": await asyncio.to_thread(
+                folder_bytes, store._session_dir(session_id), fresh=True
+            ),
             "acquisition": acquisition,
             "embryos": embryos,
             "dic_frames": dic_frames,

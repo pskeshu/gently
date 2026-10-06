@@ -673,3 +673,13 @@
 .event-list time { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; }
 .event-list .is-warn::before { content: '! '; color: var(--accent-amber); font-weight: 700; }
 .event-list .is-error::before { content: '✕ '; color: var(--accent-red); font-weight: 700; }
+
+/* A fresh session from here */
+.sidebar-header { gap: 8px; }
+.session-new-btn {
+    margin-left: auto;
+    font: inherit; font-size: 12px; font-weight: 600;
+    padding: 3px 9px; border-radius: 6px;
+    border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer;
+}
+.session-new-btn:hover { background: var(--accent); color: var(--bg-dark); }

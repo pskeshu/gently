@@ -54,6 +54,13 @@ def restore_acquisition_state(agent: Any) -> dict[str, Any]:
         logger.warning("timelapse state restore failed for %s: %s", sid, exc)
         return {"restored": False, "reason": str(exc)}
     restored = isinstance(message, str) and message.startswith("Restored")
+    if not restored:
+        # A session with no checkpoint starts clean: the idle orchestrator
+        # must not show the previous session's embryos as this one's run.
+        try:
+            orch._embryo_states = {}
+        except Exception:
+            logger.debug("could not clear orchestrator embryo state", exc_info=True)
     (logger.info if restored else logger.debug)("Session %s: %s", sid, message)
     return {"restored": restored, "message": message}
 
