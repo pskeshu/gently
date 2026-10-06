@@ -552,6 +552,26 @@ class FileStore:
         data["last_active"] = _now()
         _write_yaml(yaml_path, data)
 
+    def update_session(
+        self, session_id: str, *, name: str | None = None, description: str | None = None
+    ) -> SessionInfo | None:
+        """Give a session a name and/or a description, in its session.yaml.
+        The folder keeps the slug it was created with; the index is by id.
+        Returns the record as written, or None if the session is unknown."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return None
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return None
+        if name is not None:
+            data["name"] = name.strip() or None
+        if description is not None:
+            data["description"] = description.strip() or None
+        _write_yaml(yaml_path, data)
+        return data
+
     def mark_advanced_diagnostics(self, session_id: str, since: str) -> bool:
         """Record on the session that it was recorded with Advanced diagnostics
         on, from ``since``. Set once, never cleared. Returns True if written.

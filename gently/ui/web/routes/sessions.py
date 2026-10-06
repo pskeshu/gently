@@ -21,6 +21,234 @@ def _open_in_file_manager(path: Path) -> None:
     reveal.open_folder(path)
 
 
+_NOTABLE = {
+    "SESSION_RESTORED": lambda d: "Session restored",
+    "ACQUISITION_STARTED": lambda d: (
+        "Acquisition started"
+        + (f" · {len(d['embryo_ids'])} embryos" if isinstance(d.get("embryo_ids"), list) else "")
+    ),
+    "ACQUISITION_COMPLETED": lambda d: "Acquisition completed",
+    "ACQUISITION_STOPPED": lambda d: (
+        "Acquisition stopped" + (f" · {d['reason']}" if d.get("reason") else "")
+    ),
+    "ACQUISITION_FAILED": lambda d: (
+        "Acquisition failed"
+        + (
+            f" · {d.get('error') or d.get('error_message')}"
+            if d.get("error") or d.get("error_message")
+            else ""
+        )
+    ),
+    "TRIGGER_FIRED": lambda d: (
+        f"Rule {d.get('rule') or d.get('name') or '?'} fired"
+        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
+    ),
+    "BURST_START": lambda d: (
+        f"Burst on {d.get('embryo_id', '?')}: {d.get('frames', '?')} frames"
+        + (f" ({d['mode']})" if d.get("mode") else "")
+    ),
+    "BURST_COMPLETE": lambda d: (
+        f"Burst done on {d.get('embryo_id', '?')}"
+        + (f": {d['frames_captured']} frames" if d.get("frames_captured") is not None else "")
+        + (
+            f" at {d['sustained_hz']:.1f} Hz"
+            if isinstance(d.get("sustained_hz"), (int, float))
+            else ""
+        )
+    ),
+    "POWER_RAMP_STEP": lambda d: (
+        f"{d.get('wavelength', '?')} nm power {d.get('old_pct')}% → {d.get('new_pct')}%"
+        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
+    ),
+    "HATCHING_DETECTED": lambda d: f"Hatching detected on {d.get('embryo_id', '?')}",
+    "DETECTION_TRIGGERED": lambda d: (
+        f"{d.get('detector_name') or d.get('detector') or 'Detector'} fired"
+        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
+    ),
+    "EMBRYO_TERMINATED": lambda d: (
+        f"{d.get('embryo_id', '?')} terminated" + (f" · {d['reason']}" if d.get("reason") else "")
+    ),
+    "EMBRYO_SKIPPED": lambda d: (
+        f"{d.get('embryo_id', '?')} skipped" + (f" · {d['reason']}" if d.get("reason") else "")
+    ),
+    "OPERATOR_REMOVED_EMBRYO": lambda d: f"Operator removed {d.get('embryo_id', '?')}",
+    "TEMPERATURE_SETPOINT_CHANGED": lambda d: f"Setpoint → {d.get('to')} °C",
+    "TEMP_PROTOCOL_COMPLETED": lambda d: (
+        "Temperature protocol "
+        + ("locked" if d.get("locked") else "cancelled" if d.get("cancelled") else "ended")
+        + (f" · {d['error']}" if d.get("error") else "")
+    ),
+    "ERROR_OCCURRED": lambda d: f"Error: {d.get('message') or d.get('error') or str(d)[:160]}",
+    "WARNING_ISSUED": lambda d: f"Warning: {d.get('message') or str(d)[:160]}",
+}
+
+_LEVEL = {
+    "ACQUISITION_FAILED": "error",
+    "ERROR_OCCURRED": "error",
+    "WARNING_ISSUED": "warn",
+    "EMBRYO_TERMINATED": "warn",
+    "EMBRYO_SKIPPED": "warn",
+    "ACQUISITION_STOPPED": "warn",
+}
+
+
+def _notable_events(path: Path, limit: int = 300) -> list[dict]:
+    """The run's events worth reading back, oldest first, from events.jsonl.
+    Status chatter and per-frame traffic are left out; a truncated line is
+    skipped, not fatal."""
+    if not path.is_file():
+        return []
+    import json
+
+    out: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                kind = rec.get("event_type") or rec.get("type")
+                say = _NOTABLE.get(kind)
+                if say is None:
+                    continue
+                data = rec.get("data") if isinstance(rec.get("data"), dict) else {}
+                try:
+                    text = say(data)
+                except Exception:
+                    text = kind.replace("_", " ").capitalize()
+                out.append(
+                    {
+                        "type": kind,
+                        "at": rec.get("timestamp"),
+                        "text": text,
+                        "level": _LEVEL.get(kind, "info"),
+                    }
+                )
+    except OSError:
+        return []
+    return out[-limit:]
+
+
+def _fmt_interval(sec) -> str:
+    try:
+        s = float(sec)
+    except (TypeError, ValueError):
+        return ""
+    if s <= 0:
+        return ""
+    if s < 60:
+        return f"{s:g} s"
+    if s < 3600:
+        return f"{round(s / 60)} min"
+    h = s / 3600
+    return f"{h:g} h" if h == int(h) else f"{h:.1f} h"
+
+
+def derive_session_name(
+    *,
+    created_at: str | None,
+    embryo_count: int = 0,
+    last_run: dict | None = None,
+    acquisition: dict | None = None,
+    embryos: list[dict] | None = None,
+) -> str:
+    """A name from the facts: count, cadence, when, how it ended. What an
+    unnamed session is called in the list, and what the model's suggestion
+    falls back to. 'Oct 4 overnight' says more than a hex id."""
+    parts: list[str] = []
+    if embryo_count:
+        parts.append(f"{embryo_count} embryo{'s' if embryo_count != 1 else ''}")
+    interval = (acquisition or {}).get("interval_seconds") or (last_run or {}).get(
+        "interval_seconds"
+    )
+    if interval:
+        parts.append(f"every {_fmt_interval(interval)}")
+    when = ""
+    started = (last_run or {}).get("started_at") or created_at
+    try:
+        dt = datetime.fromisoformat(str(started)) if started else None
+    except ValueError:
+        dt = None
+    if dt is not None:
+        when = f"{dt.strftime('%b')} {dt.day}"  # not %-d: the rig runs Windows
+        if dt.hour >= 17 or dt.hour < 5:
+            when += " overnight"
+    if when:
+        parts.append(when)
+    outcome = ""
+    status = str((last_run or {}).get("status") or "")
+    going = (last_run or {}).get("embryos_going")
+    if embryos and all(e.get("is_complete") for e in embryos):
+        outcome = "all complete"
+    elif status in ("running", "paused") and going:
+        outcome = "cut short"
+    elif status in ("completed", "complete") or (status and going == 0):
+        outcome = "complete"
+    elif status == "stopped":
+        outcome = "stopped"
+    if outcome:
+        parts.append(outcome)
+    return " · ".join(parts) if parts else "Unnamed session"
+
+
+def _first_user_words(history: list[dict], limit: int = 600) -> str:
+    """What the operator asked for, in their words, for the model to name
+    the session by. Text blocks only; tool traffic is not a request."""
+    out: list[str] = []
+    for m in history:
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            out.append(c)
+        elif isinstance(c, list):
+            out.extend(
+                b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"
+            )
+        if sum(len(x) for x in out) >= limit:
+            break
+    return " / ".join(x.strip() for x in out if x.strip())[:limit]
+
+
+def _ask_model_for_a_name(client, summary: dict) -> tuple[str, str] | None:
+    """One short call on the project's fast model: a name and a line for the
+    session. None on anything but a clean JSON answer; the caller falls back
+    to the derived name."""
+    import json
+
+    from gently.settings import settings
+
+    response = client.with_options(timeout=20.0).messages.create(
+        model=settings.models.fast,
+        max_tokens=200,
+        system=(
+            "You name light-sheet microscopy sessions for the biologist who ran them. "
+            'Reply with JSON only, no prose: {"name": ..., "description": ...}. '
+            "The name is at most six words, specific to what was imaged and why, with no date "
+            "(the interface shows it) and without the word 'session'. The description is one "
+            "sentence of at most 25 words: what was imaged, how, and how it ended."
+        ),
+        messages=[{"role": "user", "content": json.dumps(summary, default=str)}],
+    )
+    text = "".join(b.text for b in response.content if getattr(b, "type", "") == "text").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[text.find("{") :] if "{" in text else text
+    try:
+        doc = json.loads(text[text.find("{") : text.rfind("}") + 1])
+    except (ValueError, TypeError):
+        return None
+    name = str(doc.get("name") or "").strip()
+    desc = str(doc.get("description") or "").strip()
+    if not name:
+        return None
+    return name[:120], desc[:600]
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -65,6 +293,11 @@ def create_router(server) -> APIRouter:
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),
                         "dic_frames": _dic_count(store, sid),
+                        "suggested_name": derive_session_name(
+                            created_at=s.get("created_at"),
+                            embryo_count=held.get("embryo_count", 0),
+                            last_run=held.get("last_run"),
+                        ),
                         "description": s.get("description", ""),
                         "active": sid == active_id,
                         "advanced_diagnostics": bool(
@@ -429,17 +662,31 @@ def create_router(server) -> APIRouter:
         experiment = snapshot.get("experiment_data", {}) or {}
         held = await asyncio.to_thread(_what_a_session_holds, store, session_id)
         embryos, dic_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
+        acquisition = store.get_acquisition_plan(session_id)
+        state = _checkpoint(store, session_id)
+        _add_dose(embryos, state)
+        events, temperature, removed = await asyncio.to_thread(_what_happened, store, session_id)
         return {
             "session_id": session_id,
-            "name": info.get("name") or session_id,
+            "name": info.get("name"),
+            "suggested_name": derive_session_name(
+                created_at=info.get("created_at"),
+                embryo_count=len(embryos),
+                last_run=(held or {}).get("last_run"),
+                acquisition=acquisition,
+                embryos=embryos,
+            ),
             "description": info.get("description", ""),
             "created_at": info.get("created_at", ""),
             "last_active": info.get("last_active", ""),
             "run": (held or {}).get("run"),
             "last_run": (held or {}).get("last_run"),
-            "acquisition": store.get_acquisition_plan(session_id),
+            "acquisition": acquisition,
             "embryos": embryos,
             "dic_frames": dic_frames,
+            "events": events,
+            "temperature": temperature,
+            "removed_embryos": removed,
             "embryo_states": experiment.get("embryos", {}) or {},
             "conversation": snapshot.get("conversation_history", []) or [],
             "detection_history": {},
@@ -479,6 +726,7 @@ def create_router(server) -> APIRouter:
                     "strain": e.get("strain"),
                     "position": pos,
                     "timepoints": len(tps),
+                    "projection_timepoints": tps,
                     "latest_timepoint": latest,
                     "thumbnail": (
                         f"/api/sessions/{sid}/projection?embryo={eid}&t={latest}"
@@ -518,6 +766,140 @@ def create_router(server) -> APIRouter:
                 }
             )
         return embryos, frames
+
+    def _add_dose(embryos: list[dict], state: dict) -> None:
+        """Each embryo's light dose so far against its budget, from the
+        checkpoint: the main reason not to carry an embryo on."""
+        rows = state.get("embryos") or {}
+        base = state.get("dose_budget_base_ms")
+        for e in embryos:
+            row = rows.get(e["embryo_id"]) or {}
+            e["dose_ms"] = row.get("total_exposure_ms")
+            budget = None
+            if base:
+                try:
+                    from gently.harness.roles import get_role
+
+                    budget = float(base) * float(
+                        get_role(e.get("role") or "test").photodose_budget_multiplier
+                    )
+                except Exception:
+                    budget = float(base)
+            e["dose_budget_ms"] = budget
+
+    def _what_happened(store, sid: str) -> tuple[list[dict], list[dict], list[dict]]:
+        """The run's notable events, the night's temperature, and the embryos
+        set aside — what you ask before resuming: did anything go wrong."""
+        folder = store._session_dir(sid)
+        events: list[dict] = []
+        if folder is not None:
+            events = _notable_events(Path(folder) / "events.jsonl")
+        try:
+            samples = store.read_temperature_log(sid) or []
+        except Exception:
+            samples = []
+        step = max(1, -(-len(samples) // 240))  # ceil: at most 240 points
+        temperature = [
+            {"t": r.get("t"), "water_c": r.get("water_c"), "setpoint_c": r.get("setpoint_c")}
+            for r in samples[::step]
+            if r.get("water_c") is not None
+        ]
+        try:
+            removed = [
+                {
+                    "embryo_id": r.get("embryo_id"),
+                    "nickname": r.get("nickname"),
+                    "removed_at": r.get("removed_at"),
+                    "reason": r.get("reason") or r.get("removed_by") or r.get("by"),
+                    "timepoints": r.get("timepoints") or r.get("projections"),
+                }
+                for r in store.list_removed_embryos(sid) or []
+            ]
+        except Exception:
+            removed = []
+        return events, temperature, removed
+
+    @router.patch("/api/sessions/{session_id}", dependencies=[Depends(require_control)])
+    async def rename_session(session_id: str, body: dict):
+        """Give a session a name and a line about it. Written to its
+        session.yaml; the folder keeps its slug."""
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        name = body.get("name")
+        description = body.get("description")
+        if name is not None and not isinstance(name, str):
+            raise HTTPException(status_code=400, detail="name must be a string")
+        if description is not None and not isinstance(description, str):
+            raise HTTPException(status_code=400, detail="description must be a string")
+        if name is not None and len(name) > 120:
+            raise HTTPException(status_code=400, detail="name is too long (120 characters)")
+        if description is not None and len(description) > 600:
+            raise HTTPException(status_code=400, detail="description is too long (600 chars)")
+        info = store.update_session(session_id, name=name, description=description)
+        if info is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {
+            "session_id": session_id,
+            "name": info.get("name"),
+            "description": info.get("description"),
+        }
+
+    @router.post("/api/sessions/{session_id}/suggest-name", dependencies=[Depends(require_control)])
+    async def suggest_session_name(session_id: str):
+        """A name and a line for the session, from what its folder holds.
+        The model writes it when the agent has an API key; otherwise the
+        name is derived from the counts, the cadence, the date and the
+        outcome. Nothing is written — the operator saves or edits it."""
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        info = store.get_session(session_id)
+        if info is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        held = await asyncio.to_thread(_what_a_session_holds, store, session_id) or {}
+        embryos, _frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
+        acquisition = store.get_acquisition_plan(session_id)
+        derived = derive_session_name(
+            created_at=info.get("created_at"),
+            embryo_count=len(embryos),
+            last_run=held.get("last_run"),
+            acquisition=acquisition,
+            embryos=embryos,
+        )
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        client = getattr(agent, "claude", None) if getattr(agent, "api_enabled", False) else None
+        if client is None:
+            return {"name": derived, "description": None, "source": "derived"}
+        snapshot = store.load_session_snapshot(session_id) or {}
+        summary = {
+            "created_at": info.get("created_at"),
+            "embryos": [
+                {
+                    "id": e["embryo_id"],
+                    "nickname": e.get("nickname"),
+                    "role": e.get("role"),
+                    "strain": e.get("strain"),
+                    "timepoints": e.get("timepoints"),
+                    "last_stage": e.get("stage"),
+                    "complete": e.get("is_complete"),
+                }
+                for e in embryos
+            ],
+            "acquisition": acquisition,
+            "run": held.get("last_run"),
+            "dic_frames": _dic_count(store, session_id),
+            "operator_said": _first_user_words(snapshot.get("conversation_history") or []),
+        }
+        try:
+            got = await asyncio.to_thread(_ask_model_for_a_name, client, summary)
+        except Exception:
+            logger.info("name suggestion fell back to the derived name", exc_info=True)
+            got = None
+        if not got:
+            return {"name": derived, "description": None, "source": "derived"}
+        return {"name": got[0], "description": got[1], "source": "model"}
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
     async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):

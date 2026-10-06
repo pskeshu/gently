@@ -609,3 +609,67 @@
     border-color: var(--accent-purple, #a78bfa);
 }
 .session-item.active-session { border-left: 2px solid var(--accent-green); }
+
+/* Finding a session */
+.session-search {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.session-search:focus { outline: none; border-color: var(--accent); }
+
+/* Naming a session in place */
+.session-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.session-title h2 { margin: 0; }
+.session-title h2.is-suggested { font-style: italic; color: var(--text-muted); font-weight: 500; }
+.session-title-hint { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.session-edit-btn {
+    font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer;
+}
+.session-edit-btn:hover { color: var(--text); border-color: var(--accent); }
+.session-name-form { display: grid; gap: 8px; margin: 4px 0 8px; max-width: 640px; }
+.session-name-form input, .session-name-form textarea {
+    font: inherit; width: 100%; box-sizing: border-box; padding: 6px 10px;
+    color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+}
+.session-name-form input { font-size: 18px; font-weight: 600; }
+.session-name-form textarea { font-size: 13px; min-height: 48px; resize: vertical; }
+.session-name-form-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.session-name-form-row .hint { font-size: 12px; color: var(--text-muted); }
+.session-name-form .session-resume-btn { margin: 0; }
+.session-name-form .session-edit-btn[disabled] { opacity: .6; cursor: progress; }
+
+/* Development, embryo by embryo */
+.stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; margin: 8px 0 2px; background: var(--bg-hover); }
+.stage-bar span { flex: 1 1 0; min-width: 2px; }
+.stage-bar-key { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.embryo-thumb.is-scrubbing img { cursor: ew-resize; }
+
+/* Light dose against the budget */
+.dose { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.dose-bar { height: 4px; border-radius: 2px; background: var(--bg-hover); overflow: hidden; margin-top: 3px; }
+.dose-bar span { display: block; height: 100%; background: var(--accent-green); }
+.dose.is-high .dose-bar span { background: var(--accent-amber); }
+.dose.is-over .dose-bar span { background: var(--accent-red); }
+
+/* Set aside */
+.session-removed { margin-top: 16px; font-size: 13px; color: var(--text-muted); }
+.session-removed b { color: var(--text); font-weight: 600; }
+
+/* What happened */
+.session-temp { margin-bottom: 16px; }
+.session-temp svg { width: 100%; height: 72px; display: block; }
+.session-temp-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; display: flex; gap: 12px; }
+.session-temp-head span { font-weight: 400; letter-spacing: 0; text-transform: none; }
+.event-list { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; }
+.event-list time { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; }
+.event-list .is-warn::before { content: '! '; color: var(--accent-amber); font-weight: 700; }
+.event-list .is-error::before { content: '✕ '; color: var(--accent-red); font-weight: 700; }
