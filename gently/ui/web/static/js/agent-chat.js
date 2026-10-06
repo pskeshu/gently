@@ -1161,6 +1161,7 @@ const AgentChat = (() => {
 
     function togglePanel(open) {
         panelOpen = (open === undefined) ? !panelOpen : open;
+        rememberPanel();
         panel.classList.toggle('open', panelOpen);
         if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('AGENT_PANEL', { open: panelOpen });
         if (railBtn) railBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
@@ -1243,18 +1244,42 @@ const AgentChat = (() => {
         resizeEl.addEventListener('dblclick', () => { setChatWidth(CHAT_DEFAULT_W, true); emitLayoutChanged(); });
     }
 
+    // How the panel starts is Settings → Assistant → Agent panel: 'collapsed'
+    // (the shipped default), 'open', or 'remember' — as it was left. #133 made it
+    // open on every load by deleting the memory of a close, because one close
+    // had defeated "open by default" on the scope PC for good. The operators
+    // asked for collapsed, so the start is a choice now, and the memory is one
+    // of the choices rather than a side effect of the × button.
+    const PANEL_OPEN_KEY = 'gently-chat-open';
+    function panelMode() {
+        return (typeof SettingsStore !== 'undefined') ? SettingsStore.get('agentPanel', 'collapsed') : 'collapsed';
+    }
+    // The only write of the remembered state: nothing is kept under
+    // 'collapsed' or 'open', so a close there is for the session (#133).
+    function rememberPanel() {
+        if (panelMode() !== 'remember') return;
+        try { localStorage.setItem(PANEL_OPEN_KEY, panelOpen ? '1' : '0'); } catch (_) {}
+    }
+    function startOpen() {
+        const mode = panelMode();
+        if (mode === 'open') return true;
+        if (mode === 'remember') {
+            try { return localStorage.getItem(PANEL_OPEN_KEY) === '1'; } catch (_) {}
+        }
+        return false;  // 'collapsed', or 'remember' with nothing remembered yet
+    }
+
     function restorePrefs() {
         try {
             const w = parseInt(localStorage.getItem('gently-chat-w'));
             if (w) setChatWidth(w, false);
         } catch (_) {}
         // The agent panel is always docked — a real column that pushes content,
-        // not a float over it. It is open on every load; the header Agent toggle /
-        // Ctrl+J / × collapse it to width 0 for this session only. The collapse
-        // used to be remembered, so one close made "open by default" false on
-        // that machine for good (#133).
+        // not a float over it. Whether it starts open is the operator's setting
+        // (panelMode above); Ctrl+J, the × and the rail's spark fold or open it
+        // any time.
         document.body.classList.add('chat-docked');
-        togglePanel(true);
+        togglePanel(startOpen());
     }
 
     // Unseen-activity badge on the header toggle — so a closed panel still tells
@@ -1325,6 +1350,11 @@ const AgentChat = (() => {
                 markAnswered(request_id);
                 // Answered from the overlay: restore working state.
                 if (askPending) setAskState(false);
+            });
+            // Choosing 'As it was left' in Settings starts remembering from the
+            // state the panel is in now, so the next load does not surprise.
+            ClientEventBus.on('SETTINGS_CHANGED', ({ path } = {}) => {
+                if (!path || path === 'agentPanel') rememberPanel();
             });
         }
         if (railBtn) railBtn.addEventListener('click', () => togglePanel(true));

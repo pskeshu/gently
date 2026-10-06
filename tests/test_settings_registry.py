@@ -94,10 +94,10 @@ def test_a_setting_that_can_be_changed_names_its_reader_and_its_store(s):
     ids=lambda s: s.key,
 )
 def test_a_browser_preference_ships_with_a_value(s):
-    """Its leaf is in the values embryos.js ships with, or it is the Atrium's,
-    which atrium.js reads for itself."""
+    """Its leaf is in the values embryos.js ships with, or it is the Atrium's or
+    the agent panel's, which atrium.js and agent-chat.js read for themselves."""
     leaf = s.store.split(":", 1)[1].split(".")[-1]
-    if leaf == "atrium":
+    if leaf in ("atrium", "agentPanel"):
         return
     assert re.search(rf"\b{leaf}:", _shipped()), f"{s.key}: embryos.js ships no {leaf}"
 
@@ -234,3 +234,15 @@ def test_settings_is_where_the_atrium_is_switched_off_so_it_opens_the_tabs():
     fn = atrium[atrium.index("    function wanted() {") :][:500]
     assert "location.hash" in fn and "return false;" in fn
     assert 'href="/#settings"' in atrium
+
+
+def test_the_agent_panel_is_collapsed_unless_settings_says_otherwise():
+    """The scope's operators asked for a quiet start: the chat folds until it is
+    wanted. The registry's default and the fallback agent-chat.js reads with must
+    agree, or Settings would show one thing and the page do another."""
+    s = next(s for s in registry.SETTINGS if s.key == "assistant.panel")
+    assert s.default == "collapsed"
+    assert [c[0] for c in s.choices] == ["collapsed", "open", "remember"]
+    assert s.store == "prefs:agentPanel" and s.applies == registry.LOAD
+    chat = (JS / "agent-chat.js").read_text(encoding="utf-8")
+    assert "SettingsStore.get('agentPanel', 'collapsed')" in chat
