@@ -252,6 +252,7 @@ const ReviewApp = {
                     ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
                 </div>
                 ${this.renderRun(this.runOf(s))}
+                <div class="session-export" id="session-export"></div>
             </div>
 
             ${this.renderPlan(s.acquisition)}
@@ -282,7 +283,90 @@ const ReviewApp = {
 
         this.setupTabHandlers();
         this.wireScrub();
+        this.pollExport(true);
         void frames;
+    },
+
+    // ---- export, for Fiji and for finding the experiment again -----------
+
+    async pollExport(once) {
+        const s = this.currentSession;
+        const host = document.getElementById('session-export');
+        if (!s || !host) return;
+        let job = null;
+        try {
+            const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/export`);
+            job = r.ok ? await r.json() : null;
+        } catch (_) { /* leave the button */ }
+        if (!job || job.session_id !== s.session_id) return;
+        this._exportDefault = job.default_dest || '';
+        this.renderExport(job);
+        if (job.state === 'running' && !once) {
+            clearTimeout(this._exportTimer);
+            this._exportTimer = setTimeout(() => this.pollExport(false), 1000);
+        } else if (job.state === 'running' && once) {
+            clearTimeout(this._exportTimer);
+            this._exportTimer = setTimeout(() => this.pollExport(false), 1000);
+        }
+    },
+
+    renderExport(job) {
+        const host = document.getElementById('session-export');
+        if (!host) return;
+        const s = this.currentSession;
+        const open = typeof Reveal !== 'undefined'
+            ? Reveal.button({ what: 'export', session_id: s.session_id }, 'show', { label: 'Open export folder', title: 'Show the export in the file manager', cls: 'session-edit-btn' })
+            : '';
+        if (job.state === 'running') {
+            const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+            host.innerHTML = `<span class="session-export-status">Exporting… ${job.done}${job.total ? ` of ${job.total}` : ''} files${job.current ? ` · ${this.escapeHtml(job.current)}` : ''}</span>
+                <div class="dose-bar session-export-bar"><span style="width:${pct}%"></span></div>`;
+            return;
+        }
+        const last = job.state === 'done'
+            ? `<span class="session-export-status">Exported ${job.done} files to <code>${this.escapeHtml(job.path)}</code></span> ${open}`
+            : job.state === 'error'
+                ? `<span class="session-export-status is-error">Export failed: ${this.escapeHtml(job.error || '')}</span>`
+                : '';
+        host.innerHTML = `
+            <div class="session-export-row">
+                <button class="session-edit-btn" onclick="ReviewApp.askExport()" title="One folder per embryo, files named in time order, the record beside them; opens in Fiji with Import › Image Sequence">Export for Fiji…</button>
+                ${last}
+            </div>
+            <div id="session-export-form"></div>`;
+    },
+
+    askExport() {
+        const host = document.getElementById('session-export-form');
+        if (!host) return;
+        host.innerHTML = `
+            <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.startExport()">
+                <input id="session-export-dest" placeholder="Destination folder (leave empty for ${this.escapeHtml(this._exportDefault || 'the data folder\'s exports/')})" autocomplete="off">
+                <div class="session-name-form-row">
+                    <button type="submit" class="session-resume-btn">Export</button>
+                    <button type="button" class="session-edit-btn" onclick="document.getElementById('session-export-form').innerHTML = ''">Cancel</button>
+                    <span class="hint">Copies, not links. A folder per embryo, named by nickname; volumes and DIC frames named so a sort is time order; plan, stage calls, events and temperature as CSV; a README pointing back at the originals.</span>
+                </div>
+            </form>`;
+        const input = document.getElementById('session-export-dest');
+        if (input) input.focus();
+    },
+
+    async startExport() {
+        const s = this.currentSession;
+        const input = document.getElementById('session-export-dest');
+        const dest = input && input.value.trim() ? input.value.trim() : null;
+        try {
+            const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/export`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dest ? { dest } : {}),
+            });
+            if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || ('HTTP ' + r.status)); }
+            this.renderExport(await r.json());
+            this.pollExport(false);
+        } catch (e) {
+            const host = document.getElementById('session-export');
+            if (host) host.insertAdjacentHTML('beforeend', `<div class="session-export-status is-error">Export failed to start: ${this.escapeHtml(e.message)}</div>`);
+        }
     },
 
     // ---- naming -------------------------------------------------------------
