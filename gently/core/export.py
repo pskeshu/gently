@@ -120,6 +120,14 @@ def _write_csv(path: Path, rows: list[dict], columns: list[str]) -> None:
             w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in columns})
 
 
+def _ref_path(meta: dict, kind: str) -> str:
+    """Where a frame's dark or flat is, inside the export."""
+    refs = meta.get("references") or {}
+    if not refs.get(kind):
+        return ""
+    return f"references/{refs.get('record')}/{Path(str(refs[kind])).name}"
+
+
 def plan_lines(plan: dict | None) -> list[str]:
     """The acquisition plan in sentences, for the README."""
     if not plan:
@@ -393,6 +401,22 @@ def export_session(
             if src is not None:
                 _copy(Path(src), edir / "projections" / f"{label}_t{int(tp):04d}.jpg", step)
 
+    # --- the dark and flat references, beside the frames they correct ------
+    refs_src = sd / "calibration" / "brightfield"
+    ref_records: list[dict] = []
+    if refs_src.is_dir():
+        shutil.copytree(refs_src, out / "dic" / "references", dirs_exist_ok=True)
+        for entry in sorted(refs_src.iterdir()):
+            rec = entry / "brightfield.yaml"
+            if rec.is_file():
+                try:
+                    doc = yaml.safe_load(rec.read_text(encoding="utf-8")) or {}
+                except (OSError, yaml.YAMLError):
+                    doc = {}
+                if isinstance(doc, dict):
+                    doc["record"] = doc.get("record") or entry.name
+                    ref_records.append(doc)
+
     # --- the DIC overview, by frame then time, not by uuid ------------------
     dic_rows = []
     for i, rec in enumerate(
@@ -421,6 +445,8 @@ def export_session(
                     "led_intensity_pct": meta.get("led_intensity_pct"),
                     "width": rec.get("width"),
                     "height": rec.get("height"),
+                    "dark": _ref_path(meta, "dark"),
+                    "flat": _ref_path(meta, "flat"),
                 }
             )
     if dic_rows:
@@ -439,6 +465,8 @@ def export_session(
                 "led_intensity_pct",
                 "width",
                 "height",
+                "dark",
+                "flat",
             ],
         )
     step("dic.csv")
@@ -487,9 +515,19 @@ def export_session(
         "  <embryo>/calibration/                     the calibration runs (frames, plots, fit)",
         "  dic/dic_f0001_<date-time>.tif ...         the DIC overview frames, in order;"
         " dic/dic.csv says when and where",
+        "  dic/references/<record>/                  dark and flat-field references;"
+        " brightfield.yaml says light, exposure, frames averaged, checks",
         "  embryos.csv, stage_calls.csv, events.csv, temperature.csv",
         "  metadata/                                 the session's own files, as kept"
         " (YAML/JSONL/JSON)",
+        "",
+        "Brightfield correction",
+        "----------------------",
+        "  dic.csv names the dark and flat that apply to each frame. Then:",
+        "    corrected = (frame - dark) / (flat - dark) * mean(flat - dark)",
+        "  In Fiji: Process > Image Calculator (Subtract, then Divide, 32-bit result),"
+        " then multiply by the mean.",
+        "" if not ref_records else f"  {len(ref_records)} reference record(s) in dic/references/.",
         "",
         "Fiji",
         "----",

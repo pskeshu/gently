@@ -2875,9 +2875,20 @@ const OperateManager = (function () {
         LightPanel.mount('op-light-host');
     }
 
+    // The dark/flat references for the overview frames sit under the DIC
+    // fields of the plan and read them (panels/brightfield-refs.js).
+    let _bfRefsMounted = false;
+    function mountBrightfieldRefs() {
+        if (_bfRefsMounted || typeof BrightfieldRefs === 'undefined') return;
+        if (!$('op-bfref-host')) return;
+        _bfRefsMounted = true;
+        BrightfieldRefs.mount('op-bfref-host');
+    }
+
     let _panelsMounted = false;
     function mountPanels() {
         if (_panelsMounted) return;
+        mountBrightfieldRefs();
         _panelsMounted = true;
         if (typeof MarkingPanel !== 'undefined' && $('op-marking-host')) {
             MarkingPanel.mount('op-marking-host');

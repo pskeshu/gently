@@ -150,6 +150,7 @@ class TimelapseOrchestrator:
         # The DIC overview channel (see DicOverview). A subject of its own in
         # the due-loop: one frame of the whole field on its own clock.
         self._dic: DicOverview | None = None
+        self._dic_references: dict | None = None
         # A light needs a moment to be a light: the room light is a relay and a
         # tube, the LED a shutter. Short, and the tests set it to nothing.
         self._dic_light_settle_s: float = 1.0
@@ -386,6 +387,7 @@ class TimelapseOrchestrator:
             if self._dic.position is None:
                 self._dic.position = self._subject_centroid(list(self._embryo_states))
             self._dic_next_due_at = now
+            self._dic_references = self._find_brightfield_references()
 
         # Burst state is per-session; clear at start.
         self._burst_in_progress = None
@@ -818,6 +820,48 @@ class TimelapseOrchestrator:
             return 5.0
         return max(0.0, (self._dic_next_due_at - datetime.now()).total_seconds())
 
+    def _find_brightfield_references(self) -> dict | None:
+        """The dark and flat taken this session for the overview's light and
+        exposure, if any — named in every frame's metadata so the analysis
+        downstream knows what to divide out. None is said aloud: the frames
+        are still taken, but a run without references is a run that will be
+        harder to correct later."""
+        dic = self._dic
+        if dic is None or not dic.enabled or self._store is None or not self._session_id:
+            return None
+        try:
+            from gently.app.brightfield import ReferenceSpec, for_frame, list_records, matching
+
+            spec = ReferenceSpec(
+                light=dic.light,
+                led_intensity_pct=dic.led_intensity_pct,
+                exposure_ms=dic.exposure_ms,
+            )
+            found = matching(list_records(self._store, self._session_id), spec)
+        except Exception:
+            logger.debug("brightfield reference lookup failed", exc_info=True)
+            return None
+        if found is None:
+            msg = (
+                f"No dark/flat references for the overview ({dic.light}"
+                + (
+                    f" {dic.led_intensity_pct}%"
+                    if dic.light == "led" and dic.led_intensity_pct
+                    else ""
+                )
+                + (f", {dic.exposure_ms:g} ms" if dic.exposure_ms else "")
+                + "). Take them from Acquisition › DIC overview › References."
+            )
+            logger.warning(msg)
+            try:
+                self._emit_event(
+                    EventType.WARNING_ISSUED, {"message": msg, "about": "brightfield_references"}
+                )
+            except Exception:
+                logger.debug("could not announce the missing references", exc_info=True)
+            return None
+        return for_frame(found)
+
     async def _capture_dic_overview(self) -> bool:
         """Take one overview frame and file it beside the session's snapshots.
 
@@ -878,6 +922,7 @@ class TimelapseOrchestrator:
                     "exposure_ms": dic.exposure_ms,
                     "light": dic.light,
                     "led_intensity_pct": dic.led_intensity_pct if lit_led else None,
+                    "references": getattr(self, "_dic_references", None),
                     "captured_at": captured_at.isoformat(),
                 }
                 try:

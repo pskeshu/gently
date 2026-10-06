@@ -1767,3 +1767,16 @@
 .op-btn.is-armed::before, .lp-btn.is-armed::before,
 .op-gauge.is-near-floor .op-gauge-name::before,
 .op-plan-say[data-bad="1"]::before { content: '! '; }
+
+/* ── Dark and flat references for the overview frames (panels/brightfield-refs.js) ── */
+.bf-refs { display: grid; gap: var(--op-2); padding: var(--op-2) 0 0; border-top: 1px dashed var(--op-rule); margin-top: var(--op-1); }
+.bf-head { display: flex; align-items: baseline; gap: var(--op-2); flex-wrap: wrap; }
+.bf-title { font-weight: 600; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--op-ink-dim); }
+.bf-ok { color: var(--op-live); font-size: 12px; }
+.bf-missing { color: var(--op-warn); font-size: 12px; }
+.bf-cap { color: var(--op-ink-dim); font-size: 12px; }
+.bf-steps { display: grid; gap: var(--op-2); }
+.bf-step { display: grid; gap: var(--op-1); }
+.bf-row { display: flex; align-items: center; gap: var(--op-2); flex-wrap: wrap; }
+.bf-thumb { width: 160px; max-width: 100%; border: 1px solid var(--op-rule); border-radius: 4px; background: #000; display: block; }
+.bf-warn { color: var(--op-warn); font-size: 12px; }
