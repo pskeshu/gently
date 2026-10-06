@@ -338,9 +338,38 @@ class VisualizationServer(Service):
         # Thumbnails resolve via the projection uids added above.
         tracker = self.timelapse_tracker
         try:
+            # The tracker is the session's: nothing of the previous one stays.
+            # (It used to keep the old embryos, so a switch to a session with
+            # none showed ghost tiles pointing at images that were not there.)
             tracker.session_id = session_id
+            tracker.status = "IDLE"
+            tracker.started_at = None
+            tracker.embryos = {}
             tracker.detection_reasoning = {}
             tracker.projection_uids = {}
+            tracker.volume_paths = {}
+            tracker.total_timepoints = 0
+            for emb in embryos:
+                # Every embryo of the session is listed, with how far its
+                # volumes got, whether or not a stage was ever called on it.
+                eid = (
+                    emb.get("embryo_id")
+                    if isinstance(emb, dict)
+                    else getattr(emb, "embryo_id", None)
+                )
+                if not eid:
+                    continue
+                try:
+                    tps = self.gently_store.list_projection_timepoints(session_id, eid) or []
+                except Exception:
+                    tps = []
+                tracker.embryos[eid] = {
+                    "embryo_id": eid,
+                    "timepoints": max(tps, default=0),
+                    "is_complete": False,
+                    "detections": {},
+                    "current_stage": None,
+                }
             for emb in embryos:
                 eid = (
                     emb.get("embryo_id")
