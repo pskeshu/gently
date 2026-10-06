@@ -8,6 +8,11 @@
  * restored. Resuming is the one button that changes the live agent.
  */
 
+function ageDays(iso) {
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? (Date.now() - t) / 86400000 : Infinity;
+}
+
 const ReviewApp = {
     sessions: [],
     currentSession: null,
@@ -97,6 +102,7 @@ const ReviewApp = {
         if (s.embryo_count) parts.push(`${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}`);
         if (s.timepoints) parts.push(`${s.timepoints} timepoint${s.timepoints !== 1 ? 's' : ''}`);
         if (s.dic_frames) parts.push(`${s.dic_frames} DIC`);
+        if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
         return parts;
     },
@@ -132,22 +138,185 @@ const ReviewApp = {
 
     // ---- the list -----------------------------------------------------------
 
-    renderSessionList() {
-        const list = document.getElementById('session-list');
-        const filterCheckbox = document.getElementById('filter-with-content');
-        const filterWithContent = filterCheckbox ? filterCheckbox.checked : true;
+    // ---- filters ------------------------------------------------------------
+    // Chips, in groups. Within a group a session passes if it matches ANY chip
+    // that is on; across groups every group must pass; the search box narrows
+    // further. Each chip shows how many of the searched sessions it would keep,
+    // so a filter never hides sessions silently.
+
+    FILTERS: {
+        holds: {
+            label: 'Holds',
+            chips: {
+                embryos: { label: 'embryos', test: s => s.embryo_count > 0 },
+                brightfield: { label: 'brightfield', test: s => s.dic_frames > 0 },
+                empty: { label: 'empty', test: s => !(s.embryo_count > 0) && !(s.dic_frames > 0) },
+            },
+            defaults: ['embryos', 'brightfield'],
+        },
+        run: {
+            label: 'Run',
+            chips: {
+                interrupted: { label: 'cut short', test: (s, app) => (app.runOf(s) || {}).status === 'interrupted' },
+                complete: { label: 'complete', test: (s, app) => (app.runOf(s) || {}).status === 'complete' },
+                never: { label: 'never ran', test: (s, app) => !app.runOf(s) },
+            },
+            defaults: ['interrupted', 'complete', 'never'],
+        },
+        when: {
+            label: 'When',
+            chips: {
+                today: { label: 'today', test: s => ageDays(s.created_at) < 1 },
+                week: { label: 'this week', test: s => ageDays(s.created_at) >= 1 && ageDays(s.created_at) < 7 },
+                older: { label: 'older', test: s => ageDays(s.created_at) >= 7 },
+            },
+            defaults: ['today', 'week', 'older'],
+        },
+        has: {
+            label: 'Has',
+            any: true,   // these are extra requirements, not a partition: on = required
+            chips: {
+                diagnostics: { label: 'diagnostics recording', test: s => !!s.advanced_diagnostics },
+                references: { label: 'dark/flat refs', test: s => s.brightfield_references > 0 },
+            },
+            defaults: [],
+        },
+    },
+
+    SORTS: {
+        newest: { label: 'newest', key: s => s.created_at || '', desc: true },
+        timepoints: { label: 'most timepoints', key: s => Number(s.timepoints) || 0, desc: true },
+        size: { label: 'largest', key: s => Number(s.bytes) || 0, desc: true },
+    },
+
+    _filterState: null,
+
+    filterState() {
+        if (this._filterState) return this._filterState;
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('gently-session-filters') || 'null'); } catch (_) { saved = null; }
+        const state = { on: {}, sort: 'newest', open: false };
+        Object.entries(this.FILTERS).forEach(([g, def]) => {
+            const want = saved && saved.on && Array.isArray(saved.on[g]) ? saved.on[g] : def.defaults;
+            state.on[g] = want.filter(k => def.chips[k]);
+        });
+        if (saved && this.SORTS[saved.sort]) state.sort = saved.sort;
+        if (saved && typeof saved.open === 'boolean') state.open = saved.open;
+        this._filterState = state;
+        return state;
+    },
+
+    saveFilterState() {
+        try { localStorage.setItem('gently-session-filters', JSON.stringify(this._filterState)); } catch (_) { /* fine */ }
+    },
+
+    toggleChip(group, key) {
+        const st = this.filterState();
+        const on = new Set(st.on[group] || []);
+        if (on.has(key)) on.delete(key); else on.add(key);
+        st.on[group] = [...on];
+        this.saveFilterState();
+        this.renderSessionList();
+    },
+
+    setSort(key) {
+        if (!this.SORTS[key]) return;
+        this.filterState().sort = key;
+        this.saveFilterState();
+        this.renderSessionList();
+    },
+
+    resetFilters() {
+        this._filterState = null;
+        try { localStorage.removeItem('gently-session-filters'); } catch (_) { /* fine */ }
+        this.renderSessionList();
+    },
+
+    passesGroup(s, group, on) {
+        const def = this.FILTERS[group];
+        if (def.any) return on.every(k => def.chips[k].test(s, this));           // requirements
+        if (!on.length) return true;                                           // nothing chosen = no filter
+        return on.some(k => def.chips[k].test(s, this));                       // partition
+    },
+
+    searched() {
         const searchBox = document.getElementById('session-search');
         const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
+        const out = needle
+            ? this.sessions.filter(s => [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
+                .some(v => v && String(v).toLowerCase().includes(needle)))
+            : this.sessions.slice();
+        return { needle, sessions: out };
+    },
 
-        // Filter sessions based on checkbox, then on the search box
-        let filtered = this.sessions;
-        if (filterWithContent) {
-            filtered = this.sessions.filter(s => s.embryo_count > 0);
-        }
-        if (needle) {
-            filtered = filtered.filter(s => [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
-                .some(v => v && String(v).toLowerCase().includes(needle)));
-        }
+    // What the filters say, in a line: only what differs from the default.
+    filterSummary(st) {
+        const bits = [];
+        Object.entries(this.FILTERS).forEach(([g, def]) => {
+            const on = st.on[g] || [];
+            const same = [...on].sort().join() === [...def.defaults].sort().join();
+            if (same) return;
+            if (def.any) { on.forEach(k => bits.push(def.chips[k].label)); return; }
+            if (!on.length) bits.push(`any ${def.label.toLowerCase()}`);
+            else bits.push(on.map(k => def.chips[k].label).join(' or '));
+        });
+        if (st.sort !== 'newest') bits.push(this.SORTS[st.sort].label + ' first');
+        return bits;
+    },
+
+    toggleFilters() {
+        const st = this.filterState();
+        st.open = !st.open;
+        this.saveFilterState();
+        this.renderSessionList();
+    },
+
+    renderFilters(searchedSessions) {
+        const host = document.getElementById('session-filters');
+        if (!host) return;
+        const st = this.filterState();
+        const summary = this.filterSummary(st);
+        const isDefault = summary.length === 0;
+        const groups = Object.entries(this.FILTERS).map(([g, def]) => {
+            // The count a chip shows: the searched sessions that pass every OTHER
+            // group and this chip — what turning it on alone would keep.
+            const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || []));
+            const chips = Object.entries(def.chips).map(([k, chip]) => {
+                const n = searchedSessions.filter(s => others(s) && chip.test(s, this)).length;
+                const on = (st.on[g] || []).includes(k);
+                return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.any ? 'Require' : 'Show'} sessions: ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+            }).join('');
+            return `<div class="session-filter-label">${def.label}</div><div class="session-filter-chips">${chips}</div>`;
+        }).join('');
+        const sorts = Object.entries(this.SORTS).map(([k, so]) =>
+            `<button type="button" class="session-chip${st.sort === k ? ' is-on' : ''}" onclick="ReviewApp.setSort('${k}')">${so.label}</button>`).join('');
+        host.innerHTML = `
+            <button type="button" class="session-filters-toggle${isDefault ? '' : ' is-set'}" onclick="ReviewApp.toggleFilters()" aria-expanded="${st.open ? 'true' : 'false'}">
+                <span class="session-filters-caret">${st.open ? '▾' : '▸'}</span>
+                <span class="session-filters-word">Filters</span>
+                <span class="session-filters-summary">${isDefault ? 'embryos or brightfield · newest' : this.escapeHtml(summary.join(' · '))}</span>
+            </button>
+            ${st.open ? `<div class="session-filters-grid">${groups}<div class="session-filter-label">Sort</div><div class="session-filter-chips">${sorts}</div></div>
+            ${isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>'}` : ''}`;
+    },
+
+    applyFilters(sessions) {
+        const st = this.filterState();
+        const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [])));
+        const so = this.SORTS[st.sort] || this.SORTS.newest;
+        kept.sort((a, b) => {
+            const ka = so.key(a), kb = so.key(b);
+            const c = ka < kb ? -1 : ka > kb ? 1 : 0;
+            return so.desc ? -c : c;
+        });
+        return kept;
+    },
+
+    renderSessionList() {
+        const list = document.getElementById('session-list');
+        const { needle, sessions: searchedSessions } = this.searched();
+        this.renderFilters(searchedSessions);
+        const filtered = this.applyFilters(searchedSessions);
 
         if (this.sessions.length === 0) {
             list.innerHTML = '<div class="no-sessions">No sessions found</div>';
@@ -155,9 +324,10 @@ const ReviewApp = {
         }
 
         if (filtered.length === 0) {
-            list.innerHTML = needle
+            const hidden = searchedSessions.length;
+            list.innerHTML = needle && !hidden
                 ? `<div class="no-sessions">Nothing matches “${this.escapeHtml(needle)}”</div>`
-                : `<div class="no-sessions">No sessions with content<br><small>${this.sessions.length} empty session${this.sessions.length !== 1 ? 's' : ''} hidden</small></div>`;
+                : `<div class="no-sessions">Nothing passes these filters<br><small>${hidden} session${hidden !== 1 ? 's' : ''} hidden · <a href="#" onclick="event.preventDefault(); ReviewApp.resetFilters()">reset</a></small></div>`;
             return;
         }
 
@@ -750,7 +920,7 @@ const ReviewApp = {
         const right = document.getElementById('status-right');
         if (!left) return;
         const total = this.sessions.length;
-        const withContent = this.sessions.filter(s => s.embryo_count > 0).length;
+        const withContent = this.sessions.filter(s => s.embryo_count > 0 || s.dic_frames > 0).length;
         left.textContent = `${total} session${total !== 1 ? 's' : ''} · ${withContent} with content`;
         if (right && this.currentSession) {
             const embryos = (this.currentSession.embryos || []).length;

@@ -14,10 +14,9 @@
         <div class="sidebar-filter">
             <input type="search" class="session-search" id="session-search" placeholder="Find a session…"
                    aria-label="Find a session" oninput="ReviewApp.renderSessionList()">
-            <label class="filter-toggle">
-                <input type="checkbox" id="filter-with-content" checked onchange="ReviewApp.renderSessionList()">
-                <span>Only with content</span>
-            </label>
+            {# Filter chips: what a session holds, how its run ended, when, and
+               the recordings it carries. review.js draws them with counts. #}
+            <div class="session-filters" id="session-filters"></div>
         </div>
         <div class="session-list" id="session-list">
             <div class="loading">Loading sessions...</div>
