@@ -1557,6 +1557,9 @@
     color: var(--op-ink-dim);
 }
 .cal-num:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+/* Selects that name things, not numbers: wide enough for "embryo 02 — R² 0.96, scan". */
+select.cal-num { width: auto; min-width: 62px; max-width: 100%; }
+#op-cal-borrow-from { min-width: 15rem; }
 .cal-adv {
     margin-top: var(--op-2);
     padding: var(--op-2) var(--op-3);
