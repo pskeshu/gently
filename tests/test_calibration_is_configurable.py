@@ -51,6 +51,8 @@ def _cal_defaults() -> dict[str, object]:
         val = raw.split("//")[0].strip()
         if val in ("null", "true", "false"):
             out[key] = {"null": None, "true": True, "false": False}[val]
+        elif val[:1] in ("'", '"'):
+            out[key] = val.strip("'\"")
         else:
             out[key] = float(val)
     return out

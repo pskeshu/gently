@@ -1252,6 +1252,7 @@ const OperateManager = (function () {
     // tool's, so an untouched pane behaves exactly as before.
     const CAL_KEY = 'gently.calibrate.settings';
     const CAL_DEFAULTS = {
+        method: 'legacy',   // which routine: legacy sweep or hardware-timed scan
         edges: true,        // skip_edge_detection = !edges
         zbuf: 25,           // z_buffer_um
         estep: 0.05,        // edge_step (deg)
@@ -1280,6 +1281,7 @@ const OperateManager = (function () {
 
     function readCalForm() {
         _cal = {
+            method: $('cal-method') ? $('cal-method').value : _cal.method,
             edges: $('cal-edges') ? !!$('cal-edges').checked : _cal.edges,
             zbuf: calNum('cal-zbuf', CAL_DEFAULTS.zbuf),
             estep: calNum('cal-estep', CAL_DEFAULTS.estep),
@@ -1296,6 +1298,16 @@ const OperateManager = (function () {
     function renderCalForm() {
         const set = (id, v) => { const el = $(id); if (el && el.value !== String(v)) el.value = v; };
         if ($('cal-edges')) $('cal-edges').checked = !!_cal.edges;
+        set('cal-method', _cal.method || 'legacy');
+        const say = $('op-cal-method');
+        if (say) say.textContent = _cal.method === 'scan'
+            ? 'Scan — one slice-only volume for the extent, then piezo-only volumes at three '
+              + 'galvo positions, a line through every point. Seconds, hardware-timed. Needs the laser.'
+            : 'Legacy sweep — a galvo sweep read by the light-sheet camera, then a piezo focus '
+              + 'sweep. Needs the laser: the LED alone gives a DIC-like image with no nuclei to find.';
+        // The sweep's own knobs mean nothing to the scan.
+        ['cal-edges', 'cal-more'].forEach(id => { const el = $(id); if (el) el.closest('label, button').hidden = _cal.method === 'scan'; });
+        if (_cal.method === 'scan' && $('cal-adv')) $('cal-adv').hidden = true;
         set('cal-zbuf', _cal.zbuf); set('cal-estep', _cal.estep);
         set('cal-erange', _cal.erange); set('cal-etol', _cal.etol); set('cal-inset', _cal.inset);
         if ($('cal-gtop')) $('cal-gtop').value = _cal.gtop == null ? '' : _cal.gtop;
@@ -1309,6 +1321,11 @@ const OperateManager = (function () {
     // defaults travels, so the request says what the operator changed.
     function calibrationSettings() {
         const body = {};
+        if (_cal.method && _cal.method !== CAL_DEFAULTS.method) body.method = _cal.method;
+        if (_cal.method === 'scan') {
+            if (Number.isFinite(_cal.zbuf) && _cal.zbuf !== CAL_DEFAULTS.zbuf) body.z_buffer_um = _cal.zbuf;
+            return body;
+        }
         if (!_cal.edges) {
             body.skip_edge_detection = true;
             if (_cal.gtop != null) body.galvo_top = _cal.gtop;
@@ -1326,7 +1343,7 @@ const OperateManager = (function () {
     }
 
     function wireCalForm() {
-        ['cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
+        ['cal-method', 'cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
             'cal-gtop', 'cal-gbot'].forEach(id => {
             const el = $(id);
             if (el) el.addEventListener('change', readCalForm);

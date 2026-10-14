@@ -350,7 +350,13 @@ def create_router(server) -> APIRouter:
         Shared by the single-embryo route and the batch, so "calibrate this
         one" and "calibrate the rest" cannot quietly run different recipes.
         """
+        from gently.calibration import METHODS
+
         args: dict = {}
+        if payload.get("method") is not None:
+            if payload["method"] not in METHODS:
+                raise HTTPException(status_code=400, detail=f"method must be one of {METHODS}")
+            args["method"] = payload["method"]
         if payload.get("skip_edge_detection") is not None:
             args["skip_edge_detection"] = bool(payload["skip_edge_detection"])
         for key, cast, lo, hi in (
@@ -2337,17 +2343,29 @@ def create_router(server) -> APIRouter:
         elif source not in agent.experiment.embryos:
             raise HTTPException(status_code=404, detail=f"unknown source embryo {source}")
 
+        # Borrowing lends the slope and measures the target: it needs the rig.
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
         registry = get_tool_registry()
         try:
-            message = await registry.execute(
-                "apply_calibration_to_embryos",
-                {
-                    "source_embryo_id": source,
-                    "target_embryo_ids": [embryo_id],
-                    "overwrite_existing": True,
-                },
-                {"agent": agent},
+            message = await _run_cancellable_calibration(
+                agent,
+                registry.execute(
+                    "apply_calibration_to_embryos",
+                    {
+                        "source_embryo_id": source,
+                        "target_embryo_ids": [embryo_id],
+                        "overwrite_existing": True,
+                    },
+                    {"agent": agent, "client": client},
+                ),
+                embryo_id,
             )
+        except CalibrationAborted:
+            raise HTTPException(
+                status_code=409, detail=f"Calibration of {embryo_id} aborted by operator"
+            ) from None
         except Exception as exc:
             logger.exception("Borrowing calibration for %s failed", embryo_id)
             raise HTTPException(status_code=502, detail=f"apply failed: {exc}") from exc

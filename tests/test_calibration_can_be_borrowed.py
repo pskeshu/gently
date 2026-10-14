@@ -30,6 +30,7 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -125,7 +126,28 @@ def test_the_pane_only_offers_a_better_fit() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_auto_picks_the_best_other_embryo() -> None:
+def _measured(monkeypatch) -> list:
+    """Stand in for the scan: a borrow lends the slope and MEASURES the target.
+
+    Copying the lender's extent and depth onto the target is what blurred the
+    neuron embryos on 2026-10-13: those numbers are the lender's position, not
+    the optics. So the tool starts a scan from the lender's line, and the
+    target's own calibration is whatever that scan finds.
+    """
+    calls: list = []
+
+    async def fake_scan(embryo_id, context, *, start=None, n_focus=3, **_):
+        calls.append((embryo_id, start, n_focus))
+        emb = context["agent"].experiment.embryos[embryo_id]
+        emb.calibration = {"slope_um_per_deg": start[0], "offset_um": 7.0, "method": "scan"}
+        return f"\u2713 Calibrated {embryo_id} (scan)"
+
+    monkeypatch.setattr("gently.calibration.scan.scan_calibrate", fake_scan)
+    return calls
+
+
+def test_auto_picks_the_best_other_embryo(monkeypatch) -> None:
+    calls = _measured(monkeypatch)
     target = _emb("embryo_1")
     embryos = {
         "embryo_1": target,
@@ -135,11 +157,18 @@ def test_auto_picks_the_best_other_embryo() -> None:
     r = _app(embryos).post("/api/devices/embryos/embryo_1/calibration/borrow", json={})
     assert r.status_code == 200, r.text
     assert r.json()["source_embryo_id"] == "embryo_3"
-    assert target.calibration["r_squared_top"] == 0.97
+    assert calls == [("embryo_1", (100.0, 0.0), 1)], (
+        "the target was not measured from the lender's line"
+    )
+    assert target.calibration["borrowed_from"] == "embryo_3"
+    assert "r_squared_top" not in target.calibration, (
+        "the lender's fit quality was copied as the target's"
+    )
 
 
-def test_the_copy_does_not_alias_the_source() -> None:
+def test_the_copy_does_not_alias_the_source(monkeypatch) -> None:
     """Two embryos sharing one dict would drift together on the next fit."""
+    _measured(monkeypatch)
     source = _emb("embryo_2", top=0.9, bot=0.9)
     target = _emb("embryo_1")
     _app({"embryo_1": target, "embryo_2": source}).post(
@@ -329,7 +358,8 @@ def test_the_threshold_is_not_duplicated_as_a_literal() -> None:
     )
 
 
-def test_a_borrowed_fit_survives_a_restore(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_a_borrowed_fit_survives_a_restore(tmp_path, monkeypatch) -> None:
     """Otherwise it is durable by luck.
 
     A fit reaches `embryo.yaml` only when the agent's `auto_save` happens to
@@ -350,16 +380,19 @@ def test_a_borrowed_fit_survives_a_restore(tmp_path) -> None:
         emb.position_coarse = {"x": 1.0, "y": 2.0}
         store.register_embryo(session_id, emb.id, position_x=1.0, position_y=2.0)
 
+    _measured(monkeypatch)
     agent = MagicMock()
     agent.experiment.embryos = {"embryo_1": target, "embryo_2": source}
     agent.store = store
     agent.session_id = session_id
+    client = MagicMock()
+    client.is_connected = True
 
     fn = getattr(apply_calibration_to_embryos, "__wrapped__", apply_calibration_to_embryos)
-    fn(
+    await fn(
         source_embryo_id="embryo_2",
         target_embryo_ids=["embryo_1"],
-        context={"agent": agent},
+        context={"agent": agent, "client": client},
     )
 
     on_disk = store.get_embryo(session_id, "embryo_1")
