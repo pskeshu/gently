@@ -350,7 +350,13 @@ def create_router(server) -> APIRouter:
         Shared by the single-embryo route and the batch, so "calibrate this
         one" and "calibrate the rest" cannot quietly run different recipes.
         """
+        from gently.calibration import METHODS
+
         args: dict = {}
+        if payload.get("method") is not None:
+            if payload["method"] not in METHODS:
+                raise HTTPException(status_code=400, detail=f"method must be one of {METHODS}")
+            args["method"] = payload["method"]
         if payload.get("skip_edge_detection") is not None:
             args["skip_edge_detection"] = bool(payload["skip_edge_detection"])
         for key, cast, lo, hi in (
@@ -2300,15 +2306,13 @@ def create_router(server) -> APIRouter:
         dependencies=[Depends(require_control)],
     )
     async def borrow_calibration(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
-        """Copy another embryo's fit onto this one. Body: {"source": id|"auto"}.
+        """Lend another embryo's slope to this one and measure the rest.
 
-        Runs through the registered tool, so the pane and the agent apply
-        calibrations by exactly the same path — including its deep copy, which
-        is what stops the two embryos aliasing one calibration dict.
-
-        Unlike `calibrate`, this needs no microscope: it moves numbers between
-        two embryos. That is the point — it is what you do when the rig is busy
-        or the dose budget is spent.
+        Body: {"source": id|"auto"}. Any embryo with a fit can be the source.
+        Runs through the registered tool, so the pane and the agent borrow by
+        exactly the same path: a scan from the lender's line with one focus
+        point. It needs the microscope — copying the lender's extent and depth
+        instead is what imaged Ryan's neuron embryos at the wrong Z (#267).
         """
         # The import registers the tool as well as naming the ranking helper,
         # so the registry lookup below cannot miss.
@@ -2337,17 +2341,29 @@ def create_router(server) -> APIRouter:
         elif source not in agent.experiment.embryos:
             raise HTTPException(status_code=404, detail=f"unknown source embryo {source}")
 
+        # Borrowing lends the slope and measures the target: it needs the rig.
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
         registry = get_tool_registry()
         try:
-            message = await registry.execute(
-                "apply_calibration_to_embryos",
-                {
-                    "source_embryo_id": source,
-                    "target_embryo_ids": [embryo_id],
-                    "overwrite_existing": True,
-                },
-                {"agent": agent},
+            message = await _run_cancellable_calibration(
+                agent,
+                registry.execute(
+                    "apply_calibration_to_embryos",
+                    {
+                        "source_embryo_id": source,
+                        "target_embryo_ids": [embryo_id],
+                        "overwrite_existing": True,
+                    },
+                    {"agent": agent, "client": client},
+                ),
+                embryo_id,
             )
+        except CalibrationAborted:
+            raise HTTPException(
+                status_code=409, detail=f"Calibration of {embryo_id} aborted by operator"
+            ) from None
         except Exception as exc:
             logger.exception("Borrowing calibration for %s failed", embryo_id)
             raise HTTPException(status_code=502, detail=f"apply failed: {exc}") from exc

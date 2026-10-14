@@ -6,7 +6,6 @@ binary edge search, and full/fast calibration routines.
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from gently.core import spim_alignment
@@ -701,365 +700,6 @@ async def hybrid_focus_selection(
             pass
 
 
-async def binary_edge_search(
-    client,
-    claude_vision,
-    direction: str,
-    agent,
-    embryo_id: str,
-    piezo_heuristic: float,
-    max_range: float = 0.25,
-    num_iterations: int = 4,
-) -> tuple[float, int]:
-    """
-    Binary search for embryo edge in 4 steps.
-
-    Instead of linear sweep (10-20 exposures), uses binary search
-    to find embryo edge in 4-5 exposures.
-
-    Parameters
-    ----------
-    client : QueueServerClient
-        Microscope client
-    claude_vision : AsyncClaudeClient
-        Vision API client
-    direction : str
-        'top' (negative galvo) or 'bottom' (positive galvo)
-    agent : MicroscopyAgent
-        For viz server and state
-    embryo_id : str
-        Embryo identifier
-    piezo_heuristic : float
-        Expected piezo position at galvo=0
-    max_range : float
-        Maximum galvo range to search
-    num_iterations : int
-        Number of binary search steps
-
-    Returns
-    -------
-    tuple
-        (edge_galvo, num_exposures)
-    """
-    import tempfile
-    from pathlib import Path
-
-    from PIL import Image
-
-    sign = -1 if direction == "top" else 1
-    low, high = 0.0, max_range * sign
-    last_visible = 0.0
-    exposures = 0
-
-    logger.info("Binary edge search (%s): range 0 to %.3f deg", direction, high)
-
-    for i in range(num_iterations):
-        mid = (low + high) / 2
-
-        # Calculate piezo position using heuristic slope
-        HEURISTIC_SLOPE = 100.0  # µm/degree
-        piezo = piezo_heuristic + HEURISTIC_SLOPE * mid
-
-        # Capture image
-        result = await client.capture_lightsheet_image(
-            piezo_position=float(piezo), galvo_position=float(mid)
-        )
-        exposures += 1
-
-        if not result.get("success") or result.get("image") is None:
-            # Assume not visible on failure
-            high = mid if sign > 0 else low
-            low = mid if sign < 0 else high
-            continue
-
-        img = select_best_view(result["image"])
-
-        # Check visibility with Vision
-        img_norm = ((img - img.min()) / (img.max() - img.min() + 1e-8) * 255).astype(np.uint8)
-
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            temp_path = Path(f.name)
-            Image.fromarray(img_norm).save(temp_path)
-
-        try:
-            visible, feature_score, desc = await claude_vision.detect_embryo_presence(temp_path)
-        finally:
-            try:
-                temp_path.unlink()
-            except Exception:
-                pass
-
-        logger.debug(
-            "iter %d: galvo=%.3f deg, visible=%s, features=%s", i + 1, mid, visible, feature_score
-        )
-
-        if visible:
-            last_visible = mid
-            # Embryo visible, search further out
-            if sign > 0:
-                low = mid
-            else:
-                high = mid
-        else:
-            # Gone too far, search back
-            if sign > 0:
-                high = mid
-            else:
-                low = mid
-
-    return last_visible, exposures
-
-
-async def fast_calibrate_embryo(
-    embryo_id: str, context: dict, z_buffer_um: float = 25.0
-) -> tuple[bool, str, int]:
-    """
-    Vision-guided fast calibration using session slope.
-
-    For first embryo: Full bootstrap calibration to establish slope
-    For subsequent: Only find offset using hybrid FFT+Vision focus selection
-
-    Reduces exposures from 60-80 to 8-15 per embryo.
-
-    Parameters
-    ----------
-    embryo_id : str
-        Embryo to calibrate
-    context : Dict
-        Tool context with agent and client
-    z_buffer_um : float
-        Z padding above/below embryo for volume acquisition
-
-    Returns
-    -------
-    tuple
-        (success, message, total_exposures)
-    """
-    from gently.hardware.dispim.claude_client import AsyncClaudeClient
-
-    agent = ctx_get(context, "agent")
-    client = ctx_get(context, "client")
-
-    if not agent:
-        return False, "Error: No agent context", 0
-
-    if not client or not getattr(client, "is_connected", False):
-        return False, "Error: Not connected to microscope server", 0
-
-    embryo, err = get_embryo_or_error(agent, embryo_id)
-    if err:
-        return False, err, 0
-
-    # Get session prior
-    session_prior = agent.calibration_prior
-
-    # Initialize Claude Vision client
-    claude_vision = AsyncClaudeClient()
-
-    total_exposures = 0
-    HEURISTIC_SLOPE = 100.0  # Default µm/degree
-
-    logger.info("=== FAST CALIBRATION: %s ===", embryo_id)
-
-    # Check if this is bootstrap (first embryo) or fast mode
-    is_bootstrap = not session_prior.is_ready_for_fast_calibration()
-
-    if is_bootstrap:
-        logger.info("Mode: BOOTSTRAP (establishing session slope)")
-    else:
-        logger.info("Mode: FAST (using session slope %.2f um/deg)", session_prior.slope_um_per_deg)
-
-    # --- STEP 1: Binary Edge Detection ---
-    logger.info("Step 1: Binary edge detection...")
-
-    # Start with heuristic piezo at galvo=0
-    piezo_heuristic = session_prior.offset_um if session_prior.num_calibrations > 0 else 0.0
-
-    galvo_top, exp_top = await binary_edge_search(
-        client, claude_vision, "top", agent, embryo_id, piezo_heuristic
-    )
-    total_exposures += exp_top
-
-    galvo_bottom, exp_bottom = await binary_edge_search(
-        client, claude_vision, "bottom", agent, embryo_id, piezo_heuristic
-    )
-    total_exposures += exp_bottom
-
-    logger.info("Edges detected: top=%.3f deg, bottom=%.3f deg", galvo_top, galvo_bottom)
-
-    # Validate edges
-    if galvo_top >= galvo_bottom:
-        return (
-            False,
-            f"Invalid edges: top {galvo_top:.3f}° >= bottom {galvo_bottom:.3f}°",
-            total_exposures,
-        )
-
-    galvo_center = (galvo_top + galvo_bottom) / 2
-    galvo_extent = galvo_bottom - galvo_top
-
-    # --- STEP 2: Focus at Center Position ---
-    logger.info("Step 2: Focus at center (galvo=%.3f deg)...", galvo_center)
-
-    # Use session slope or heuristic
-    slope = (
-        session_prior.slope_um_per_deg
-        if session_prior.is_ready_for_fast_calibration()
-        else HEURISTIC_SLOPE
-    )
-    piezo_expected = slope * galvo_center + session_prior.offset_um
-
-    # Capture 3-point focus grid (±2µm)
-    focus_offsets = [-2.0, 0.0, 2.0]
-    focus_images = []
-
-    for offset in focus_offsets:
-        result = await client.capture_lightsheet_image(
-            piezo_position=float(piezo_expected + offset), galvo_position=float(galvo_center)
-        )
-        total_exposures += 1
-
-        if result.get("success") and result.get("image") is not None:
-            img = select_best_view(result["image"])
-            focus_images.append(img)
-        else:
-            focus_images.append(np.zeros((100, 100), dtype=np.uint8))
-
-    # --- STEP 3: Hybrid Focus Selection ---
-    logger.info("Step 3: Hybrid focus selection...")
-
-    best_idx, method, confidence = await hybrid_focus_selection(
-        focus_images, focus_offsets, claude_vision, agent, embryo_id
-    )
-
-    embryo_offset = focus_offsets[best_idx]
-    piezo_center = piezo_expected + embryo_offset
-
-    logger.info("Selected: offset %+.1f um via %s", embryo_offset, method)
-
-    # --- STEP 4: Refinement if Edge Picked ---
-    if best_idx in [0, len(focus_offsets) - 1]:
-        logger.info("Step 4: Refining (edge position picked)...")
-
-        # Extend search in direction of edge
-        if best_idx == 0:
-            extend_offsets = [-3.0, -4.0]
-        else:
-            extend_offsets = [3.0, 4.0]
-
-        for ext_offset in extend_offsets:
-            result = await client.capture_lightsheet_image(
-                piezo_position=float(piezo_expected + ext_offset),
-                galvo_position=float(galvo_center),
-            )
-            total_exposures += 1
-
-            if result.get("success") and result.get("image") is not None:
-                img = select_best_view(result["image"])
-                focus_images.append(img)
-                focus_offsets.append(ext_offset)
-
-        # Re-run hybrid selection
-        best_idx, method, confidence = await hybrid_focus_selection(
-            focus_images, focus_offsets, claude_vision, agent, embryo_id
-        )
-        embryo_offset = focus_offsets[best_idx]
-        piezo_center = piezo_expected + embryo_offset
-        logger.info("Refined: offset %+.1f um via %s", embryo_offset, method)
-    else:
-        logger.info("Step 4: Skipped (center position picked)")
-
-    # --- STEP 5: Bootstrap - Establish Session Slope ---
-    if is_bootstrap:
-        logger.info("Step 5: Bootstrap - calibrating second position for slope...")
-
-        # Pick second position 30% away from center
-        galvo_second = galvo_center + 0.3 * galvo_extent
-        piezo_expected_second = HEURISTIC_SLOPE * galvo_second + session_prior.offset_um
-
-        # Capture 3-point focus grid at second position
-        focus_images_2 = []
-        for offset in [-2.0, 0.0, 2.0]:
-            result = await client.capture_lightsheet_image(
-                piezo_position=float(piezo_expected_second + offset),
-                galvo_position=float(galvo_second),
-            )
-            total_exposures += 1
-
-            if result.get("success") and result.get("image") is not None:
-                img = select_best_view(result["image"])
-                focus_images_2.append(img)
-            else:
-                focus_images_2.append(np.zeros((100, 100), dtype=np.uint8))
-
-        best_idx_2, _, _ = await hybrid_focus_selection(
-            focus_images_2, [-2.0, 0.0, 2.0], claude_vision, agent, embryo_id
-        )
-        piezo_second = piezo_expected_second + [-2.0, 0.0, 2.0][best_idx_2]
-
-        # Calculate slope from two points
-        calibrated_slope = (piezo_second - piezo_center) / (galvo_second - galvo_center)
-        calibrated_offset = piezo_center - calibrated_slope * galvo_center
-
-        # Lock session slope
-        session_prior.lock_session_slope(calibrated_slope, 0.85, embryo_id)
-        logger.info(
-            "Session slope locked: %.2f um/deg (bootstrap embryo: %s)", calibrated_slope, embryo_id
-        )
-    else:
-        # Fast mode - use session slope, calculate offset
-        calibrated_slope = session_prior.slope_um_per_deg
-        calibrated_offset = piezo_center - calibrated_slope * galvo_center
-
-    # --- STEP 6: Store Calibration ---
-    embryo.calibration = {
-        "slope_um_per_deg": calibrated_slope,
-        "offset_um": calibrated_offset,
-        "galvo_top_deg": galvo_top,
-        "galvo_bottom_deg": galvo_bottom,
-        "galvo_calib_top_deg": galvo_center,
-        "galvo_calib_bottom_deg": galvo_center + 0.3 * galvo_extent
-        if is_bootstrap
-        else galvo_center,
-        "piezo_calib_top_um": piezo_center,
-        "piezo_calib_bottom_um": piezo_center
-        if not is_bootstrap
-        else piezo_center + calibrated_slope * 0.3 * galvo_extent,
-        "r_squared": 0.85,  # Assumed for Vision-based selection
-        "method": "fast_vision_guided",
-        "bootstrap": is_bootstrap,
-        "timestamp": datetime.now().isoformat(),
-    }
-
-    # Calculate volume parameters
-    extent_um = galvo_extent * calibrated_slope
-    total_range_um = extent_um + 2 * z_buffer_um
-    recommended_slices = max(30, min(150, int(total_range_um / 0.5)))  # 0.5µm per slice
-
-    embryo.calibration["volume_params"] = {
-        "piezo_start_um": calibrated_offset + calibrated_slope * galvo_top - z_buffer_um,
-        "piezo_end_um": calibrated_offset + calibrated_slope * galvo_bottom + z_buffer_um,
-        "total_range_um": total_range_um,
-        "recommended_slices": recommended_slices,
-    }
-
-    agent._save_state()
-    # A calibration the agent just made is a fact the pane shows: it read
-    # "not calibrated" until something else happened to redraw it.
-    agent.experiment.notify_embryos_changed()
-
-    msg = f"""\u2713 Fast calibration complete for {embryo_id}
-  Mode: {"BOOTSTRAP" if is_bootstrap else "FAST"}
-  Slope: {calibrated_slope:.2f} \u00b5m/\u00b0
-  Offset: {calibrated_offset:.2f} \u00b5m
-  Edges: {galvo_top:.3f}\u00b0 to {galvo_bottom:.3f}\u00b0 ({galvo_extent:.3f}\u00b0 extent)
-  Total exposures: {total_exposures}
-  Recommended slices: {recommended_slices}"""
-
-    logger.info("%s", msg)
-    return True, msg, total_exposures
-
-
 @tool(
     name="calibrate_embryo",
     description="""Run full piezo-galvo calibration for a specific embryo using Claude vision.
@@ -1078,11 +718,16 @@ Use after detection to prepare an embryo for volume acquisition. Takes ~2-4 minu
 
 The z_buffer_um parameter controls how much empty space is captured above and below the embryo.
 Default is 25\u00b5m. Increase for more context (useful for segmentation), decrease for faster
-acquisition.""",
+acquisition.
+
+``method="scan"`` runs the hardware-timed routine instead: one slice-only scan for the
+extent, piezo-only scans at three galvo positions, a line through every point. Seconds
+rather than minutes, and a real R\u00b2. ``"legacy"`` (default) is the sweep described above.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
         ToolExample("Calibrate embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Hardware-timed scan calibration", {"embryo_id": "embryo_1", "method": "scan"}),
         ToolExample("Skip edge detection", {"embryo_id": "embryo_2", "skip_edge_detection": True}),
         ToolExample("More Z padding", {"embryo_id": "embryo_1", "z_buffer_um": 25.0}),
     ],
@@ -1100,9 +745,15 @@ async def calibrate_embryo(
     z_buffer_um: float = 25.0,
     require_object: bool = True,
     use_v04_plan: bool = False,
+    method: str = "legacy",
     context: dict | None = None,
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection.
+
+    ``method`` picks the routine: ``"legacy"`` is the software sweep below;
+    ``"scan"`` is ``gently.calibration.scan`` — a few hardware-timed volumes
+    with one axis still, a line through every point. Both write the same
+    calibration dict and the same record.
 
     ``require_object`` (default True) takes ONE frame at the expected focus
     first and asks Claude whether anything is there. On an empty field this
@@ -1156,6 +807,17 @@ async def calibrate_embryo(
 
     if not client or not getattr(client, "is_connected", False):
         return f"Error: Not connected to microscope server. Cannot calibrate {embryo_id}."
+
+    from gently.calibration import METHODS
+
+    if method not in METHODS:
+        return f"Error: unknown calibration method {method!r}; one of {', '.join(METHODS)}"
+    if method == "scan":
+        from gently.calibration.scan import scan_calibrate
+
+        return await scan_calibrate(
+            embryo_id, context, z_buffer_um=z_buffer_um, require_object=require_object
+        )
 
     if use_v04_plan:
         # Escape hatch reserved for a future hardware-regression follow-up. It is
@@ -1447,6 +1109,12 @@ async def calibrate_embryo(
             "r_squared_top": results["top"]["r_squared"],
             "r_squared_bottom": results["bottom"]["r_squared"],
         }
+        # The pane redraws on this. The agent's path never sent it: a fit made
+        # by the agent showed up in the Operate pane only on the next refresh.
+        try:
+            agent.experiment.notify_embryos_changed()
+        except Exception:
+            logger.debug("notify_embryos_changed failed", exc_info=True)
 
         # Update session prior for cross-embryo learning
         avg_r_squared = (results["top"]["r_squared"] + results["bottom"]["r_squared"]) / 2
@@ -1560,6 +1228,7 @@ async def calibrate_all_embryos(
     edge_tolerance_deg: float = 0.20,
     inset_fraction: float = 0.4,
     require_object: bool = True,
+    method: str = "legacy",
     context: dict | None = None,
 ) -> str:
     """Calibrate embryos sequentially with Claude vision.
@@ -1600,6 +1269,7 @@ async def calibrate_all_embryos(
             edge_tolerance_deg=edge_tolerance_deg,
             inset_fraction=inset_fraction,
             require_object=require_object,
+            method=method,
             context=context,
         )
         # Get first two lines of result
@@ -1865,28 +1535,22 @@ def _format_quality(cal: dict) -> str:
 
 @tool(
     name="apply_calibration_to_embryos",
-    description="""Copy one embryo's calibration onto one or more target embryos. Useful when
-one embryo has a strong piezo-galvo fit and others can borrow it as-is.
+    description="""Borrow one embryo's slope for one or more target embryos, then measure the rest.
 
-**Quality metric is R²**, NOT galvo extent. The right "source" is the embryo with the
-highest ``min(r_squared_top, r_squared_bottom)`` — both ends of the galvo sweep need a clean
-Gaussian fit for the calibration to hold up at the volume edges. Wider extent just means a
-bigger embryo; it does not imply better calibration.
+Only the slope (and the offset, as a starting guess) transfers between embryos: it is a
+property of the optics. The extent and the depth are the target's own, and copying them
+from another embryo images the target at the wrong Z — that is what happened on 2026-10-13.
+So this runs ``gently.calibration.scan`` on each target starting from the source's line,
+with one focus scan instead of three: a short measurement, not a free one.
 
-**Auto-pick by quality**: pass ``source_embryo_id="auto"`` to let the tool pick the
-calibration with the highest min-R² across all currently-calibrated embryos. The response
-includes the per-embryo R² ranking so the agent can narrate the choice.
+**Quality metric is R\u00b2**, NOT galvo extent. Pass ``source_embryo_id="auto"`` to let the
+tool pick the calibration with the highest min-R\u00b2 across all currently-calibrated embryos.
+The response includes the per-embryo R\u00b2 ranking so the agent can narrate the choice.
 
 Pass ``target_embryo_ids=None`` (or omit it) to apply to ALL other embryos in the
-experiment that are not skipped.
-
-Caveats — calibration is position-dependent: piezo-galvo slope drifts across the XY field,
-and embryos may sit at slightly different Z depths. The agent should warn the user about this
-when applying broadly. Best practice is still to calibrate each embryo individually; this
-tool is for "good enough" propagation or when individual calibration would burn too much
-light dose.""",
+experiment that are not skipped.""",
     category=ToolCategory.HARDWARE,
-    requires_microscope=False,
+    requires_microscope=True,
     examples=[
         ToolExample(
             "Auto-pick the best calibration and apply it",
@@ -1898,26 +1562,30 @@ light dose.""",
         ),
     ],
 )
-def apply_calibration_to_embryos(
+async def apply_calibration_to_embryos(
     source_embryo_id: str,
     target_embryo_ids: list[str] | None = None,
     overwrite_existing: bool = True,
     context: dict | None = None,
 ) -> str:
-    """Broadcast one embryo's calibration to others.
+    """Lend one embryo's slope to others and measure each target's own extent and depth.
 
     ``source_embryo_id="auto"`` picks the embryo with the highest
-    ``min(r_squared_top, r_squared_bottom)`` calibration. The response
-    includes the full per-embryo R² ranking so the agent has the data
-    to narrate the choice (and the user can audit).
+    ``min(r_squared_top, r_squared_bottom)`` calibration.
     """
+    from gently.calibration.scan import scan_calibrate
     from gently.harness.tools.helpers import require_agent
 
     agent, err = require_agent(context)
     if err:
         return err
+    client = ctx_get(context, "client")
+    if not client or not getattr(client, "is_connected", False):
+        return (
+            "Error: Not connected to microscope server. "
+            "Borrowing a slope still measures the target."
+        )
 
-    # Auto-pick by quality.
     ranking_lines = []
     if source_embryo_id == "auto" or source_embryo_id == "best":
         ranked = rank_calibration_sources(agent.experiment.embryos)
@@ -1927,16 +1595,18 @@ def apply_calibration_to_embryos(
                 "Run calibrate_embryo / calibrate_all_embryos first."
             )
         source_embryo_id = ranked[0][0]
-        ranking_lines.append("Ranking by min(R²_top, R²_bot):")
+        ranking_lines.append("Ranking by min(R\u00b2_top, R\u00b2_bot):")
         for eid, _score, cal in ranked:
-            mark = " ← chosen" if eid == source_embryo_id else ""
+            mark = " \u2190 chosen" if eid == source_embryo_id else ""
             ranking_lines.append(f"  {eid}: {_format_quality(cal)}{mark}")
 
     if source_embryo_id not in agent.experiment.embryos:
         return f"Source embryo '{source_embryo_id}' not found."
     source = agent.experiment.embryos[source_embryo_id]
-    if not source.calibration:
-        return f"{source_embryo_id} has no calibration data to copy. Run calibrate_embryo first."
+    cal = source.calibration or {}
+    if not cal.get("slope_um_per_deg"):
+        return f"{source_embryo_id} has no calibration data to lend. Run calibrate_embryo first."
+    start = (float(cal["slope_um_per_deg"]), float(cal.get("offset_um", 0.0)))
 
     if target_embryo_ids is None:
         target_embryo_ids = [
@@ -1944,7 +1614,6 @@ def apply_calibration_to_embryos(
             for eid, e in agent.experiment.embryos.items()
             if eid != source_embryo_id and not e.should_skip
         ]
-
     if not target_embryo_ids:
         return "No target embryos. Nothing to do."
 
@@ -1957,13 +1626,11 @@ def apply_calibration_to_embryos(
         if tgt.calibration and not overwrite_existing:
             skipped.append((tid, "already calibrated (overwrite_existing=False)"))
             continue
-        # Deep-ish copy so subsequent mutations don't alias the source.
-        import copy
-
-        tgt.calibration = copy.deepcopy(source.calibration)
-        # To disk as well as memory: a borrowed fit that vanishes at the next
-        # restore is worse than not offering one, because the volumes taken in
-        # between still claim to be calibrated.
+        message = await scan_calibrate(tid, context, start=start, n_focus=1)
+        if not message.lstrip().startswith("\u2713"):
+            skipped.append((tid, message.splitlines()[0]))
+            continue
+        tgt.calibration["borrowed_from"] = source_embryo_id
         if not persist_calibration(agent, tgt):
             unsaved.append(tid)
         applied.append(tid)
@@ -1973,22 +1640,17 @@ def apply_calibration_to_embryos(
         lines.extend(ranking_lines)
         lines.append("")
     lines.append(
-        f"Applied {source_embryo_id}'s calibration "
-        f"({_format_quality(source.calibration)}) to {len(applied)} embryo(s):"
+        f"Borrowed {source_embryo_id}'s slope ({start[0]:.2f} \u00b5m/deg) and measured "
+        f"{len(applied)} embryo(s):"
     )
     lines.append("  " + (", ".join(applied) if applied else "(none)"))
     if skipped:
         lines.append(f"Skipped: {', '.join(f'{tid} ({reason})' for tid, reason in skipped)}")
     if unsaved:
         lines.append(
-            f"Not written to the session record: {', '.join(unsaved)} — applied in memory "
+            f"Not written to the session record: {', '.join(unsaved)} \u2014 applied in memory "
             "only, so it will not survive a restore."
         )
-    lines.append(
-        "Note: calibration is position-dependent — piezo-galvo slope can drift "
-        "across the XY field. Verify with a quick acquisition on each target "
-        "before committing to a full timelapse."
-    )
     return "\n".join(lines)
 
 

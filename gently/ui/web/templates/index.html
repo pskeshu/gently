@@ -745,13 +745,11 @@
                       <!-- Declares the method before it runs. Kesavan on the
                            walkthrough: "when there is a calibrate option, it should
                            show what is the method it is going to use to calibrate."
-                           There is one method on this rig, so it is named rather
-                           than offered as a choice. -->
+                           Follows the Method select below (#267). -->
                       <p class="op-cap" id="op-cal-method">
-                        Lineaging-embryo method — a galvo sweep read by the
-                        light-sheet camera, then a piezo focus sweep. Needs the
-                        laser: the LED alone gives a DIC-like image with no nuclei
-                        to find.
+                        Legacy sweep — a galvo sweep read by the light-sheet
+                        camera, then a piezo focus sweep. Needs the laser: the LED
+                        alone gives a DIC-like image with no nuclei to find.
                       </p>
                       <div class="op-row"><span class="op-label">Selected</span>
                         <span class="op-num" id="op-cal-target">no embryo selected</span></div>
@@ -775,6 +773,16 @@
                          are wrong to touch without a reason, so they sit behind
                          a disclosure. Defaults match calibrate_embryo. #}
                       <div class="op-row op-row-wrap cal-opts">
+                        {# Which routine runs. Legacy is the software sweep; scan is
+                           the hardware-timed one (#267). Both stay until the rig
+                           says which to keep. #}
+                        <label class="cal-opt">
+                          <span class="op-label">Method</span>
+                          <select class="cal-num" id="cal-method">
+                            <option value="legacy" selected>Legacy sweep</option>
+                            <option value="scan">Scan</option>
+                          </select>
+                        </label>
                         <label class="cal-opt">
                           <input type="checkbox" id="cal-edges" checked>
                           <span class="op-label">Find galvo edges</span>
@@ -821,11 +829,14 @@
                       </div>
 
                       <div class="op-actions">
-                        {# The cheapest calibration is no calibration. When another
-                           embryo on the slide already carries a good fit, borrowing
-                           it costs zero exposures — the tool has existed for this
-                           all along and no surface offered it. Hidden entirely when
-                           nothing has a fit to lend. #}
+                        {# Borrowing lends another embryo's slope and measures this
+                           embryo's own extent and focus from it: a short scan, not
+                           a free copy (#267). Any embryo with a fit can lend, best
+                           first; hidden entirely when nothing has a fit to lend. #}
+                        <label class="cal-opt" id="op-cal-borrow-row" hidden>
+                          <span class="op-label">From</span>
+                          <select class="cal-num" id="op-cal-borrow-from"></select>
+                        </label>
                         <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
                         {# The rest of the slide, in one go. Absent when every
                            embryo already has a fit — there is nothing to say. #}
