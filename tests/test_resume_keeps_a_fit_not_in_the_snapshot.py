@@ -30,16 +30,17 @@ def test_a_fit_kept_as_a_dict_survives_the_resume(tmp_path) -> None:
     assert experiment.embryos["embryo_1"].calibration["slope_um_per_deg"] == 98.2
 
 
-def test_a_fit_kept_as_json_text_still_resumes(tmp_path) -> None:
+def test_a_fit_kept_as_json_text_still_resumes(tmp_path, monkeypatch) -> None:
     """The SQLite-era shape is read the same way it always was."""
     import json
+    from typing import Any
 
     store = FileStore(root=tmp_path)
     sid = store.create_session("fit-text", name="fit-text")
     store.register_embryo(sid, "embryo_1", position_x=1.0, position_y=2.0, calibration=FIT)
-    rows = store.list_embryos(sid)
+    rows: list[Any] = [dict(r) for r in store.list_embryos(sid)]
     rows[0]["calibration"] = json.dumps(FIT)
-    store.list_embryos = lambda _sid: rows  # type: ignore[method-assign]
+    monkeypatch.setattr(store, "list_embryos", lambda _sid: rows)
 
     experiment = ExperimentState()
     ok, _ = SessionManager(store, tmp_path)._resume_session(sid, experiment)
