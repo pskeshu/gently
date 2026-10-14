@@ -107,11 +107,18 @@ class SessionManager:
         for e in store_embryos:
             eid = e["embryo_id"]
             if eid not in experiment.embryos:
+                # FileStore hands the fit back as a dict; the SQLite store
+                # handed back a JSON string. Resuming a session whose embryo
+                # was registered with a fit but never reached the snapshot
+                # raised a TypeError here, and the whole resume failed.
+                cal = e.get("calibration") or {}
+                if isinstance(cal, str):
+                    cal = json.loads(cal)
                 experiment.add_embryo(
                     embryo_id=eid,
                     position=e.get("position_coarse") or {},
                     position_fine=e.get("position_fine") or {},
-                    calibration=json.loads(e["calibration"]) if e.get("calibration") else {},
+                    calibration=cal,
                 )
 
         self.store.touch_session(session_id)
