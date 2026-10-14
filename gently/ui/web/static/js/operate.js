@@ -1343,6 +1343,8 @@ const OperateManager = (function () {
     }
 
     function wireCalForm() {
+        const from = $('op-cal-borrow-from');
+        if (from) from.addEventListener('change', () => renderBorrow(_embryos.find(e => e.id === _selected)));
         ['cal-method', 'cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
             'cal-gtop', 'cal-gbot'].forEach(id => {
             const el = $(id);
@@ -1578,19 +1580,19 @@ const OperateManager = (function () {
         return ends.length ? Math.min(...ends) : Number(c.r_squared || 0);
     };
 
-    function bestSource(forEmbryo) {
-        const others = _embryos.filter(e => e.id !== (forEmbryo || {}).id
-            && !e.should_skip && hasFit(e));
-        if (!others.length) return null;
-        others.sort((a, b) => fitScore(b) - fitScore(a));
-        const best = { emb: others[0], score: fitScore(others[0]) };
-        // Only offer a fit that is actually BETTER than the one this embryo
-        // already has. Otherwise the pane offers a downgrade, or — once a fit
-        // has been borrowed — offers to borrow a copy of itself back, which is
-        // what the source embryo did after the first borrow.
-        if (hasFit(forEmbryo) && best.score <= fitScore(forEmbryo)) return null;
-        return best;
+    // Every embryo that could lend this one its slope, best fit first. Not
+    // one: the operator may know the slide better than the R² does, and may
+    // want the lineaging embryo's line for a neuron embryo whatever the
+    // numbers say. Two are never offered: the embryo itself, and any embryo
+    // that borrowed FROM it — that is its own line coming back.
+    function lenders(forEmbryo) {
+        const me = (forEmbryo || {}).id;
+        const out = _embryos.filter(e => e.id !== me && !e.should_skip && hasFit(e)
+            && (e.calibration || {}).borrowed_from !== me);
+        out.sort((a, b) => fitScore(b) - fitScore(a));
+        return out.map(e => ({ emb: e, score: fitScore(e) }));
     }
+    function bestSource(forEmbryo) { return lenders(forEmbryo)[0] || null; }
 
     // ── the pre-flight refusal ──────────────────────────────────────────────
     // A calibration that declines to start has to say why in the operator's
@@ -1709,40 +1711,55 @@ const OperateManager = (function () {
 
     function renderBorrow(emb) {
         const btn = $('op-cal-borrow'), note = $('op-cal-borrow-note');
-        const best = emb ? bestSource(emb) : null;
+        const row = $('op-cal-borrow-row'), sel = $('op-cal-borrow-from');
+        if (!btn || !note || !row || !sel) return;
+        const who = emb ? lenders(emb) : [];
         // Nothing to lend, nothing to say, no room taken.
-        if (!btn || !note) return;
-        if (!best) { btn.hidden = true; note.hidden = true; return; }
-        btn.hidden = false;
-        note.hidden = false;
-        btn.textContent = `Borrow embryo ${labelFor(best.emb)}’s fit`;
+        if (!who.length) { btn.hidden = true; note.hidden = true; row.hidden = true; return; }
+        const keep = sel.value;
+        sel.innerHTML = '';
+        who.forEach(({ emb: e, score }) => {
+            const o = document.createElement('option');
+            o.value = e.id;
+            const how = (e.calibration || {}).method || 'legacy';
+            o.textContent = `embryo ${labelFor(e)} — R² ${score.toFixed(2)}, ${how}`;
+            sel.appendChild(o);
+        });
+        sel.value = who.some(w => w.emb.id === keep) ? keep : who[0].emb.id;
+        btn.hidden = false; note.hidden = false; row.hidden = false;
+        const pick = who.find(w => w.emb.id === sel.value) || who[0];
+        btn.textContent = `Borrow embryo ${labelFor(pick.emb)}’s slope`;
         // Calling a bad fit "the best on the slide" is true and misleading at
         // once. Below the module's own low-confidence line the offer stays —
         // an operator may know something the R² does not — but it says what it
-        // is rather than recommending it. This is not hypothetical: the rig's
-        // own embryo_1 carries R² 0.06.
-        note.textContent = best.score < LOW_CONFIDENCE_R2
-            ? `Embryo ${labelFor(best.emb)}'s fit is poor (R² ${best.score.toFixed(2)}) — `
+        // is rather than recommending it.
+        const poor = pick.score < LOW_CONFIDENCE_R2;
+        const worse = hasFit(emb) && pick.score <= fitScore(emb);
+        note.textContent = poor
+            ? `Embryo ${labelFor(pick.emb)}'s fit is poor (R² ${pick.score.toFixed(2)}) — `
               + `below the low-confidence line. Calibrating this embryo is probably `
-              + `better than copying that.`
-            : `Copies the best fit on the slide (embryo ${labelFor(best.emb)}, `
-              + `R² ${best.score.toFixed(2)}) instead of spending ~60 exposures. `
-              + `Slope drifts across the field — verify with one acquisition `
-              + `before a timelapse.`;
-        note.classList.toggle('op-cap-warn', best.score < LOW_CONFIDENCE_R2);
+              + `better than starting from that.`
+            : `Starts from embryo ${labelFor(pick.emb)}'s slope (R² ${pick.score.toFixed(2)}) `
+              + `and measures this embryo's own extent and focus: a short scan, not a copy.`
+              + (worse ? ` This embryo's own fit scores at least as well.` : '');
+        note.classList.toggle('op-cap-warn', poor || worse);
     }
 
     async function borrowCalibration() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
         const b = $('op-cal-borrow'), out = $('op-cal-result');
         const label = b ? b.textContent : '';
-        if (b) { b.disabled = true; b.textContent = 'Copying…'; }
-        if (out) out.textContent = 'copying…';
+        const sel = $('op-cal-borrow-from');
+        const source = (sel && sel.value) || 'auto';
+        if (b) { b.disabled = true; b.textContent = 'Measuring…'; }
+        if (out) out.textContent = 'measuring…';
+        if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(_selected);
         try {
             const d = await postJSON(
-                `/api/devices/embryos/${_selected}/calibration/borrow`, { source: 'auto' });
+                `/api/devices/embryos/${_selected}/calibration/borrow`, { source });
             const cal = d.calibration || {};
-            toast(`Applied ${d.source_embryo_id}'s calibration`);
+            toast(`Calibrated from ${d.source_embryo_id}'s slope`);
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(true, 'calibrated');
             // Write it onto the local copy rather than waiting for the
             // EMBRYOS_UPDATE broadcast: the render in `finally` would
             // otherwise redraw "not calibrated" over an embryo the server has
@@ -1750,6 +1767,7 @@ const OperateManager = (function () {
             const mine = _embryos.find(e => e.id === _selected);
             if (mine) mine.calibration = cal;
         } catch (e) {
+            if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
             toastFail(`Could not borrow a fit (${why(e)})`);
         } finally {
             if (b) { b.disabled = false; b.textContent = label; }

@@ -829,11 +829,14 @@
                       </div>
 
                       <div class="op-actions">
-                        {# The cheapest calibration is no calibration. When another
-                           embryo on the slide already carries a good fit, borrowing
-                           it costs zero exposures — the tool has existed for this
-                           all along and no surface offered it. Hidden entirely when
-                           nothing has a fit to lend. #}
+                        {# Borrowing lends another embryo's slope and measures this
+                           embryo's own extent and focus from it: a short scan, not
+                           a free copy (#267). Any embryo with a fit can lend, best
+                           first; hidden entirely when nothing has a fit to lend. #}
+                        <label class="cal-opt" id="op-cal-borrow-row" hidden>
+                          <span class="op-label">From</span>
+                          <select class="cal-num" id="op-cal-borrow-from"></select>
+                        </label>
                         <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
                         {# The rest of the slide, in one go. Absent when every
                            embryo already has a fit — there is nothing to say. #}

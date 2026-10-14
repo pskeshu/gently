@@ -2306,15 +2306,13 @@ def create_router(server) -> APIRouter:
         dependencies=[Depends(require_control)],
     )
     async def borrow_calibration(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
-        """Copy another embryo's fit onto this one. Body: {"source": id|"auto"}.
+        """Lend another embryo's slope to this one and measure the rest.
 
-        Runs through the registered tool, so the pane and the agent apply
-        calibrations by exactly the same path — including its deep copy, which
-        is what stops the two embryos aliasing one calibration dict.
-
-        Unlike `calibrate`, this needs no microscope: it moves numbers between
-        two embryos. That is the point — it is what you do when the rig is busy
-        or the dose budget is spent.
+        Body: {"source": id|"auto"}. Any embryo with a fit can be the source.
+        Runs through the registered tool, so the pane and the agent borrow by
+        exactly the same path: a scan from the lender's line with one focus
+        point. It needs the microscope — copying the lender's extent and depth
+        instead is what imaged Ryan's neuron embryos at the wrong Z (#267).
         """
         # The import registers the tool as well as naming the ranking helper,
         # so the registry lookup below cannot miss.

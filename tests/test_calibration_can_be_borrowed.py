@@ -111,14 +111,20 @@ def test_the_pane_and_the_tool_use_the_same_metric() -> None:
     )
 
 
-def test_the_pane_only_offers_a_better_fit() -> None:
+def test_the_pane_lists_every_lender_but_never_the_embryo_itself() -> None:
+    """Any embryo with a fit can lend; the operator may know the slide better
+    than the R² does. Two are never offered: the embryo itself, and one that
+    borrowed FROM it — after one borrow that would be its own line coming back."""
     js = OPERATE_JS.read_text(encoding="utf-8")
-    best = re.search(r"function bestSource\(forEmbryo\) \{(.*?)\n    \}", js, re.S)
-    assert best, "bestSource is gone"
-    assert "best.score <= fitScore(forEmbryo)" in best.group(1), (
-        "the pane offers to copy a fit no better than the one the embryo has — "
-        "after one borrow that means offering an embryo a copy of its own fit"
+    fn = re.search(r"function lenders\(forEmbryo\) \{(.*?)\n    \}", js, re.S)
+    assert fn, "lenders is gone — the pane is back to offering one source"
+    body = fn.group(1)
+    assert "e.id !== me" in body
+    assert "borrowed_from !== me" in body, (
+        "an embryo that borrowed from this one is offered as its lender"
     )
+    html = (OPERATE_JS.parents[2] / "templates" / "index.html").read_text(encoding="utf-8")
+    assert 'id="op-cal-borrow-from"' in html, "the pane has no list to choose a lender from"
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +348,7 @@ def test_a_poor_fit_is_not_offered_as_the_best_one() -> None:
         "the best one on the slide"
     )
     render = re.search(r"function renderBorrow\(emb\) \{(.*?)\n    \}", js, re.S)
-    assert render and "best.score < LOW_CONFIDENCE_R2" in render.group(1), (
+    assert render and "pick.score < LOW_CONFIDENCE_R2" in render.group(1), (
         "a poor fit is advertised as 'the best fit on the slide' again"
     )
 
