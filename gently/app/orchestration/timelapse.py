@@ -55,6 +55,30 @@ TRACE_BASE_PATH = settings.storage.traces_dir
 logger = logging.getLogger(__name__)
 
 
+def reporter_pseudo_stage(intensity_level: str | None, has_hatched: bool) -> str:
+    """The stage-shaped word a reporter detector's reading is filed under.
+
+    The rules and the tab read stages, so a reading becomes one. Only MEDIUM
+    and STRONG are ``lit_up`` (the speed-up trigger); WEAK is informational;
+    UNCERTAIN means the classifier would not commit, so nothing fires. NONE
+    is ``no_signal``: a dark reporter, never ``no_object`` — that word is the
+    perception path's empty field, and the role's patience gives up on it.
+    """
+    if intensity_level == "SATURATING":
+        return "lit_up_saturating"
+    if intensity_level in ("STRONG", "MEDIUM"):
+        return "lit_up"
+    if intensity_level == "WEAK":
+        return "weak_signal"
+    if intensity_level == "UNCERTAIN":
+        return "uncertain"
+    if has_hatched:
+        return "hatched"
+    if intensity_level == "NONE":
+        return "no_signal"
+    return intensity_level or "unknown"
+
+
 class TimelapseOrchestrator:
     """
     Background timelapse manager
@@ -3576,27 +3600,12 @@ class TimelapseOrchestrator:
         # Only MEDIUM/STRONG → "lit_up" (the speedup trigger). WEAK is
         # informational only ("weak_signal"). UNCERTAIN means the
         # classifier refused to commit — emit "uncertain" so no rule fires.
-        if intensity_level == "SATURATING":
-            pseudo_stage = "lit_up_saturating"
-        elif intensity_level in ("STRONG", "MEDIUM"):
-            pseudo_stage = "lit_up"
-        elif intensity_level == "WEAK":
-            pseudo_stage = "weak_signal"
-        elif intensity_level == "UNCERTAIN":
-            pseudo_stage = "uncertain"
-        elif has_hatched:
-            pseudo_stage = "hatched"
-        else:
-            pseudo_stage = (
-                "no_object" if intensity_level == "NONE" else (intensity_level or "unknown")
-            )
-
-        # Track consecutive no_object across roles — drives the role-based
-        # terminal stop in _check_stop_condition.
-        if pseudo_stage == "no_object":
-            embryo_state.consecutive_no_object += 1
-        else:
-            embryo_state.consecutive_no_object = 0
+        pseudo_stage = reporter_pseudo_stage(intensity_level, has_hatched)
+        # The role's patience (``no_object_consecutive_terminal``) counts the
+        # perception path's empty fields. A reporter that has not switched on
+        # is not an empty field: on 2026-10-21 three nuclear-marker embryos
+        # were dropped after five rounds of "no puncta". This path leaves the
+        # counter alone; the detector says an embryo is gone with has_hatched.
 
         if self._store and self._perception_run_id and self._session_id:
             try:

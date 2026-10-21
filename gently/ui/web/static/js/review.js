@@ -43,11 +43,54 @@ const ReviewApp = {
             const data = await resp.json();
             this.sessions = data.sessions || [];
             this.renderSessionList();
+            this.fillSizes();
         } catch (e) {
             list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);
         }
         this.watchForFiling();
+    },
+
+    // ---- sizes come after the list. A walk over a session's files is the one
+    // slow read, and a rig has hundreds of sessions: "i went to sessions tab -
+    // it took forever to load". The list carries the sizes the server has
+    // cached; the rest are asked for in batches, newest first, and each batch
+    // repaints only the rows it filled, so nothing scrolls or flickers. ----
+    _sizesRun: 0,
+
+    async fillSizes() {
+        const run = ++this._sizesRun;
+        const todo = this.sessions.filter(s => s.bytes == null).map(s => s.session_id);
+        const BATCH = 24;
+        for (let i = 0; i < todo.length; i += BATCH) {
+            if (run !== this._sizesRun) return;   // a newer load took over
+            const ids = todo.slice(i, i + BATCH);
+            let sizes = {};
+            try {
+                const r = await fetch(`/api/sessions/sizes?ids=${encodeURIComponent(ids.join(','))}`);
+                sizes = (await r.json()).sizes || {};
+            } catch (e) {
+                console.warn('Session sizes:', e);
+                return;
+            }
+            if (run !== this._sizesRun) return;
+            const filled = this.sessions.filter(s => s.bytes == null && sizes[s.session_id] != null);
+            filled.forEach(s => { s.bytes = sizes[s.session_id]; });
+            this.repaintHoldings(filled);
+        }
+    },
+
+    /** What a row says it holds, repainted in place for these sessions only. */
+    repaintHoldings(sessions) {
+        const list = document.getElementById('session-list');
+        if (!list) return;
+        sessions.forEach(s => {
+            const meta = list.querySelector(`.session-item[data-session-id="${CSS.escape(s.session_id)}"] .session-meta`);
+            if (!meta) return;
+            meta.innerHTML = `<span>${this.formatDate(s.created_at)}</span>`
+                + this.holdings(s).map(h => `<span class="dot"></span><span>${h}</span>`).join('')
+                + this.runBadge(this.runOf(s));
+        });
     },
 
     // ---- projects: a session has one home, and may serve items elsewhere ----

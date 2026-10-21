@@ -314,6 +314,9 @@ body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 .ac-choice-label { font-weight: 600; font-size: 13px; }
 .ac-choice-desc { font-size: 12px; color: var(--text-muted); }
 .ac-choice-picked { border-color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 8%, transparent); }
+/* The agent's marking request: two ways to answer, side by side. */
+.ac-marking-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.ac-marking .ac-choice-opt { flex: 1 1 160px; }
 .ac-choice-wake {
     border-color: rgba(167, 139, 250, 0.45);
     border-left: 3px solid var(--accent-purple);

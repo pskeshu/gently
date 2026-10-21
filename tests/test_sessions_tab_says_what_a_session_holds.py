@@ -99,7 +99,11 @@ class TestTheList:
         _session_with_a_run(store)
         s = _client(store).get("/api/sessions").json()["sessions"][0]
         assert (s["embryo_count"], s["timepoints"], s["bf_frames"]) == (1, 3, 1)
-        assert s["bytes"] > 0  # what the folder occupies on disk
+        # What the folder occupies on disk is not walked for the list; the
+        # tab asks for it after, in batches (see TestTheListIsQuick).
+        assert s["bytes"] is None
+        sizes = _client(store).get("/api/sessions/sizes", params={"ids": "s1"}).json()["sizes"]
+        assert sizes["s1"] > 0
         assert s["brightfield_references"] == 0  # dark/flat sets, for the "has refs" chip
         # A finished run is described, but is not an interrupted one the gate would offer.
         assert s["run"] is None
@@ -344,3 +348,57 @@ class TestTheFilters:
         assert '<span class="n">${n}</span>' in REVIEW_JS
         # Brightfield-only sessions are content: the old checkbox hid them.
         assert "defaults: ['embryos', 'brightfield']" in REVIEW_JS
+
+
+class TestTheListIsQuick:
+    """ "i went to sessions tab - it took forever to load."
+
+    Three hundred sessions, and for each the list parsed every brightfield
+    sidecar (a night is thousands) and walked every file for its size. Now
+    frames are counted by name, sizes come from the cache or not at all, and
+    the tab asks for the missing sizes in batches once the list is drawn.
+    """
+
+    def test_frames_are_counted_by_name_not_by_reading_every_sidecar(self, store, monkeypatch):
+        _session_with_a_run(store)
+        store.put_snapshot("s1", "operate_marked", np.zeros((2, 2), dtype=np.uint16), metadata={})
+
+        def parsed_them_all(*_a, **_k):
+            raise AssertionError("parsed every sidecar")
+
+        monkeypatch.setattr(store, "list_snapshots", parsed_them_all)
+        s = _client(store).get("/api/sessions").json()["sessions"][0]
+        assert s["bf_frames"] == 1, "one bf frame and one marked view: the marked view is not bf"
+
+    def test_the_count_by_name_agrees_with_the_listing(self, store):
+        store.create_session("s2")
+        for n in range(3):
+            store.put_snapshot("s2", "bf", np.zeros((2, 2), dtype=np.uint16), metadata={"frame": n})
+        store.put_snapshot("s2", "operate_marked", np.zeros((2, 2), dtype=np.uint16), metadata={})
+        assert store.count_snapshots("s2", "bf") == len(store.list_snapshots("s2", "bf")) == 3
+        assert store.count_snapshots("s2", "operate_marked") == 1
+        assert store.count_snapshots("no-such-session", "bf") == 0
+
+    def test_a_cached_size_is_in_the_list_and_an_unknown_one_is_asked_for(self, store):
+        _session_with_a_run(store)
+        sessions_routes._SIZE_CACHE.clear()
+        c = _client(store)
+        assert c.get("/api/sessions").json()["sessions"][0]["bytes"] is None
+        sizes = c.get("/api/sessions/sizes", params={"ids": "s1,no-such-session"}).json()["sizes"]
+        assert sizes["s1"] > 0 and sizes["no-such-session"] is None
+        # Walked once, the list knows it from then on.
+        assert c.get("/api/sessions").json()["sessions"][0]["bytes"] == sizes["s1"]
+
+    def test_the_active_session_is_always_walked_fresh(self, store):
+        _session_with_a_run(store)
+        sessions_routes._SIZE_CACHE.clear()
+        s = _client(store, active="s1").get("/api/sessions").json()["sessions"][0]
+        assert s["active"] and s["bytes"] > 0
+
+    def test_the_tab_draws_the_list_then_asks_for_sizes_in_batches(self):
+        load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:1200]
+        assert load.index("this.renderSessionList();") < load.index("this.fillSizes();")
+        fill = REVIEW_JS[REVIEW_JS.index("async fillSizes() {") :][:1600]
+        assert "fetch(`/api/sessions/sizes?ids=" in fill
+        assert "s.bytes == null" in fill, "only the sizes the list did not carry are asked for"
+        assert "this.repaintHoldings(filled)" in fill, "a batch repaints its rows, not the list"

@@ -172,6 +172,7 @@ async def detect_embryos(
             if emb.get("pixel_x") is not None and emb.get("pixel_y") is not None
         ]
 
+        before = set(agent.experiment.embryos)
         marked, err = await _route_to_map_view(
             agent=agent,
             image=image,
@@ -182,6 +183,18 @@ async def detect_embryos(
         if err:
             return err
         marked = marked or []
+        # The pane has a Register of its own. An operator who pressed it while
+        # the agent waited put the embryos in the roster through that door and
+        # answered the agent with an empty list. Say so, with the ids, rather
+        # than "0", which sent the agent straight back to detect again.
+        meanwhile = [eid for eid in agent.experiment.embryos if eid not in before]
+        if not marked and meanwhile:
+            return (
+                f"The map answered with no marks, but {len(meanwhile)} embryo(s) were "
+                f"registered from the pane while it waited: {', '.join(meanwhile)}. "
+                "They are in the experiment with role 'unassigned'; use them, do not "
+                "detect again. Assign roles with assign_embryo_roles if the run needs them."
+            )
 
         # Register confirmed embryos. Use existing IDs from SAM where possible;
         # assign fresh ones for manual additions.

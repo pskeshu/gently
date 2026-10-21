@@ -1387,7 +1387,9 @@ def create_router(server) -> APIRouter:
     async def led_set(payload: dict = Body(...)):  # noqa: B008
         """Set the LED shutter state. Body: {"state": "Open"|"Closed"}."""
         client = _resolve_client()
-        if client is None:
+        # The pane closes the LED as it opens, which can be before the device
+        # layer is up: that is a 503, not a traceback in the log.
+        if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
             return await client.set_led(str(payload.get("state", "Closed")))

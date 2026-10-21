@@ -36,3 +36,12 @@ test('unknown and missing stages fall back to grey', () => {
     assert.equal(stageColor('bogus'), '#8b949e');
     assert.equal(stageColor(null), '#8b949e');
 });
+
+test("a reporter's reading has a colour of its own, off the stage ramp", () => {
+    const fallback = stageColor('no_such_stage');
+    for (const w of ['no_signal', 'weak_signal', 'lit_up', 'lit_up_saturating']) {
+        assert.notEqual(stageColor(w), fallback, w);
+    }
+    assert.notEqual(stageColor('lit_up'), stageColor('weak_signal'));
+    assert.equal(stageColor('uncertain'), fallback, 'uncertain says nothing, and looks it');
+});

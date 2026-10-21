@@ -162,6 +162,16 @@ class DiSPIMCamera:
         """Set camera region of interest."""
         self.core.setROI(self.name, x, y, width, height)
 
+    def clear_roi(self) -> None:
+        """Back to the full sensor.
+
+        Calibration and volume acquisition set the light-sheet band and leave
+        it; whoever wants the whole frame afterwards has to ask for it.
+        ``clearROI`` acts on the core's current camera, hence the activate.
+        """
+        self._ensure_active()
+        self.core.clearROI()
+
     def set_trigger_mode(self, mode: str):
         """
         Set trigger mode.

@@ -108,6 +108,7 @@ dev = [
     # audit, not pass/fail). After `uv sync`, run `playwright install chromium`
     # once. Dev-only; never in the published runtime.
     "playwright>=1.44.0",
+    "httpx2>=2.13.1",
 ]
 # Everything the microscope computer needs to drive hardware. Default-on (see
 # [tool.uv] default-groups); drop on a machine with no microscope via

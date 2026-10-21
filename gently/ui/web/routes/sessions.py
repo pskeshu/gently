@@ -149,10 +149,16 @@ _SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _SIZE_TTL_S = 900.0
 
 
-def folder_bytes(folder: Path | None, *, fresh: bool = False) -> int | None:
+def folder_bytes(
+    folder: Path | None, *, fresh: bool = False, cached_only: bool = False
+) -> int | None:
     """What a session folder occupies on disk, summed over every file.
     Cached for fifteen minutes per folder unless ``fresh``: a walk reads
-    metadata only, but the list asks for every session at once."""
+    metadata only, but the list asks for every session at once.
+
+    ``cached_only`` answers from the cache, stale or not, and None when the
+    folder has never been walked: the list says what it knows at once and
+    the tab asks ``/api/sessions/sizes`` for the rest."""
     if folder is None:
         return None
     import os
@@ -161,8 +167,10 @@ def folder_bytes(folder: Path | None, *, fresh: bool = False) -> int | None:
     key = str(folder)
     now = time.monotonic()
     hit = _SIZE_CACHE.get(key)
-    if hit and not fresh and now - hit[0] < _SIZE_TTL_S:
+    if hit and not fresh and (cached_only or now - hit[0] < _SIZE_TTL_S):
         return hit[1]
+    if cached_only and not fresh:
+        return None
     total = 0
     try:
         for root, _dirs, files in os.walk(folder):
@@ -281,7 +289,12 @@ def create_router(server) -> APIRouter:
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),
                         "bf_frames": _bf_count(store, sid),
-                        "bytes": folder_bytes(store._session_dir(sid), fresh=sid == active_id),
+                        # The walk over a session's files is the one slow read
+                        # left here: a cached size comes now, the rest arrive
+                        # through /api/sessions/sizes once the list is drawn.
+                        "bytes": folder_bytes(
+                            store._session_dir(sid), fresh=sid == active_id, cached_only=True
+                        ),
                         "brightfield_references": _reference_count(store, sid),
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
@@ -314,10 +327,37 @@ def create_router(server) -> APIRouter:
             return 0
 
     def _bf_count(store, sid: str) -> int:
+        """By file name: parsing every sidecar of every session took a minute."""
         try:
+            count = getattr(store, "count_snapshots", None)
+            n = count(sid, "bf") if callable(count) else None
+            if isinstance(n, int):
+                return n
             return len(store.list_snapshots(sid, "bf") or [])
         except Exception:
             return 0
+
+    @router.get("/api/sessions/sizes")
+    async def session_sizes(ids: str = ""):
+        """What the named sessions occupy on disk, walked now.
+
+        The list leaves ``bytes`` null for a session whose size is not
+        cached; the tab asks here in batches after it has drawn, so a rig
+        with hundreds of sessions shows its list at once. Declared before
+        ``/api/sessions/{session_id}``, which would take "sizes" for an id.
+        """
+        store = _file_store()
+        wanted = [sid for sid in (ids or "").split(",") if sid][:64]
+        if store is None or not wanted:
+            return {"sizes": {}}
+        active_id = _active_session_id()
+
+        def gather() -> dict[str, int | None]:
+            return {
+                sid: folder_bytes(store._session_dir(sid), fresh=sid == active_id) for sid in wanted
+            }
+
+        return {"sizes": await asyncio.to_thread(gather)}
 
     @router.get("/api/sessions/resumable")
     async def resumable_sessions(limit: int = 3, scan: int = 40):

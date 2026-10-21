@@ -92,7 +92,7 @@ def _make_dl():
     dl = DeviceLayerServer.__new__(DeviceLayerServer)
     dl.system = type("S", (), {"core": FakeCore()})()
     dl.devices = {
-        "camera": type("C", (), {"name": "HamCam1"})(),
+        "camera": type("C", (), {"name": "HamCam1", "clear_roi": lambda self: None})(),
         "scanner": FakeScanner(),
         "piezo": FakePiezo(),
     }
@@ -137,3 +137,30 @@ async def test_exposure_change_restarts_sequence():
     await asyncio.to_thread(dl._grab_lightsheet_frame_sync)
     assert dl.system.core.stopped >= 1 and dl.system.core.started == starts + 1
     assert dl.system.core.exposure == 30.0
+
+
+@pytest.mark.asyncio
+async def test_the_live_view_comes_back_full_frame():
+    """A calibration or a volume leaves the camera on the 2048x512 light-sheet
+    band and nothing used to put it back: returning to the SPIM camera view
+    showed the strip. Every reconfigure now clears the ROI, and only then —
+    a grab that does not reconfigure does not touch it."""
+    dl = _make_dl()
+    dl._state_pause_counter = 0
+    dl._ls_target_max_dim = 512
+    dl._ls_jpeg_quality = 70
+    dl._ls_params = {"galvo": 0.0, "piezo": 50.0, "exposure": 10.0, "mode": "snap"}
+    dl._ls_seq_started = False
+    dl._ls_applied = {}
+    dl._ls_interval_sec = 0.0
+    cleared = []
+    dl.devices["camera"] = type(
+        "C", (), {"name": "HamCam1", "clear_roi": lambda self: cleared.append(1)}
+    )()
+    await asyncio.to_thread(dl._grab_lightsheet_frame_sync)
+    assert len(cleared) == 1, "the first grab after a start did not clear the ROI"
+    await asyncio.to_thread(dl._grab_lightsheet_frame_sync)
+    assert len(cleared) == 1, "a grab with nothing to reconfigure cleared the ROI again"
+    dl._stop_lightsheet_sequence_sync()
+    await asyncio.to_thread(dl._grab_lightsheet_frame_sync)
+    assert len(cleared) == 2, "coming back after a stop did not clear the ROI"

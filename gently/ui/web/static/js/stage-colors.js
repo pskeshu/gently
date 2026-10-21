@@ -21,8 +21,13 @@ const stageColor = (() => {
         hatching: '#fde725',
         hatched: '#fef3c7',
     };
+    // A reporter's reading, filed as a stage-shaped word (gently/app/orchestration/timelapse.py
+    // reporter_pseudo_stage). Off the ramp on purpose: a signal is not a stage.
+    const SIGNAL = {
+        no_signal: '#4b5563', uncertain: '#8b949e', weak_signal: '#d97706', lit_up: '#16a34a', lit_up_saturating: '#dc2626',
+    };
     const FALLBACK = '#8b949e';
-    return (name) => RAMP[stageKey(name)] || FALLBACK;
+    return (name) => RAMP[stageKey(name)] || SIGNAL[stageKey(name)] || FALLBACK;
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { stageColor, stageKey };
