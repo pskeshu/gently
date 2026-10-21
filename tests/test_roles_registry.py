@@ -147,8 +147,12 @@ def test_default_role_is_in_registry():
     assert DEFAULT_ROLE in REGISTRY
 
 
-def test_default_role_is_test():
-    assert DEFAULT_ROLE == "test"
+def test_default_role_is_lineaging():
+    """ "change default so we go to lineage i think so we go to the perception
+    route": an embryo nobody has said anything about is staged, not read by a
+    reporter detector it may not carry."""
+    assert DEFAULT_ROLE == "lineaging"
+    assert REGISTRY[DEFAULT_ROLE].detector_name == "perception"
 
 
 # ---------------------------------------------------------------------------

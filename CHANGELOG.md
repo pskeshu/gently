@@ -899,6 +899,15 @@ while it ran. Four embryos scanned in 37 s each with the slope agreeing to
   hands the agent. The LED command the pane sends as it opens is a 503 before
   the device layer is up, not a traceback.
 
+**The default role is lineaging**
+
+- An embryo nobody has said anything about was `test`: read by the
+  dopaminergic reporter detector, never staged. It is `lineaging` now, the
+  nuclear perception route, at every door — the state, the store, the detect
+  tools, the pane's toggle and roster. `lineaging` keeps the old default's
+  patience for an embryo out of frame (five empty fields, not two). `test`
+  is the reporter run's role, chosen on purpose.
+
 **Dev**
 
 - `httpx2` in the dev group: Starlette's test client asks for it.

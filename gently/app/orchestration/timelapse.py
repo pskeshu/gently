@@ -30,6 +30,7 @@ from gently.core.imaging import (
     projection_three_view,
 )
 from gently.harness.error_log import GlobalErrorLog
+from gently.harness.roles import DEFAULT_ROLE
 from gently.harness.state import EmbryoState
 from gently.organisms import get_organism
 from gently.settings import settings
@@ -729,7 +730,7 @@ class TimelapseOrchestrator:
         if self._dose_budget_base_ms is not None and embryo.id not in self._dose_budget_exceeded:
             from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
 
-            role_def = _ROLE_REGISTRY.get(getattr(embryo, "role", "test"))
+            role_def = _ROLE_REGISTRY.get(getattr(embryo, "role", DEFAULT_ROLE))
             mult = role_def.photodose_budget_multiplier if role_def else 1.0
             budget = self._dose_budget_base_ms * mult
             if embryo.total_exposure_ms > budget:
@@ -1647,7 +1648,7 @@ class TimelapseOrchestrator:
         # embryo that hatched / drifted out of the FOV.
         from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
 
-        role = _ROLE_REGISTRY.get(getattr(embryo_state, "role", "test"))
+        role = _ROLE_REGISTRY.get(getattr(embryo_state, "role", DEFAULT_ROLE))
         if (
             role is not None
             and role.no_object_consecutive_terminal is not None
@@ -1715,7 +1716,7 @@ class TimelapseOrchestrator:
             test_states = [
                 e
                 for e in self._embryo_states.values()
-                if getattr(e, "role", "test") == "test" and not e.should_skip
+                if getattr(e, "role", DEFAULT_ROLE) == "test" and not e.should_skip
             ]
             if not test_states:
                 return None  # no test embryos → not applicable
@@ -2430,7 +2431,7 @@ class TimelapseOrchestrator:
             embryo_ids = [
                 eid
                 for eid, e in self._embryo_states.items()
-                if getattr(e, "role", "test") == "test"
+                if getattr(e, "role", DEFAULT_ROLE) == "test"
             ]
         rule = IntervalRule(
             name="test_onset_speedup",
@@ -2475,7 +2476,7 @@ class TimelapseOrchestrator:
             embryo_ids = [
                 eid
                 for eid, e in self._embryo_states.items()
-                if getattr(e, "role", "test") == "test"
+                if getattr(e, "role", DEFAULT_ROLE) == "test"
             ]
         rule = BurstRule(
             name="test_burst_on_good_structure",
@@ -2520,7 +2521,7 @@ class TimelapseOrchestrator:
             embryo_ids = [
                 eid
                 for eid, e in self._embryo_states.items()
-                if getattr(e, "role", "test") == "test"
+                if getattr(e, "role", DEFAULT_ROLE) == "test"
             ]
         rule = PowerRule(
             name=f"test_saturation_rampdown_{wavelength}",
@@ -2666,7 +2667,7 @@ class TimelapseOrchestrator:
         embryos = {}
         for eid, e in self._embryo_states.items():
             embryos[eid] = {
-                "role": getattr(e, "role", "test"),
+                "role": getattr(e, "role", DEFAULT_ROLE),
                 "cadence_phase": getattr(e, "cadence_phase", "normal"),
                 "interval_seconds": e.interval_seconds,
                 "next_due_at": _iso(getattr(e, "next_due_at", None)),
@@ -3719,7 +3720,7 @@ class TimelapseOrchestrator:
         # Perceiver-based flow below.
         from gently.harness.roles import REGISTRY as ROLE_REGISTRY
 
-        role_def = ROLE_REGISTRY.get(getattr(embryo_state, "role", "test"))
+        role_def = ROLE_REGISTRY.get(getattr(embryo_state, "role", DEFAULT_ROLE))
         detector_name = role_def.detector_name if role_def else None
 
         if detector_name and detector_name != "perception":

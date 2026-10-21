@@ -1950,12 +1950,12 @@ const OperateManager = (function () {
     async function toggleRole(id) {
         const emb = _embryos.find(e => e.id === id);
         if (!emb) return;
-        const cur = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
-        const next = cur === 'calibration' ? 'test' : 'calibration';
+        const cur = (emb.role && emb.role !== 'unassigned') ? emb.role : 'lineaging';
+        const next = cur === 'calibration' ? 'lineaging' : 'calibration';
         emb.role = next;
         publishRoster();
         const roles = {};
-        _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test'; });
+        _embryos.forEach(e => { roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'lineaging'; });
         try { await postJSON('/api/embryos/roles', { roles }); }
         catch (e) { toastFail(`Roles failed (${why(e)})`); }
     }
@@ -3312,7 +3312,7 @@ const OperateManager = (function () {
 
         _markSession = {
             sessionId: d.session_id,
-            defaultRole: d.default_role || 'test',
+            defaultRole: d.default_role || 'lineaging',
             pixelSizeUm: d.pixel_size_um || undefined,
         };
 
@@ -3402,7 +3402,7 @@ const OperateManager = (function () {
     function cycleMarkerRole(index) {
         const m = _markers[index];
         if (!m || !_markSession) return;
-        m.role = m.role === 'calibration' ? 'test' : 'calibration';
+        m.role = m.role === 'calibration' ? 'lineaging' : 'calibration';
         drawMarkers();
         publishMarking();
     }

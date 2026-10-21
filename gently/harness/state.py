@@ -132,10 +132,11 @@ class EmbryoState:
     nickname: str | None = None  # Agent-assigned: "the fast one"
     user_label: str | None = None  # User-provided: "control_1"
     # Role key into gently.harness.roles.REGISTRY. Drives cadence policy,
-    # detector selection, photodose budget, UI presentation. Default "test"
-    # is the safe choice — accidental Calibration→Test only over-protects;
-    # accidental Test→Calibration would burn extra dose on the precious sample.
-    role: str = "test"
+    # detector selection, photodose budget, UI presentation. The default is
+    # the registry's (lineaging since 2026-10-21): an embryo nobody has said
+    # anything about is staged by the nuclear perception pipeline, not read
+    # by a reporter detector it may not carry.
+    role: str = "lineaging"
     # Free-form biological sample descriptor (orthogonal to role). Examples:
     # "pan-nuclear GFP", "H2B-mCherry", "wild-type". None = unspecified.
     strain: str | None = None
@@ -1014,7 +1015,7 @@ class ExperimentState:
         user_label: str | None = None,
         confidence: float = 0.0,
         uid: str | None = None,
-        role: str = "test",
+        role: str = "lineaging",
         position_fine: dict | None = None,
     ):
         """Register new embryo.

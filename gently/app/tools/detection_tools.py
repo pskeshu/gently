@@ -21,6 +21,7 @@ from gently.core.coordinates import (
     pixel_to_stage_position,
     stage_to_pixel_position,
 )
+from gently.harness.roles import DEFAULT_ROLE
 from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
@@ -30,7 +31,7 @@ async def _route_to_map_view(
     image: np.ndarray,
     initial_markers: list[dict],
     stage_position: tuple[float, float],
-    default_role: str = "test",
+    default_role: str = DEFAULT_ROLE,
     pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
     timeout: float | None = None,
 ) -> tuple[list[dict] | None, str | None]:
@@ -118,7 +119,7 @@ async def detect_embryos(
     min_relative_peak: float | None = None,
     min_area: int | None = None,
     max_area: int | None = None,
-    default_role: str = "test",
+    default_role: str = DEFAULT_ROLE,
     context: dict | None = None,
 ) -> str:
     """Detect embryos via SAM + edit/assign roles in the web map view."""
@@ -291,7 +292,7 @@ the role assigned in the map view; existing embryos remain untouched.""",
 )
 async def manual_mark_embryos(
     exposure_ms: float | None = None,
-    default_role: str = "test",
+    default_role: str = DEFAULT_ROLE,
     context: dict | None = None,
 ) -> str:
     """Manual marking via the web map view."""
@@ -430,7 +431,7 @@ Use when user wants to adjust existing detection results (e.g., "edit embryos",
 )
 async def edit_embryos(
     exposure_ms: float | None = None,
-    default_role: str = "test",
+    default_role: str = DEFAULT_ROLE,
     context: dict | None = None,
 ) -> str:
     """Edit existing embryos via the web map view."""

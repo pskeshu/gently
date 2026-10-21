@@ -227,7 +227,7 @@ const RosterPanel = (() => {
 
     function row(emb, selected, inSet, opts) {
         const xy = xyOf(emb);
-        const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'test';
+        const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'lineaging';
         const isRef = role === 'calibration';
 
         const buttons = opts.actions.map(name => {

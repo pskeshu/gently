@@ -818,7 +818,7 @@ class FileStore:
                 "calibration": calibration
                 if calibration is not None
                 else existing.get("calibration"),
-                "role": role if role is not None else existing.get("role", "test"),
+                "role": role if role is not None else existing.get("role", "lineaging"),
                 "strain": strain if strain is not None else existing.get("strain"),
                 "created_at": existing.get("created_at", _now()),
             }
@@ -831,7 +831,8 @@ class FileStore:
                 "position_coarse": position_coarse,
                 "position_fine": position_fine,
                 "calibration": calibration,
-                "role": role if role is not None else "test",
+                # the registry's default (gently.harness.roles.DEFAULT_ROLE)
+                "role": role if role is not None else "lineaging",
                 "strain": strain,
                 "created_at": _now(),
             }

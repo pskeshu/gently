@@ -17,8 +17,12 @@ Built-in roles:
   more photodose. Standard perception pipeline.
 - ``lineaging``: lineage-tracing reference — tracks nuclei/divisions. Often
   a pan-nuclear strain, but the strain is separate from this use.
-- ``unassigned``: explicit "not yet classified" state. Treated like ``test``
-  for safety until the user resolves the assignment.
+- ``unassigned``: explicit "not yet classified" state. Imaged like the
+  default until the user resolves the assignment.
+
+The default is ``lineaging``: an embryo nobody has said anything about goes
+to the nuclear perception pipeline and is staged. ``test`` is the reporter
+run's role, chosen on purpose.
 
 Role classes
 ------------
@@ -60,7 +64,7 @@ class EmbryoRole:
 REGISTRY: dict[str, EmbryoRole] = {
     "unassigned": EmbryoRole(
         name="unassigned",
-        description="No role assigned yet — treated like 'test' for safety.",
+        description="No role assigned yet — imaged like the default, lineaging.",
         default_cadence_seconds=300.0,
         detector_name=None,
         photodose_budget_multiplier=1.0,
@@ -111,12 +115,14 @@ REGISTRY: dict[str, EmbryoRole] = {
         photodose_budget_multiplier=5.0,
         ui_color="#009e73",  # Okabe-Ito bluish green — CVD-safe vs vermilion/sky blue
         ui_icon="triangle",
-        no_object_consecutive_terminal=2,  # reference embryos don't drift back
+        # The default role since 2026-10-21, so the patience of the old default:
+        # an embryo that is the run's reason can pop out of frame and back.
+        no_object_consecutive_terminal=5,
         role_class="reference",
     ),
 }
 
-DEFAULT_ROLE: str = "test"
+DEFAULT_ROLE: str = "lineaging"
 
 
 def get_role(name: str) -> EmbryoRole:
