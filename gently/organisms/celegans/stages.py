@@ -99,6 +99,31 @@ class DevelopmentalStage(str, Enum):
 # Convenience: list of stage string values (for backwards compatibility)
 STAGES = DevelopmentalStage.ordered_values()
 
+# WormBase life-stage ontology terms (WBls), checked against the OBO release of
+# 2026-10-20. ``early`` spans gastrulation through early morphogenesis, so it
+# takes the gastrulating term; ``hatching``, ``arrested`` and ``no_object`` have
+# no term. A stage call, an export or a note can carry the id and link to it.
+WBLS: dict[str, str] = {
+    DevelopmentalStage.EARLY.value: "WBls:0000010",
+    DevelopmentalStage.BEAN.value: "WBls:0000016",
+    DevelopmentalStage.COMMA.value: "WBls:0000017",
+    DevelopmentalStage.FOLD_1_5.value: "WBls:0000018",
+    DevelopmentalStage.FOLD_2.value: "WBls:0000019",
+    DevelopmentalStage.PRETZEL.value: "WBls:0000020",
+    DevelopmentalStage.HATCHED.value: "WBls:0000024",
+}
+
+
+def ontology_id(stage: str | None) -> str | None:
+    """The WBls id of a stage name, or None when the stage has no term."""
+    return WBLS.get(str(stage)) if stage else None
+
+
+def ontology_url(term: str) -> str:
+    """Where a WBls or WBbt id resolves for a person."""
+    kind = "life_stage" if term.startswith("WBls:") else "anatomy_term"
+    return f"https://wormbase.org/species/all/{kind}/{term}"
+
 
 # Stage boundary definitions for VLM guidance
 # Each stage has:

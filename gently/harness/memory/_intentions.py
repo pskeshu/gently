@@ -17,7 +17,6 @@ from .model import (
     Intentions,
     PlannedSession,
     PlannedSessionStatus,
-    Project,
     SessionIntent,
     Status,
 )
@@ -35,7 +34,6 @@ class IntentionsMixin(StoreProtocol):
     def _load_intentions(self) -> Intentions:
         return Intentions(
             campaigns=self.get_active_campaigns(),
-            projects=self.get_active_projects(),
             planned_sessions=self.get_upcoming_sessions(limit=5),
             current_focus=self.get_state("current_focus"),
             session_intent=self.get_current_session_intent(),
@@ -373,47 +371,6 @@ class IntentionsMixin(StoreProtocol):
             parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
             is_shared=bool(d.get("is_shared", 0)),
-            created_at=datetime.fromisoformat(d["created_at"]),
-            updated_at=datetime.fromisoformat(d["updated_at"]),
-        )
-
-    # ==================================================================
-    # Projects
-    # ==================================================================
-
-    def create_project(
-        self,
-        description: str,
-        campaign_id: str | None = None,
-        project_id: str | None = None,
-    ) -> str:
-        """Create a new project. Returns project ID."""
-        pid = project_id or self._gen_id()
-        now = self._now()
-        with self._tx():
-            self._conn.execute(
-                "INSERT INTO projects"
-                " (id, description, campaign_id, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'active', ?, ?)",
-                (pid, description, campaign_id, now, now),
-            )
-        logger.info(f"Created project {pid}: {description}")
-        return pid
-
-    def get_active_projects(self) -> list[Project]:
-        """Get all active projects."""
-        rows = self._conn.execute(
-            "SELECT * FROM projects WHERE status = 'active' ORDER BY created_at DESC"
-        ).fetchall()
-        return [self._row_to_project(row) for row in rows]
-
-    def _row_to_project(self, row: sqlite3.Row) -> Project:
-        d = dict(row)
-        return Project(
-            id=d["id"],
-            description=d["description"],
-            campaign_id=d.get("campaign_id"),
-            status=Status(d.get("status", "active")),
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
         )

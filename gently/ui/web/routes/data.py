@@ -3178,6 +3178,32 @@ def create_router(server) -> APIRouter:
         # Skip seeding when start was a no-op ("already running") — don't append a
         # phantom active tactic for a run we didn't start.
         already_running = isinstance(result, str) and result.startswith("Timelapse already running")
+        # A run set up from a plan item ("Set up on Devices" on the Projects
+        # tab): file the session under the item's project through the one door,
+        # and let the plan say what actually ran, as the operator's own.
+        plan_item_id = payload.get("plan_item_id") or None
+        if plan_item_id and cs is not None and sid and not already_running:
+            try:
+                from dataclasses import asdict as _asdict
+
+                from gently.app.filing import file_session_under
+                from gently.harness.memory.acquisition import structure_from_payload
+
+                item = cs.get_plan_item(str(plan_item_id))
+                if item is not None:
+                    file_session_under(
+                        getattr(agent, "store", None), cs, sid, item.campaign_id, item.id
+                    )
+                    spec = _asdict(item.imaging_spec) if item.imaging_spec else {}
+                    spec["acquisition"] = structure_from_payload(payload)
+                    prov = dict(spec.get("provenance") or {})
+                    prov["acquisition"] = {"source": "typed", "text": "Start on Devices › Operate"}
+                    spec["provenance"] = prov
+                    cs.update_plan_item(item_id=item.id, spec=spec)
+            except Exception:
+                logger.debug(
+                    "filing the run under plan item %s failed", plan_item_id, exc_info=True
+                )
         if cs is not None and sid and not already_running:
             try:
                 import uuid as _uuid

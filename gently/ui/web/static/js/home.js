@@ -135,11 +135,26 @@ const HomeApp = (() => {
         });
     }
 
+    // Project names for the session rows; loadCampaigns fills the same map.
+    async function ensureProjectNames() {
+        if (Object.keys(_projectNames).length) return;
+        try {
+            const data = await (await fetch('/api/campaigns')).json();
+            (data.campaigns || []).forEach(t => { const c = t.campaign || {}; if (c.id) _projectNames[c.id] = c.shorthand || c.description || c.id; });
+        } catch (_) { /* the chip falls back to the id */ }
+    }
+
+    function projectChip(s) {
+        if (!s.project_id) return '<span class="home-tag home-tag-unfiled" title="In no project yet">unfiled</span>';
+        const name = _projectNames[s.project_id] || String(s.project_id).slice(0, 8);
+        return `<span class="home-tag home-tag-project" title="Its project">▣ ${escapeHtml(name)}</span>`;
+    }
+
     async function loadSessions() {
         const el = document.getElementById('home-recent-sessions');
         if (!el) return;
         try {
-            const data = await (await fetch('/api/sessions')).json();
+            const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames()]);
             const sessions = (data.sessions || []).slice(0, SESSIONS_N);
             if (!sessions.length) { empty(el, 'No sessions yet.'); return; }
             el.innerHTML = sessions.map(s => {
@@ -151,7 +166,7 @@ const HomeApp = (() => {
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;
@@ -166,25 +181,71 @@ const HomeApp = (() => {
         } catch (e) { empty(el, 'Could not load sessions.'); }
     }
 
+    // Projects: name, done count, last run, live, and what waits on a person.
+    let _projectNames = {};
     async function loadCampaigns() {
         const el = document.getElementById('home-recent-campaigns');
         if (!el) return;
         try {
             const data = await (await fetch('/api/campaigns')).json();
-            const items = (data.campaigns || []).slice(0, CAMPAIGNS_N);
-            if (!items.length) { empty(el, 'No plans yet.'); return; }
-            el.innerHTML = items.map(t => {
+            const trees = data.campaigns || [];
+            _projectNames = {};
+            trees.forEach(t => { const c = t.campaign || {}; if (c.id) _projectNames[c.id] = c.shorthand || c.description || c.id; });
+            const items = trees.slice(0, CAMPAIGNS_N);
+            let unfiled = 0;
+            try {
+                const u = await (await fetch('/api/sessions?unfiled=1')).json();
+                unfiled = (u.sessions || []).length;
+            } catch (_) { unfiled = 0; }
+            if (!items.length && !unfiled) { empty(el, 'No projects yet.'); return; }
+            const rows = items.map(t => {
                 const c = t.campaign || {};
                 const st = t.status || {};
-                const name = c.shorthand || c.description || 'Untitled plan';
+                const p = t.project || {};
+                const name = c.shorthand || c.description || 'Untitled project';
                 const total = st.total || 0;
-                const chip = total ? `<span class="home-chip">${st.completed || 0}/${total} done</span>` : '';
-                return `<div class="home-item home-item-clickable" data-go-tab="plans">
-                    <span class="home-item-name">${escapeHtml(name)}</span>${chip}
+                const done = st.completed || 0;
+                const pct = total ? Math.round(100 * done / total) : 0;
+                const waiting = (p.proposed_items || 0) + (p.proposed_findings || 0);
+                const live = p.live ? '<span class="home-tag home-tag-live">live</span>' : '';
+                const confirm = waiting ? `<span class="home-tag home-tag-diag" title="Suggested by the agent, waiting for a person">${waiting} to confirm</span>` : '';
+                const meta = [
+                    total ? `${done} of ${total} items done` : 'no plan items yet',
+                    p.last_run_at ? `last run ${relTime(p.last_run_at)}` : (p.sessions ? `${p.sessions} sessions` : 'no sessions'),
+                ].join(' · ');
+                return `<div class="home-item home-item-clickable" data-go-tab="plans" data-project="${escapeHtml(c.id || '')}">
+                    <div class="home-item-main">
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(name)}</span>${live}${confirm}</div>
+                        <span class="home-item-meta">${escapeHtml(meta)}</span>
+                    </div>
+                    ${total ? `<span class="home-chip" title="${pct}% of the plan done"><span class="home-bar"><i style="width:${pct}%"></i></span>${done}/${total}</span>` : ''}
                 </div>`;
-            }).join('');
+            });
+            if (unfiled) {
+                rows.push(`<div class="home-item home-item-clickable" data-go-tab="sessions" data-unfiled="1">
+                    <div class="home-item-main">
+                        <div class="home-item-row"><span class="home-item-name">Unfiled sessions</span></div>
+                        <span class="home-item-meta">${unfiled} session${unfiled !== 1 ? 's' : ''} without a project</span>
+                    </div>
+                    <span class="home-chip">file them ›</span>
+                </div>`);
+            }
+            el.innerHTML = rows.join('');
+            // Which project to open on the Projects tab, and which filter on the Sessions tab.
+            el.querySelectorAll('[data-project]').forEach(row => row.addEventListener('click', () => {
+                try { sessionStorage.setItem('gently-open-project', row.dataset.project); } catch (_) { /* fine */ }
+            }));
+            el.querySelectorAll('[data-unfiled]').forEach(row => row.addEventListener('click', () => {
+                try {
+                    localStorage.setItem('gently-session-filters', JSON.stringify({
+                        on: { holds: ['embryos', 'brightfield', 'empty'], run: ['interrupted', 'complete', 'never'], when: ['today', 'week', 'older'], has: [], project: ['unfiled'] },
+                        sort: 'newest', open: true,
+                    }));
+                } catch (_) { /* fine */ }
+                if (typeof ReviewApp !== 'undefined') ReviewApp._filterState = null;
+            }));
             wireGoTab(el);
-        } catch (e) { empty(el, 'Could not load plans.'); }
+        } catch (e) { empty(el, 'Could not load projects.'); }
     }
 
     async function loadImages(force) {

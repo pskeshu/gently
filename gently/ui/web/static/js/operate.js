@@ -2140,7 +2140,9 @@ const OperateManager = (function () {
                 // what goes on the wire, and what the run view says back.
                 const payload = AcquisitionPlan.toPayload(plan, ids);
                 payload.scope = _targetScope;   // "what to run", kept with the plan
+                if (_setupItem && _setupItem.id) payload.plan_item_id = _setupItem.id;
                 await postJSON('/api/devices/timelapse/start', payload);
+                if (_setupItem) { _setupItem = null; renderSetupBanner(); }
                 // What was typed has been applied: the form follows the
                 // embryos again until the operator types something new.
                 _planDirty = false;
@@ -3708,6 +3710,53 @@ const OperateManager = (function () {
         renderLock();
         renderSubnavMeta();
     }
+    // ---- a plan item, set up here ----------------------------------------
+    // The Projects tab hands an item over (sessionStorage + an event): its
+    // acquisition fills the Acquisition pane, the banner says where it came
+    // from, and Start files the run under it.
+    let _setupItem = null;
+
+    function takeSetupItem() {
+        try {
+            const raw = sessionStorage.getItem('gently-setup-item');
+            if (!raw) return null;
+            sessionStorage.removeItem('gently-setup-item');
+            return JSON.parse(raw);
+        } catch (_) { return null; }
+    }
+
+    function renderSetupBanner() {
+        const pane = $('op-pane-acquire');
+        if (!pane) return;
+        let el = document.getElementById('op-setup-banner');
+        if (!_setupItem) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'op-setup-banner';
+            el.className = 'op-setup-banner';
+            pane.insertBefore(el, pane.firstChild);
+        }
+        const where = _setupItem.project && _setupItem.project.name ? ` · in ${escapeHtml(_setupItem.project.name)}` : '';
+        el.innerHTML = `<span class="op-setup-chip">plan item</span> <b>${escapeHtml(_setupItem.title || '')}</b>${where}`
+            + ' <span class="op-setup-hint">Start files this run under it</span>'
+            + ' <button type="button" class="op-setup-clear" id="op-setup-clear">clear</button>';
+        const btn = document.getElementById('op-setup-clear');
+        if (btn) btn.addEventListener('click', () => { _setupItem = null; renderSetupBanner(); });
+    }
+
+    function applySetupItem(item) {
+        if (!item || typeof AcquisitionPlan === 'undefined') return;
+        _setupItem = item;
+        showPane('acquire');
+        if (typeof setMode === 'function') setMode('adaptive');
+        try { fillPlan(AcquisitionPlan.fromStructure(item.structure || {})); } catch (e) { console.warn('plan item did not fill the pane', e); }
+        _planDirty = true;
+        renderSetupBanner();
+        if (typeof renderPlan === 'function') renderPlan();
+    }
+
+    window.addEventListener('gently:setup-item', e => applySetupItem(e.detail));
+
     function showPaneInitial() {
         PANE_ORDER.forEach(p => {
             const el = $(`op-pane-${p}`);
@@ -3715,6 +3764,8 @@ const OperateManager = (function () {
         });
         if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', _pane);
         if (PANES[_pane]) { PANES[_pane].onEnter(); PANES[_pane].render(); }
+        const handed = takeSetupItem();
+        if (handed) applySetupItem(handed);
     }
     function deactivate() {
         if (!_active) return;

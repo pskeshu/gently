@@ -54,7 +54,11 @@ MANIFEST = {
         "ground_truth.yaml": "Human annotations: [{stage, start_timepoint, end_timepoint}]",
     },
     "agent_memory": {
-        "campaigns": "Research campaigns with plans, templates, version history",
+        "campaigns": (
+            "Research campaigns with plans, templates, version history. A root campaign is a "
+            "project: it carries strains[] and references[], and sessions name it in "
+            "session.yaml.project_id."
+        ),
         "learnings": "Individual YAML files — agent-synthesized insights",
         "observations": "Individual YAML files — synthesized experiment notes",
         "active": "Short-lived items: expectations, watchpoints, questions",

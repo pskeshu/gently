@@ -17,12 +17,12 @@ const TYPE_ICONS = {
 };
 const STATUS_DOTS = {
     planned: '\u25CB', in_progress: '\u25D1', completed: '\u25CF',
-    skipped: '\u2298', blocked: '\u2297',
+    skipped: '\u2298', blocked: '\u2297', proposed: '\u25CC',
 };
 const STATUS_LABELS = {
     active: 'Active', completed: 'Completed', paused: 'Paused',
     planned: 'Planned', in_progress: 'In Progress',
-    skipped: 'Skipped', blocked: 'Blocked',
+    skipped: 'Skipped', blocked: 'Blocked', proposed: 'Suggested',
 };
 const SPEC_LABELS = {
     strain: 'Strain', genotype: 'Genotype', reporter: 'Reporter',
@@ -68,6 +68,19 @@ const state = {
     _specError: '',             // inline save error in the spec editor
     _sessionPickerOpen: false,  // whether the session link picker is visible
     _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
+    // The project layer: a root campaign is a project; its page has sections.
+    section: 'ledger',          // 'ledger' | 'plan' | 'sessions' | 'findings' | 'notes'
+    ledger: null,               // /api/campaigns/{id}/ledger
+    projSessions: null,         // /api/sessions?project_id=
+    findings: null,             // finding notes of the project
+    notes: null,                // all notes of the project
+    sectionError: '',
+    openForm: null,             // the one inline form or menu open, e.g. 'item', 'answer:<id>'
+    newProjectOpen: false,
+    search: null,               // the add popover: {q, groups, sel, rows, ctrls, timer}
+    searchMsg: '',
+    planMsg: '',
+    unfiled: null,              // sessions offered by "+ add a session"
 };
 
 // ── DOM refs (cached on init) ────────────────────────────
@@ -80,9 +93,25 @@ let $statusLeft, $statusRight;
 
 // ── Init ─────────────────────────────────────────────────
 let _initialized = false;
+// Home hands over the project to open (see home.js) through sessionStorage.
+// app.js calls CampaignsApp.init() on every switch to this tab, so the handover
+// is taken every time, not only at the first boot.
+function takeHandover() {
+    try {
+        const wanted = sessionStorage.getItem('gently-open-project');
+        if (wanted) sessionStorage.removeItem('gently-open-project');
+        return wanted || null;
+    } catch (_) { return null; }
+}
+
 function boot() {
-    if (_initialized) return;
+    const handed = takeHandover();
+    if (_initialized) {
+        if (handed) openCampaign(handed).catch(() => {});
+        return;
+    }
     _initialized = true;
+    if (handed) window.INITIAL_CAMPAIGN_ID = handed;
     // Cache DOM
     $workspace      = document.getElementById('workspace');
     $navContent     = document.getElementById('nav-content');
@@ -129,8 +158,15 @@ function boot() {
         if (!el) return;
         const action = el.dataset.action;
         const id = el.dataset.id;
+        // A ledger card is itself the way to its details; a click on one of
+        // its controls, fields or menus is not.
+        if (el.classList.contains('pj-entry') && e.target.closest('input, select, textarea, label, a, .pj-form, .pj-menu, .pj-act, .pj-tools')) return;
         switch (action) {
-            case 'select-item': selectItem(id); break;
+            case 'select-item':
+                // A card already open in the side panel closes it on a second click.
+                if (el.classList.contains('pj-entry') && state.selectedItemId === id && $workspace?.classList.contains('inspector-open')) closeInspector();
+                else selectItem(id);
+                break;
             case 'open-campaign': openCampaign(id); break;
             case 'navigate-item': e.stopPropagation(); navigateToItem(id); break;
             case 'run-item': e.stopPropagation(); runPlanItem(id); break;
@@ -146,9 +182,24 @@ function boot() {
             case 'session-picker-cancel': e.stopPropagation(); cancelSessionPicker(); break;
             case 'session-picker-link': e.stopPropagation(); submitSessionLink(); break;
             case 'session-delink': e.stopPropagation(); handleSessionDelink(el.dataset.sessionId); break;
+            default: projectAction(action, el, e); break;
         }
     });
-
+    // The add popover and the inline forms: typing, keys, selects.
+    document.addEventListener('input', e => {
+        if (e.target && e.target.id === 'pj-search-input') onSearchInput(e.target.value);
+        if (e.target && e.target.dataset && e.target.dataset.field === 'title' && e.target.closest('.pj-form[data-form="item"]')) previewIntent(e.target.value);
+    });
+    document.addEventListener('keydown', e => {
+        if (e.target && e.target.id === 'pj-search-input') onSearchKey(e);
+    });
+    document.addEventListener('change', e => {
+        const el = e.target.closest ? e.target.closest('select[data-action]') : null;
+        if (el && el.value) projectAction(el.dataset.action, el, e);
+    });
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('CONTEXT_UPDATED', () => scheduleCampaignRefresh());
+    }
     // Scroll-spy for plan view
     document.getElementById('canvas')?.addEventListener('scroll', onCanvasScroll, { passive: true });
 
@@ -178,7 +229,7 @@ function boot() {
 // ══════════════════════════════════════════════════════════
 
 async function loadCampaigns() {
-    showLoading('Loading campaigns...');
+    showLoading('Loading projects...');
     try {
         const res = await fetch('/api/campaigns');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -195,8 +246,8 @@ async function loadCampaigns() {
             renderAll();
         } else {
             $canvasContent.innerHTML = `<div class="empty-state">
-                <p>No campaigns yet</p>
-                <span class="empty-hint">Create a campaign plan to get started</span>
+                <p>No projects yet</p>
+                <span class="empty-hint">“+ New project” above: one line saying what it asks. Or ask Gently to plan one.</span>
             </div>`;
             updateHeader();
             updateStatusbar();
@@ -249,8 +300,14 @@ async function openCampaign(campaignId) {
     state.viewingSnapshotId = null;
     state.planView = 'doc';
     state.typeFilter = '';
+    state.section = 'ledger';
+    state.ledger = state.projSessions = state.findings = state.notes = null;
+    state.sectionError = '';
+    state.openForm = null;
+    state.search = null;
+    state.searchMsg = state.planMsg = '';
     closeInspector();
-    showLoading('Loading plan...');
+    showLoading('Loading project...');
 
     await Promise.all([
         loadDocument(campaignId),
@@ -266,14 +323,15 @@ async function openCampaign(campaignId) {
 
     if (!state.docData) {
         $canvasContent.innerHTML = `<div class="empty-state">
-            <p>Failed to load plan document</p>
-            <span class="empty-hint">Campaign may not exist</span>
+            <p>Failed to load the project</p>
+            <span class="empty-hint">It may not exist any more</span>
         </div>`;
         updateHeader();
         return;
     }
 
     renderAll();
+    loadSection();
 }
 
 // Live refresh of the open campaign (debounced) — re-fetch its tree and re-render,
@@ -289,9 +347,10 @@ function scheduleCampaignRefresh() {
 async function refreshActiveCampaign() {
     if (!state.activeCampaignId) return;
     const keep = state.selectedItemId;
-    await loadDocument(state.activeCampaignId);
+    await Promise.all([loadDocument(state.activeCampaignId), refreshSummaries()]);
     if (!state.docData) return;
     renderAll();
+    loadSection();
     // Don't clobber an in-progress spec edit with a re-fetch.
     if (keep && !state.editingSpec) selectItem(keep).catch(() => {});
 }
@@ -327,10 +386,10 @@ function renderNavigator() {
 }
 
 function renderNavDashboard() {
-    let html = '<div class="nav-section-title">Campaigns</div>';
+    let html = '<div class="nav-section-title">Projects</div>';
 
     if (state.allCampaigns.length === 0) {
-        html += '<div style="padding:16px;color:var(--text-muted);font-size:0.78rem;font-style:italic">No campaigns</div>';
+        html += '<div style="padding:16px;color:var(--text-muted);font-size:0.78rem;font-style:italic">No projects yet</div>';
         $navContent.innerHTML = html;
         return;
     }
@@ -357,8 +416,14 @@ function renderCanvas() {
     if (!$canvasContent) return;
     if (!state.docData) {
         $canvasContent.innerHTML = `<div class="empty-state">
-            <p>Select a campaign</p>
+            <p>Select a project</p>
         </div>`;
+        $canvasContent.classList.remove('pj-with-header');
+        return;
+    }
+    $canvasContent.classList.add('pj-with-header');
+    if (state.section !== 'plan') {
+        $canvasContent.innerHTML = renderProjectHeader() + renderSection();
         return;
     }
     switch (state.planView) {
@@ -369,6 +434,9 @@ function renderCanvas() {
         case 'timeline': renderTimelinePlanView(); break;
         default: renderPlanDoc(); break;
     }
+    // The project header sits above every plan view; the doc's own title
+    // card is hidden under it (css .pj-with-header).
+    $canvasContent.insertAdjacentHTML('afterbegin', renderProjectHeader() + renderPlanBar());
 }
 
 
@@ -513,15 +581,26 @@ function renderDocItem(item, taskNum) {
         ? `<div class="doc-item-footer">${refBadges}${depLinks}</div>`
         : '';
 
-    return `<div class="doc-item" id="item-${item.id}" data-item-id="${item.id}" data-action="select-item" data-id="${item.id}">
+    // A suggestion from the agent: dashed, labelled, and not runnable until accepted.
+    const suggested = statusClass === 'proposed';
+    const suggestRow = suggested
+        ? `<div class="doc-item-suggest"><span class="pj-chip ai">suggested by the agent</span>
+            <button data-action="item-accept" data-id="${item.id}">Accept</button>
+            <button data-action="select-item" data-id="${item.id}">Edit</button>
+            <button data-action="item-remove" data-id="${item.id}">Dismiss</button></div>`
+        : '';
+
+    return `<div class="doc-item${suggested ? ' doc-item--suggested' : ''}" id="item-${item.id}" data-item-id="${item.id}" data-action="select-item" data-id="${item.id}">
         <span class="doc-item-status dot-${statusClass}">${dot}</span>
         <span class="doc-item-icon type-${item.type}">${icon}</span>
         <div class="doc-item-body">
             <div class="doc-item-title-row">
                 <span class="doc-item-num">${esc(taskNum)}</span>
                 <span class="doc-item-title">${esc(item.title)}</span>
+                ${item.origin === 'manual' ? '<span class="pj-chip">manual</span>' : ''}
             </div>
             ${specLine ? `<div class="doc-item-spec">${esc(specLine)}</div>` : ''}
+            ${suggestRow}
             ${footer}
         </div>
     </div>`;
@@ -713,12 +792,21 @@ function renderInspector(data) {
         if (state.editingSpec) {
             html += section('Imaging Specification', renderSpecEditor(spec));
         } else {
-            const rows = renderSpecTable(spec);
-            const content = rows
-                ? `<table class="spec-table">${rows}</table>`
-                : '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No parameters set yet</div>';
             const editBtn = '<button class="spec-edit-btn" data-action="spec-edit">✎ Edit</button>';
+            const said = acquisitionSentence(spec);
+            const setup = canSetUp(item) ? `<button class="pj-link" data-action="item-setup" data-id="${esc(item.id)}">Set up on Devices</button>` : '';
+            const acqRows = renderAcquisitionRows(spec);
+            const restRows = renderSpecTable(spec, ACQUISITION_FLAT_KEYS);
+            let content = '';
+            if (said) content += `<div class="spec-sentence">${esc(said)}${setup ? ` · ${setup}` : ''}</div>`;
+            if (acqRows) content += `<div class="spec-sub">Acquisition <small>what Devices › Operate runs</small></div><table class="spec-table">${acqRows}</table>`;
+            if (restRows) content += `<div class="spec-sub">Sample and intention</div><table class="spec-table">${restRows}</table>`;
+            if (!acqRows && !restRows) content += '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No parameters set yet</div>';
             html += section('Imaging Specification', content, editBtn);
+            const tactics = renderTacticsList(spec);
+            if (tactics) html += section('Tactics', tactics);
+            const draft = renderDraftInspector(item);
+            if (draft) html += section("Gently's draft", draft);
         }
     }
 
@@ -727,17 +815,25 @@ function renderInspector(data) {
         html += section('Bench Specification', `<table class="spec-table">${renderSpecTable(item.bench_spec)}</table>`);
     }
 
-    // Dependencies
-    if (deps.length > 0) {
+    // Dependencies — read here, and edited here: × takes one away, the select
+    // adds one. Items that already wait on this one are left out (a cycle).
+    {
+        const depIds = new Set(deps.map(d => d.id));
+        const dntIds = new Set(dnts.map(d => d.id));
         const chips = deps.map(d => {
             const dot = STATUS_DOTS[d.status] || '\u25CB';
             const dc = d.status || 'planned';
-            return `<span class="dep-chip" data-action="navigate-item" data-id="${d.id}">
+            return `<span class="dep-chip">
                 <span class="dep-chip-dot dot-${dc}">${dot}</span>
-                ${esc(d.title)}
+                <a data-action="navigate-item" data-id="${d.id}">${esc(d.title)}</a>
+                <button class="dep-remove" data-action="dep-remove" data-id="${esc(item.id)}" data-dep="${d.id}" title="This item no longer waits on that one">×</button>
             </span>`;
         }).join('');
-        html += section('Depends on', `<div class="dep-list">${chips}</div>`);
+        const candidates = allItems().filter(x => x.id !== item.id && !depIds.has(x.id) && !dntIds.has(x.id));
+        const picker = candidates.length
+            ? `<select class="dep-add" data-action="dep-add" data-id="${esc(item.id)}"><option value="">+ waits on…</option>${candidates.map(x => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join('')}</select>`
+            : '<span class="pj-muted">nothing else in this project to wait on</span>';
+        html += section('Depends on', `<div class="dep-list">${chips || '<span class="pj-muted">nothing</span>'}${picker}</div>`);
     }
 
     // Dependents
@@ -1113,10 +1209,12 @@ function backToCurrent() {
 function updateHeader() {
     const $viewSwitcher = document.getElementById('plan-view-switcher');
     const campaign = state.docData?.document?.campaign;
-    if ($headerTitle) $headerTitle.textContent = campaign?.shorthand || 'Campaigns';
-    if ($headerBreadcrumb) $headerBreadcrumb.textContent = '';
-    // Show view switcher and controls when a campaign is loaded
-    if (state.docData) {
+    if ($headerTitle) $headerTitle.textContent = 'Projects';
+    if ($headerBreadcrumb) {
+        $headerBreadcrumb.textContent = campaign ? `› ${campaign.shorthand || campaign.description}` : '';
+    }
+    // The plan's views, versions and print belong to the Plan section only.
+    if (state.docData && state.section === 'plan') {
         if (state.versions.length > 0) {
             $versionWrap?.classList.remove('hidden');
         } else {
@@ -1141,8 +1239,8 @@ function updateStatusbar() {
 
     if ($statusLeft) {
         $statusLeft.textContent = state.docData
-            ? `${numCampaigns} campaign${numCampaigns !== 1 ? 's' : ''} \u00B7 ${total} items \u00B7 ${pct}% complete`
-            : `${numCampaigns} campaign${numCampaigns !== 1 ? 's' : ''}`;
+            ? `${numCampaigns} project${numCampaigns !== 1 ? 's' : ''} \u00B7 ${total} items \u00B7 ${pct}% complete`
+            : `${numCampaigns} project${numCampaigns !== 1 ? 's' : ''}`;
     }
     if ($statusRight) {
         if (state.versions.length > 0) {
@@ -1321,17 +1419,100 @@ function section(title, content, headerAction) {
     return `<div class="detail-section"><div class="${titleCls}">${title}${extra}</div>${content}</div>`;
 }
 
-function renderSpecTable(spec) {
+// The older flat fields the acquisition table already covers, left out of the
+// sample-and-intention table when an acquisition is shown.
+const ACQUISITION_FLAT_KEYS = new Set([
+    'interval_s', 'num_slices', 'exposure_ms', 'laser_wavelength_nm', 'laser_power_pct',
+    'galvo_amplitude', 'piezo_amplitude_um', 'stop_condition', 'adaptive_intervals',
+    'acquisition', 'acquisition_derived', 'draft', 'tactics', 'provenance',
+]);
+
+function provenanceTag(spec, key) {
+    const p = spec && spec.provenance && spec.provenance[key];
+    if (!p) return '';
+    const word = { sentence: 'from the sentence', model: 'drafted by Gently', typed: 'typed', accepted: 'accepted' }[p.source] || p.source;
+    const cls = p.source === 'model' ? 'ai' : '';
+    return `<span class="spec-prov ${cls}" title="${esc(p.text || '')}">${esc(word)}</span>`;
+}
+
+// The acquisition in the pane's own rows: cadence, channels, ending.
+function renderAcquisitionRows(spec) {
+    const a = spec && spec.acquisition;
+    if (!a || typeof AcquisitionPlan === 'undefined') return '';
+    const P = AcquisitionPlan.fromStructure(a);
+    const tag = spec.acquisition_derived ? '<span class="spec-prov">read from the older fields</span>' : provenanceTag(spec, 'acquisition');
+    const row = (k, v, extra) => `<tr><td>${esc(k)}</td><td>${v}${extra ? ' ' + extra : ''}</td></tr>`;
+    const every = P.intervalSeconds % 60 === 0 && P.intervalSeconds >= 60 ? `${P.intervalSeconds / 60} min` : `${P.intervalSeconds} s`;
+    let rows = row('Cadence', `every ${esc(every)}`, tag);
+    if (P.spim.enabled === false) {
+        rows += row('SPIM volumes', 'off — a brightfield-only run');
+    } else {
+        rows += row('SPIM volumes', [
+            P.spim.slices == null ? 'slices as each embryo has' : `${P.spim.slices} slices`,
+            P.spim.exposureMs == null ? 'exposure as each embryo has' : `${P.spim.exposureMs} ms`,
+        ].map(esc).join(' · '));
+        rows += row('Lasers', P.spim.laserConfig ? esc(P.spim.laserConfig) : '<span class="pj-muted">preset as the controller has</span>');
+        const powers = Object.entries(P.spim.laserPowers || {});
+        if (powers.length) rows += row('Laser power', powers.map(([wl, pct]) => `${esc(wl)} at ${esc(pct)} %`).join(' · '));
+    }
+    if (P.bf.enabled) {
+        const lit = AcquisitionPlan.BF_LIGHTS[P.bf.light] ? AcquisitionPlan.BF_LIGHTS[P.bf.light].says : P.bf.light;
+        rows += row('Brightfield overview', [
+            P.spim.enabled === false ? 'the run' : (P.bf.everyRounds === 1 ? 'one frame per round' : `one frame every ${P.bf.everyRounds} rounds`),
+            lit + (P.bf.light === 'led' && P.bf.ledPct != null ? ` at ${P.bf.ledPct} %` : ''),
+            P.bf.exposureMs != null ? `${P.bf.exposureMs} ms` : '',
+            P.bf.position === 'here' && P.bf.pins && P.bf.pins.length ? `from ${P.bf.pins.length} position${P.bf.pins.length === 1 ? '' : 's'}` : 'from the centroid',
+        ].filter(Boolean).map(esc).join(' · '));
+    } else if (P.spim.enabled !== false) {
+        rows += row('Brightfield overview', '<span class="pj-muted">off</span>');
+    }
+    rows += row('Ends', esc(AcquisitionPlan.stopWords(P.stop.kind, P.stop.value, P.spim.enabled === false ? 'frame' : 'timepoint')));
+    if (P.overrides && P.overrides.length) rows += row('Per-embryo endings', P.overrides.map(o => `${esc(o.embryoId)} ${esc(AcquisitionPlan.stopWords(o.kind, o.value))}`).join(', '));
+    if (P.monitoringMode && P.monitoringMode !== 'idle') rows += row('Monitoring', esc(P.monitoringMode));
+    return rows;
+}
+
+function renderTacticsList(spec) {
+    const list = (spec && spec.tactics) || [];
+    if (!list.length) return '';
+    return `<div class="detail-section-content">${list.map(t => {
+        const st = t.structure || {};
+        const steps = Array.isArray(st.steps) ? st.steps : null;
+        const stepsText = steps ? `${steps.length} step${steps.length === 1 ? '' : 's'}: ${steps.slice(0, 8).map(x => Object.entries(x).map(([k, v]) => `${k} ${v}`).join(' ')).join(', ')}${steps.length > 8 ? ', …' : ''}` : '';
+        const rest = Object.entries(st).filter(([k]) => k !== 'steps').map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
+        return `<div class="spec-tactic"><span class="pj-chip">${esc(t.kind || 'tactic')}</span> <b>${esc(t.name || '')}</b>${t.target ? ` <span class="pj-muted">· ${esc(t.target)}</span>` : ''}${t.scope ? ` <span class="pj-muted">· ${esc(t.scope)}</span>` : ''}${stepsText ? `<div class="pj-muted">${esc(stepsText)}</div>` : ''}${rest ? `<div class="pj-muted">${esc(rest)}</div>` : ''}</div>`;
+    }).join('')}</div>`;
+}
+
+function renderDraftInspector(item) {
+    const spec = item.imaging_spec || {};
+    const d = spec.draft;
+    if (!d) return '';
+    const label = { drafting: 'Gently is drafting…', drafted: 'drafted by Gently, waiting for you', unavailable: 'no draft: ' + ((d.assumptions || [])[0] || 'no model to ask'), accepted: 'accepted' }[d.status] || d.status;
+    const actions = d.status === 'drafted'
+        ? `<div class="pj-act"><button data-action="item-accept-spec" data-id="${esc(item.id)}">Accept spec</button><button data-action="item-draft" data-id="${esc(item.id)}">Ask again</button></div>`
+        : (d.status === 'unavailable' ? `<div class="pj-act"><button data-action="item-draft" data-id="${esc(item.id)}">Try again</button></div>` : '');
+    return `<div class="detail-section-content">
+        <div><span class="pj-chip ${d.status === 'accepted' ? '' : 'ai'}">${esc(label)}</span></div>
+        ${d.rationale ? `<div class="spec-rationale">${esc(d.rationale)}</div>` : ''}
+        ${(d.assumptions || []).length && d.status !== 'unavailable' ? `<ul class="spec-assumptions">${d.assumptions.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+        ${d.sentence && d.sentence !== item.title ? `<div class="pj-muted">from: “${esc(d.sentence)}”</div>` : ''}
+        ${actions}
+    </div>`;
+}
+
+function renderSpecTable(spec, skip) {
     let rows = '';
     for (const [key, value] of Object.entries(spec)) {
         if (value == null || key.startsWith('_')) continue;
+        if (skip && skip.has(key)) continue;
         // Skip nested objects (e.g. provenance metadata) — they'd render as
         // "[object Object]". Field-level provenance isn't a spec value to show here.
         if (typeof value === 'object' && !Array.isArray(value)) continue;
         const label = SPEC_LABELS[key] || key;
-        let display = Array.isArray(value) ? value.join(', ') : String(value);
+        let display = Array.isArray(value) ? value.map(v => typeof v === 'object' ? JSON.stringify(v) : v).join(', ') : String(value);
         if (SPEC_UNITS[key]) display += SPEC_UNITS[key];
-        rows += `<tr><td>${esc(label)}</td><td>${esc(display)}</td></tr>`;
+        rows += `<tr><td>${esc(label)}</td><td>${esc(display)} ${provenanceTag(spec, key)}</td></tr>`;
     }
     return rows;
 }
@@ -1351,6 +1532,7 @@ const STATUS_COLORS = {
     completed: 'var(--accent)',
     skipped: 'var(--text-muted)',
     blocked: 'var(--accent-red)',
+    proposed: 'var(--accent-purple)',
 };
 
 // Timeline-only: tint bars by task type so the filter highlight has something to pop.
@@ -1869,6 +2051,925 @@ function renderTimelinePlanView() {
                 chartScroll.scrollLeft += e.deltaY / scale;
             }
         }, { passive: false });
+    }
+}
+
+// ══════════════════════════════════════════════════════════
+//  THE PROJECT LAYER
+//  A root campaign is a project. Its page: a header with the question, the
+//  strains and links it keeps, then sections. Every value is read back from
+//  the store; nothing is remembered in the browser but the open section.
+// ══════════════════════════════════════════════════════════
+
+const enc = encodeURIComponent;
+
+async function api(method, url, body) {
+    const init = { method };
+    if (body !== undefined) {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, init);
+    if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.json()).detail || ''; } catch (_) { /* not json */ }
+        throw new Error(detail || `HTTP ${res.status}`);
+    }
+    return res.status === 204 ? null : res.json();
+}
+
+// An error is shown beside the control that caused it, never in an alert.
+function showErr(el, msg) {
+    const host = el?.closest?.('.pj-form, .pj-entry, .pj-chip, .pj-head, .pj-card, .pj-newform, .pj-planbar') || el?.parentElement;
+    if (!host) return;
+    let box = host.querySelector(':scope > .pj-err');
+    if (!box) {
+        box = document.createElement('div');
+        box.className = 'pj-err';
+        host.appendChild(box);
+    }
+    box.textContent = msg;
+}
+
+function fields(form) {
+    const out = {};
+    if (!form) return out;
+    form.querySelectorAll('[data-field]').forEach(i => { out[i.dataset.field] = (i.value || '').trim(); });
+    return out;
+}
+
+function focusFirst() {
+    const el = document.querySelector('.pj-form [data-field], #new-project-form [data-field]');
+    if (el) el.focus();
+}
+
+function fmtWhen(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function specProvenanceNote(s) {
+    const prov = (s && s.provenance) || {};
+    const fromSentence = Object.keys(prov).filter(k => prov[k] && prov[k].source === 'sentence');
+    const fromModel = Object.keys(prov).filter(k => prov[k] && prov[k].source === 'model');
+    const bits = [];
+    if (fromSentence.length) bits.push(`${fromSentence.length} from the sentence`);
+    if (fromModel.length) bits.push(`${fromModel.length} implied, by Gently`);
+    return bits.length ? ` <span class="pj-prov" title="${esc(fromSentence.concat(fromModel).join(', '))}">· ${esc(bits.join(' · '))}</span>` : '';
+}
+
+// The pane's own sentence for the acquisition, when the spec carries one in
+// the pane's shape; the older flat fields otherwise.
+function acquisitionSentence(s) {
+    if (!s || !s.acquisition || typeof AcquisitionPlan === 'undefined') return '';
+    const n = Number(s.num_embryos) || 0;
+    const subjects = Array.from({ length: n }, (_, i) => ({ id: `e${i + 1}`, label: `e${i + 1}` }));
+    try { return AcquisitionPlan.describe(AcquisitionPlan.fromStructure(s.acquisition), subjects); } catch (_) { return ''; }
+}
+
+function specSummary(s) {
+    if (!s) return '';
+    const head = [s.strain, s.temperature_c != null ? `${s.temperature_c} °C` : ''].filter(Boolean).join(' · ');
+    let body = acquisitionSentence(s);
+    if (!body) {
+        body = [
+            s.num_embryos ? `${s.num_embryos} embryos` : '',
+            s.interval_s ? `every ${s.interval_s} s` : '',
+            s.laser_wavelength_nm ? `${s.laser_wavelength_nm} nm` : '',
+            s.stop_condition ? `until ${s.stop_condition}` : '',
+        ].filter(Boolean).join(' · ');
+    }
+    const tail = s.success_criteria ? `so that: ${s.success_criteria}` : '';
+    return [head, body, tail].filter(Boolean).join(' · ');
+}
+
+// An item can be set up on Devices › Operate once its acquisition is the
+// person's: typed, accepted, or never drafted.
+function canSetUp(it) {
+    const s = it.imaging_spec;
+    if (!s || !s.acquisition || it.type !== 'imaging') return false;
+    const d = s.draft;
+    return !d || d.status === 'accepted' || (s.provenance && s.provenance.acquisition && s.provenance.acquisition.source === 'typed');
+}
+
+function setUpOnDevices(it) {
+    const campaign = state.docData?.document?.campaign || {};
+    const detail = {
+        id: it.id,
+        title: it.title,
+        project: { id: state.activeCampaignId, name: campaign.shorthand || campaign.description || '' },
+        structure: it.imaging_spec.acquisition,
+    };
+    try { sessionStorage.setItem('gently-setup-item', JSON.stringify(detail)); } catch (_) { /* fine */ }
+    if (typeof switchTab === 'function') switchTab('devices');
+    window.dispatchEvent(new CustomEvent('gently:setup-item', { detail }));
+}
+
+function treeOf() { return state.docData?.document || {}; }
+function phasesOf() { return (treeOf().children || []).map(ch => ch.campaign).filter(Boolean); }
+function allItems() {
+    const t = treeOf();
+    const out = [...(t.items || [])];
+    (t.children || []).forEach(ch => out.push(...(ch.items || [])));
+    return out;
+}
+// "1", "2.3": the numbers the Doc view gives items.
+function itemNumbers() {
+    const m = {};
+    const t = treeOf();
+    (t.items || []).forEach((it, i) => { m[it.id] = String(i + 1); });
+    (t.children || []).forEach((ch, p) => (ch.items || []).forEach((it, i) => { m[it.id] = `${p + 1}.${i + 1}`; }));
+    return m;
+}
+
+async function refreshSummaries() {
+    try {
+        const data = await api('GET', '/api/campaigns');
+        state.allCampaigns = data.campaigns || [];
+    } catch (_) { /* the navigator keeps what it had */ }
+}
+
+function projectSummary() {
+    const id = state.activeCampaignId;
+    return (state.allCampaigns.find(t => t.campaign?.id === id) || {}).project || {};
+}
+
+// ── header ───────────────────────────────────────────────
+
+function refChip(r, asStrain) {
+    const label = asStrain ? (r.key || r.title) : (r.title || r.key);
+    const name = r.url
+        ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(label || '')}</a>`
+        : `<span>${esc(label || '')}</span>`;
+    const sub = r.subtitle || (asStrain && r.title && r.title !== r.key ? r.title : '');
+    return `<span class="pj-chip pj-chip-src"><b>${esc(r.source || 'text')}</b>${name}${sub ? `<small>${esc(sub)}</small>` : ''}<i data-action="ref-remove" data-source="${esc(r.source || '')}" data-key="${esc(r.key || '')}" title="Remove from the project">×</i></span>`;
+}
+
+function renderProjectHeader() {
+    const c = treeOf().campaign || {};
+    const st = state.docData?.status || {};
+    const summary = projectSummary();
+    const dot = summary.live ? 'live' : c.status === 'completed' ? 'done' : c.status === 'paused' ? 'cut' : 'plan';
+    const strains = c.strains || [];
+    const refs = c.references || [];
+    const tabs = [
+        ['ledger', 'Ledger', null],
+        ['plan', 'Plan', st.total || null],
+        ['sessions', 'Sessions', summary.sessions || null],
+        ['findings', 'Findings', null],
+        ['notes', 'Notes', null],
+    ];
+    const stat = (n, word) => `<span><b>${n}</b> ${word}</span>`;
+    return `<div class="pj-head" id="pj-head">
+        <div class="pj-row1">
+            <h2>${esc(c.shorthand || c.description || 'Project')}</h2>
+            <span class="pj-state"><span class="pj-dot ${dot}"></span>${summary.live ? 'live now' : esc(c.status || 'active')}</span>
+            <span class="pj-muted">since ${esc(formatDate(c.created_at))}</span>
+            <span class="pj-stats">
+                ${stat(summary.sessions || 0, 'session' + ((summary.sessions || 0) === 1 ? '' : 's'))}
+                <span><b>${st.completed || 0}</b> / <b>${st.total || 0}</b> items</span>
+                ${summary.proposed_items ? stat(summary.proposed_items, 'suggested') : ''}
+                ${summary.proposed_findings ? stat(summary.proposed_findings, 'finding' + (summary.proposed_findings === 1 ? '' : 's') + ' to confirm') : ''}
+            </span>
+        </div>
+        <div class="pj-q">${esc(c.description || '')}${c.target ? `<small>${esc(c.target)}</small>` : ''}</div>
+        <div class="pj-facets">
+            <span class="pj-k">Strains</span>
+            <div class="pj-vals">${strains.map(s => refChip(s, true)).join('')}<button class="pj-add" data-action="search-open" data-as="strain">+ add</button></div>
+            <span class="pj-k">Links</span>
+            <div class="pj-vals">${refs.map(r => refChip(r, false)).join('')}<button class="pj-add" data-action="search-open" data-as="link">+ add</button></div>
+        </div>
+        ${state.search ? renderSearchPopover() : ''}
+        <div class="pj-sections">${tabs.map(([k, label, n]) =>
+            `<button class="pj-section${state.section === k ? ' on' : ''}" data-action="section" data-section="${k}">${label}${n != null ? `<i>${n}</i>` : ''}</button>`).join('')}</div>
+    </div>`;
+}
+
+function renderNewProjectForm() {
+    const host = document.getElementById('new-project-form');
+    if (!host) return;
+    host.classList.toggle('hidden', !state.newProjectOpen);
+    host.innerHTML = state.newProjectOpen ? `
+        <input data-field="description" placeholder="What does the project ask? One line." autofocus>
+        <input data-field="shorthand" placeholder="short name (optional)">
+        <div class="pj-act"><button data-action="new-project-submit">Create</button><button data-action="new-project-cancel">Cancel</button></div>` : '';
+    if (state.newProjectOpen) focusFirst();
+}
+
+// ── sections ─────────────────────────────────────────────
+
+function renderSection() {
+    switch (state.section) {
+        case 'sessions': return renderProjSessions();
+        case 'findings': return renderFindingsSection();
+        case 'notes': return renderNotesSection();
+        default: return renderLedger();
+    }
+}
+
+async function loadSection() {
+    const id = state.activeCampaignId;
+    if (!id) return;
+    const P = enc(id);
+    state.sectionError = '';
+    try {
+        if (state.section === 'ledger') state.ledger = await api('GET', `/api/campaigns/${P}/ledger`);
+        else if (state.section === 'sessions') state.projSessions = (await api('GET', `/api/sessions?project_id=${P}`)).sessions || [];
+        else if (state.section === 'findings') state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
+        else if (state.section === 'notes') state.notes = (await api('GET', `/api/notebook/notes?project=${P}`)).notes || [];
+        else return;
+    } catch (err) {
+        state.sectionError = err.message;
+    }
+    if (state.activeCampaignId === id) renderCanvas();
+}
+
+async function reloadProject() {
+    await Promise.all([loadDocument(state.activeCampaignId), refreshSummaries()]);
+    renderNavigator();
+    await loadSection();
+}
+
+function loadingBox(what) {
+    return `<div class="pj-card"><div class="pj-loading">${state.sectionError ? esc(state.sectionError) : `Reading ${what}…`}</div></div>`;
+}
+
+// ── the ledger ───────────────────────────────────────────
+
+function dotFor(status) {
+    return { completed: 'done', in_progress: 'live', skipped: 'skip', blocked: 'err', proposed: 'plan' }[status] || 'plan';
+}
+
+function itemEntry(it, suggest, blocked) {
+    const nums = state._nums || {};
+    const spec = specSummary(it.imaging_spec);
+    const runs = (it.session_ids || []).length;
+    const menuOpen = state.openForm === `menu:${it.id}`;
+    const byId = Object.fromEntries(allItems().map(x => [x.id, x]));
+    const waits = blocked ? (it.depends_on || []).map(d => `<button class="pj-link" data-action="item-undepend" data-id="${esc(it.id)}" data-dep="${esc(d)}" title="Remove this dependency">${esc((byId[d] && byId[d].title) || d.slice(0, 8))} ×</button>`) : [];
+    const open = state.selectedItemId === it.id;
+    return `<div class="pj-entry pj-clickable${suggest ? ' suggest' : ''}${blocked ? ' dim' : ''}${menuOpen ? ' menu-open' : ''}${open ? ' is-open' : ''}" data-item-id="${esc(it.id)}" data-action="select-item" data-id="${esc(it.id)}" title="${open ? 'Close the details' : 'Open the details'}">
+        ${blocked ? `<div class="pj-m"><span class="pj-chip">waits on</span> ${waits.join(', ') || 'another item'}</div>` : ''}
+        <div class="pj-tools"><button data-action="select-item" data-id="${esc(it.id)}" title="Open in the inspector">✎</button><button data-action="item-menu" data-id="${esc(it.id)}" title="More">…</button></div>
+        ${menuOpen ? itemMenu(it) : ''}
+        ${suggest ? '<div class="pj-t"><span class="pj-chip ai">suggested by the agent</span></div>' : ''}
+        <div class="pj-t">${suggest ? '' : `<span class="pj-dot ${dotFor(it.status)}"></span>`}<span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
+        ${it.description && it.description !== it.title ? `<div class="pj-m pj-sentence">${esc(it.description.slice(0, 200))}</div>` : ''}
+        ${spec ? `<div class="pj-m">${esc(spec)}${specProvenanceNote(it.imaging_spec)}</div>` : ''}
+        ${draftBlock(it)}
+        ${state.transcribeMsg && state.transcribeMsg.id === it.id ? `<div class="pj-m pj-transcribed">${esc(state.transcribeMsg.text)}</div>` : ''}
+        <div class="pj-m"><span class="pj-chip ${it.origin === 'manual' ? '' : 'ai'}">${it.origin === 'manual' ? 'manual' : 'agent'}</span>${runs ? ` ${runs} run${runs !== 1 ? 's' : ''}` : ' not run yet'}${canSetUp(it) ? ` · <button class="pj-link" data-action="item-setup" data-id="${esc(it.id)}" title="Open Devices › Operate with this acquisition filled in; Start files the run under this item">Set up on Devices</button>` : ''}</div>
+        ${suggest ? `<div class="pj-act"><button data-action="item-accept" data-id="${esc(it.id)}">Accept</button><button data-action="select-item" data-id="${esc(it.id)}">Edit</button><button data-action="item-remove" data-id="${esc(it.id)}">Dismiss</button></div>` : ''}
+    </div>`;
+}
+
+// Gently's draft of the spec, as the card tells it: drafting, drafted (accept,
+// edit, ask again), unavailable (no model), accepted.
+function draftBlock(it) {
+    const d = it.imaging_spec && it.imaging_spec.draft;
+    const tactics = (it.imaging_spec && it.imaging_spec.tactics) || [];
+    const asking = state.openForm === `redraft:${it.id}`;
+    const askForm = asking ? `<div class="pj-form pj-redraft"><input data-field="note" placeholder="add a constraint, e.g. only 488, two embryos"><div class="pj-act"><button data-action="item-redraft" data-id="${esc(it.id)}">Ask again</button><button data-action="form-close">Cancel</button></div></div>` : '';
+    if (!d) {
+        if (it.type !== 'imaging' || specSummary(it.imaging_spec)) return '';
+        return `<div class="pj-m pj-nospec">no spec yet · <button class="pj-link ai" data-action="item-draft" data-id="${esc(it.id)}" title="Ask Gently to draft the spec from the sentence">ask Gently to draft it</button></div>`;
+    }
+    const tacticLine = tactics.length ? `<div class="pj-m pj-tactics">${tactics.map(t => `<span class="pj-chip">${esc(t.kind || 'tactic')}</span> ${esc(t.name || '')}${t.structure && t.structure.steps ? ` · ${t.structure.steps.length} steps` : ''}`).join(' · ')}</div>` : '';
+    const assumptions = (d.assumptions || []).length ? `<div class="pj-m pj-assume">${(d.assumptions || []).map(a => `<span>· ${esc(a)}</span>`).join(' ')}</div>` : '';
+    if (d.status === 'drafting') {
+        return `<div class="pj-m pj-draft"><span class="pj-dot live pulse"></span> Gently is drafting the spec from the sentence…</div>`;
+    }
+    if (d.status === 'unavailable') {
+        return `<div class="pj-m pj-draft"><span class="pj-chip">no draft</span> ${esc((d.assumptions || [])[0] || 'no model to ask')} · <button class="pj-link ai" data-action="item-draft" data-id="${esc(it.id)}">try again</button></div>`;
+    }
+    if (d.status === 'accepted') {
+        return `${tacticLine}<div class="pj-m pj-draft"><span class="pj-chip">spec accepted</span>${d.rationale ? ` ${esc(d.rationale)}` : ''}</div>`;
+    }
+    return `${tacticLine}
+        <div class="pj-m pj-draft"><span class="pj-chip ai">drafted by Gently</span>${d.rationale ? ` ${esc(d.rationale)}` : ''}</div>
+        ${assumptions}
+        <div class="pj-act"><button data-action="item-accept-spec" data-id="${esc(it.id)}" title="Make the drafted fields yours">Accept spec</button><button data-action="select-item" data-id="${esc(it.id)}">Edit</button><button data-action="form-open" data-form="redraft:${esc(it.id)}">Ask again</button></div>
+        ${askForm}`;
+}
+
+function itemMenu(it) {
+    const phases = phasesOf().filter(p => p.id !== it.campaign_id);
+    const others = allItems().filter(x => x.id !== it.id && !(it.depends_on || []).includes(x.id));
+    return `<div class="pj-menu">
+        <button data-action="item-draft" data-id="${esc(it.id)}" class="ai" title="Ask Gently to draft the spec from the sentence; it lists its assumptions">Draft spec with Gently</button>
+        <button data-action="item-skip" data-id="${esc(it.id)}">Skip</button>
+        <button data-action="item-remove" data-id="${esc(it.id)}" class="danger">Remove</button>
+        ${phases.length ? `<label>Move to <select data-action="item-move" data-id="${esc(it.id)}"><option value="">a phase…</option>${phases.map(p => `<option value="${esc(p.id)}">${esc(p.description || p.shorthand)}</option>`).join('')}</select></label>` : ''}
+        ${others.length ? `<label>Depends on <select data-action="item-depends" data-id="${esc(it.id)}"><option value="">an item…</option>${others.map(o => `<option value="${esc(o.id)}">${esc(o.title)}</option>`).join('')}</select></label>` : ''}
+    </div>`;
+}
+
+function expEntry(e) {
+    const st = e.status;
+    const cls = st === 'confirmed' ? 'done' : st === 'surprised' ? 'err' : st === 'expired' ? 'skip' : 'live';
+    const mark = st === 'confirmed' ? '<span class="ok">✓ met</span>'
+        : st === 'surprised' ? '<span class="miss">✕ missed</span>'
+        : st === 'expired' ? '<span class="pj-muted">expired</span>' : 'pending';
+    return `<div class="pj-entry">
+        <div class="pj-t"><span class="pj-dot ${cls}"></span><b>${esc(e.target)} ${esc(e.prediction)}</b></div>
+        <div class="pj-v">by ${esc(fmtWhen(e.expected_time))}${e.uncertainty ? ` ${esc(e.uncertainty)}` : ''} · ${mark}</div>
+        ${e.basis ? `<div class="pj-m">basis: ${esc(e.basis)}</div>` : ''}
+        ${st === 'pending' ? `<div class="pj-act"><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="confirmed">✓ met</button><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="surprised">✕ missed</button></div>` : ''}
+    </div>`;
+}
+
+function outcomeEntry(it) {
+    const nums = state._nums || {};
+    const editing = state.openForm === `outcome:${it.id}`;
+    const runs = (it.session_ids || []).length;
+    return `<div class="pj-entry">
+        <div class="pj-t"><span class="pj-dot ${it.status === 'skipped' ? 'skip' : 'done'}"></span><span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
+        ${editing
+        ? `<div class="pj-form"><textarea data-field="outcome" rows="2">${esc(it.outcome || '')}</textarea><div class="pj-act"><button data-action="outcome-save" data-id="${esc(it.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>`
+        : `<div class="pj-v pj-editable" data-action="form-open" data-form="outcome:${esc(it.id)}" title="Edit the outcome">${esc(it.outcome || (it.status === 'skipped' ? 'skipped' : 'done, no outcome written yet'))}</div>`}
+        <div class="pj-m">${esc(it.status)} · ${runs} run${runs !== 1 ? 's' : ''}</div>
+    </div>`;
+}
+
+function findingCard(n) {
+    const dim = n.status === 'superseded';
+    const sup = state.openForm === `supersede:${n.id}`;
+    const cites = arr => (arr || []).map(b => `<span class="pj-cite">${esc(String(b).slice(0, 12))}</span>`).join(' ');
+    return `<div class="pj-entry find${dim ? ' dim' : ''}">
+        <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+        <div class="pj-body">${esc(n.body)}</div>
+        ${(n.basis || []).length ? `<div class="pj-m">basis ${cites(n.basis)}</div>` : ''}
+        ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
+        ${dim ? '' : `<div class="pj-act">${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="confirmed">Confirm</button>` : ''}<button data-action="form-open" data-form="supersede:${esc(n.id)}">Supersede</button>${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="superseded">Dismiss</button>` : ''}</div>`}
+        ${sup ? `<div class="pj-form"><textarea data-field="body" rows="3" placeholder="The finding that replaces it"></textarea><div class="pj-act"><button data-action="note-supersede" data-id="${esc(n.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
+    </div>`;
+}
+
+function questionEntry(q) {
+    const open = q.status === 'open' || q.status === 'investigating';
+    const answering = state.openForm === `answer:${q.id}`;
+    return `<div class="pj-entry${open ? '' : ' dim'}">
+        <div class="pj-t"><span class="pj-dot ${open ? 'plan' : 'done'}"></span><b>${esc(q.content)}</b></div>
+        <div class="pj-m">${open ? 'open' : 'answered'}${q.resolution ? ` · ${esc(q.resolution)}` : ''}${q.session_id ? ` · from session ${esc(String(q.session_id).slice(0, 8))}` : ''}</div>
+        ${open && !answering ? `<div class="pj-act"><button data-action="form-open" data-form="answer:${esc(q.id)}">Answer</button><button data-action="q-resolve" data-id="${esc(q.id)}" data-resolution="closed">Close</button></div>` : ''}
+        ${answering ? `<div class="pj-form"><input data-field="resolution" placeholder="The answer"><div class="pj-act"><button data-action="q-resolve" data-id="${esc(q.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
+    </div>`;
+}
+
+function addRow(form, label, hint) {
+    if (state.openForm === form) return addForm(form);
+    return `<button class="pj-addrow" data-action="form-open" data-form="${form}">+ ${label}<small>${esc(hint || '')}</small></button>`;
+}
+
+function addForm(form) {
+    const phases = phasesOf();
+    const body = {
+        item: `<select data-field="type"><option value="imaging">imaging</option><option value="bench">bench</option><option value="genetics">genetics</option><option value="analysis">analysis</option><option value="decision_point">decision point</option></select>
+               <input data-field="title" placeholder="What to do, in a sentence"><div class="pj-intent-preview" id="pj-intent-preview"></div>
+               ${phases.length ? `<select data-field="phase_id"><option value="">no phase</option>${phases.map(p => `<option value="${esc(p.id)}">${esc(p.description || p.shorthand)}</option>`).join('')}</select>` : ''}`,
+        expectation: `<input data-field="target" placeholder="target: an embryo id, or project"><input data-field="prediction" placeholder="what will happen"><input data-field="expected_time" type="datetime-local"><input data-field="uncertainty" placeholder="± how much">`,
+        finding: '<textarea data-field="body" rows="3" placeholder="A claim the data supports"></textarea>',
+        question: '<input data-field="content" placeholder="What the data cannot settle yet">',
+    }[form] || '';
+    return `<div class="pj-form" data-form="${form}">${body}<div class="pj-act"><button data-action="form-submit" data-form="${form}">Add</button><button data-action="form-close">Cancel</button></div></div>`;
+}
+
+function renderLedger() {
+    const L = state.ledger;
+    if (!L) return loadingBox('the ledger');
+    state._nums = itemNumbers();
+    const col = (title, hint, body, add) =>
+        `<div class="pj-col"><h4>${title} <small>${hint}</small></h4>${body || '<div class="pj-none">nothing yet</div>'}${add}</div>`;
+    const next = (L.in_progress || []).map(i => itemEntry(i, false)).join('')
+        + (L.next || []).map(i => itemEntry(i, false)).join('')
+        + (L.proposed || []).map(i => itemEntry(i, true)).join('')
+        + (L.blocked || []).map(i => itemEntry(i, false, true)).join('');
+    const predicted = (L.predicted || []).slice().reverse().map(expEntry).join('');
+    const measured = (L.measured?.outcomes || []).map(outcomeEntry).join('') + (L.measured?.findings || []).map(findingCard).join('');
+    const open = (L.open || []).map(questionEntry).join('') + (L.answered || []).slice(-3).map(questionEntry).join('');
+    return `<div class="pj-card">
+        <div class="pj-card-head"><h3>Ledger</h3><span class="pj-muted">what is next, what was predicted, what was measured, what is open</span></div>
+        <div class="pj-ledger">
+            ${col('Next', 'unblocked plan items, then what waits', next, addRow('item', 'item', 'by hand; the agent’s own arrive as suggestions'))}
+            ${col('Predicted', 'expectations', predicted, addRow('expectation', 'expectation', 'yours or the agent’s; ✓ ✕ to resolve'))}
+            ${col('Measured', 'outcomes and findings', measured, addRow('finding', 'finding', 'a claim; the agent’s wait for your confirm'))}
+            ${col('Open', 'questions', open, addRow('question', 'question', 'answer or close in place'))}
+        </div>
+    </div>`;
+}
+
+// ── the plan bar: today's canvas, plus the ways to add to it ──
+
+function renderPlanBar() {
+    const open = state.openForm === 'item';
+    return `<div class="pj-planbar">
+        <span class="pj-muted">The plan as it is: phases, items, dependencies and versions.</span>
+        <span class="pj-spacer"></span>
+        <button class="hdr-btn" data-action="form-open" data-form="item">+ item</button>
+        <button class="hdr-btn pj-ai" data-action="plan-with-gently" title="Enter plan mode with this project as the focus">Plan with Gently</button>
+        ${state.planMsg ? `<span class="pj-muted pj-planmsg">${esc(state.planMsg)}</span>` : ''}
+        ${open ? addForm('item') : ''}
+    </div>`;
+}
+
+// ── sessions: the project's observability, aggregated from each session's records ──
+
+function runOf(s) {
+    if (s.run && s.run.status) return s.run;
+    const last = s.last_run;
+    if (!last || !last.status) return null;
+    const ended = ['completed', 'complete', 'stopped', 'idle'].includes(String(last.status));
+    return Object.assign({}, last, { status: ended || !last.embryos_going ? 'complete' : last.status });
+}
+
+function endedOf(s) {
+    if (s.active) return ['live', 'live now'];
+    const run = runOf(s);
+    if (!run) return ['plan', 'never ran'];
+    const st = String(run.status);
+    if (st === 'failed') return ['err', 'failed'];
+    if (['interrupted', 'running', 'paused'].includes(st)) return ['cut', 'cut short'];
+    return ['done', 'complete'];
+}
+
+function renderProjSessions() {
+    const rows = state.projSessions;
+    if (!rows) return loadingBox('the sessions');
+    const adding = state.openForm === 'add-session';
+    const addForm = adding ? `<div class="pj-form" data-form="add-session">
+            ${state.unfiled === null ? '<span class="pj-muted">Finding sessions…</span>'
+            : `<select data-field="session_id"><option value="">a session…</option>${state.unfiled.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)} · ${esc(formatDate(s.created_at))}</option>`).join('')}</select>`}
+            <div class="pj-act"><button data-action="session-add-submit">File it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
+    const body = rows.length === 0
+        ? '<div class="pj-none">No session is filed under this project yet.</div>'
+        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead><tbody>
+        ${rows.map(s => {
+            const [cls, label] = endedOf(s);
+            const run = runOf(s) || {};
+            const sentence = [
+                s.embryo_count ? `${s.embryo_count} emb` : '',
+                run.interval_seconds ? `${run.interval_seconds} s` : '',
+                run.total_timepoints ? `${run.total_timepoints} tp` : '',
+            ].filter(Boolean).join(' · ');
+            const plans = (s.plan_items || []).map(p => `<span class="pj-chip">plan: ${esc(p.title)}</span>`).join(' ');
+            const holds = [
+                s.embryo_count ? `${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}` : '',
+                s.timepoints ? `${s.timepoints} tp` : '',
+                s.bf_frames ? `${s.bf_frames} brightfield` : '',
+            ].filter(Boolean).join(' · ') || '—';
+            const signals = (s.errors || s.warnings)
+                ? [s.errors ? `<span class="e">${s.errors} error${s.errors !== 1 ? 's' : ''}</span>` : '', s.warnings ? `<span class="w">${s.warnings} warning${s.warnings !== 1 ? 's' : ''}</span>` : ''].filter(Boolean).join(' · ')
+                : '<span class="z">—</span>';
+            const agent = s.turns != null
+                ? `<b>${s.turns}</b> turn${s.turns !== 1 ? 's' : ''}${s.corrections ? ` · <span class="corr">${s.corrections} correction${s.corrections !== 1 ? 's' : ''}</span>` : ' · 0 corrections'}`
+                : '<span class="z">—</span>';
+            const chips = [s.active ? '<span class="pj-chip live">active</span>' : '', s.advanced_diagnostics ? '<span class="pj-chip diag">advanced diagnostics</span>' : ''].join('');
+            return `<tr class="${s.active ? 'live' : ''}" data-action="session-go" data-session-id="${esc(s.session_id)}" title="Open in the Sessions tab">
+                <td class="num">${esc(fmtWhen(s.created_at))}</td>
+                <td><div class="name">${esc(s.name || s.suggested_name || s.session_id)}</div><div class="sub">${plans}${plans && sentence ? ' · ' : ''}${esc(sentence)}</div></td>
+                <td>${holds}</td>
+                <td><span class="ended"><span class="pj-dot ${cls}"></span>${label}</span></td>
+                <td class="sig">${signals}</td>
+                <td class="ag">${agent}</td>
+                <td>${chips}</td>
+            </tr>`;
+        }).join('')}
+        </tbody></table>`;
+    return `<div class="pj-card">
+        <div class="pj-card-head"><h3>Sessions</h3><span class="pj-muted">${rows.length} in this project · aggregated from each session’s own records</span>
+            <span class="pj-right"><button class="hdr-btn" data-action="session-add-open">+ add a session</button></span></div>
+        ${addForm}${body}
+    </div>`;
+}
+
+function goToSession(sid) {
+    if (typeof switchTab === 'function') switchTab('sessions');
+    setTimeout(() => { if (window.ReviewApp && typeof window.ReviewApp.loadSession === 'function') window.ReviewApp.loadSession(sid); }, 80);
+}
+
+// ── findings and notes ───────────────────────────────────
+
+function renderFindingsSection() {
+    const list = state.findings;
+    if (!list) return loadingBox('the findings');
+    const live = list.filter(n => n.status !== 'superseded');
+    const gone = list.filter(n => n.status === 'superseded');
+    return `<div class="pj-card">
+        <div class="pj-card-head"><h3>Findings</h3><span class="pj-muted">claims about this project; the agent’s arrive proposed, a person confirms</span></div>
+        <div class="pj-stack">${live.map(findingCard).join('') || '<div class="pj-none">No finding yet.</div>'}${addRow('finding', 'finding', '')}</div>
+        ${gone.length ? `<div class="pj-stack dimmed"><h4>Superseded</h4>${gone.map(findingCard).join('')}</div>` : ''}
+    </div>`;
+}
+
+function renderNotesSection() {
+    const list = state.notes;
+    if (!list) return loadingBox('the notes');
+    return `<div class="pj-card">
+        <div class="pj-card-head"><h3>Notes</h3><span class="pj-muted">everything in the notebook filed to this project</span></div>
+        <div class="pj-stack">${list.length ? list.map(n => `<div class="pj-entry">
+            <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+            ${n.title ? `<div class="pj-t"><b>${esc(n.title)}</b></div>` : ''}
+            <div class="pj-body">${esc(n.body)}</div>
+            ${(n.sessions || []).length ? `<div class="pj-m">sessions ${n.sessions.map(s => `<span class="pj-cite">${esc(String(s).slice(0, 8))}</span>`).join(' ')}</div>` : ''}
+        </div>`).join('') : '<div class="pj-none">No note is filed to this project yet.</div>'}</div>
+    </div>`;
+}
+
+// ── the add popover: one box, five sources, each group lands when its source answers ──
+
+const SEARCH_SOURCES = ['lab', 'genes', 'strains', 'papers', 'terms'];
+const SEARCH_NAMES = {
+    lab: ['This lab', 'strains and genes already named anywhere in gently'],
+    genes: ['Genes', 'Alliance of Genome Resources, WormBase ids'],
+    strains: ['Strains', 'CGC'],
+    papers: ['Papers', 'Europe PMC · a DOI or PMID resolves directly'],
+    terms: ['Terms', 'WBls life stages and WBbt anatomy, via OLS'],
+};
+
+function openSearch() {
+    state.search = { q: '', groups: {}, sel: -1, rows: [], ctrls: {}, timer: null };
+    state.searchMsg = '';
+    renderCanvas();
+    document.getElementById('pj-search-input')?.focus();
+}
+
+function closeSearch() {
+    const S = state.search;
+    if (S) Object.values(S.ctrls).forEach(c => c.abort());
+    state.search = null;
+    renderCanvas();
+}
+
+function onSearchInput(value) {
+    const S = state.search;
+    if (!S) return;
+    S.q = value;
+    S.sel = -1;
+    clearTimeout(S.timer);
+    S.timer = setTimeout(runSearch, 200);
+}
+
+function runSearch() {
+    const S = state.search;
+    if (!S) return;
+    Object.values(S.ctrls).forEach(c => c.abort());
+    S.ctrls = {};
+    S.groups = {};
+    const q = S.q.trim();
+    if (q.length < 2) { paintSearch(); return; }
+    SEARCH_SOURCES.forEach(src => {
+        const ctrl = new AbortController();
+        S.ctrls[src] = ctrl;
+        S.groups[src] = { status: 'loading', results: [] };
+        fetch(`/api/search/${src}?q=${enc(q)}`, { signal: ctrl.signal })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(data => { if (state.search === S && S.ctrls[src] === ctrl) { S.groups[src] = data; paintSearch(); } })
+            .catch(err => {
+                if (err.name === 'AbortError' || state.search !== S || S.ctrls[src] !== ctrl) return;
+                S.groups[src] = { status: 'error', results: [], error: err.message };
+                paintSearch();
+            });
+    });
+    paintSearch();
+}
+
+function glyphFor(g) {
+    if (!g) return ['plan', 'not asked'];
+    if (g.status === 'loading') return ['cut', 'searching…'];
+    if (g.status === 'error') return ['err', g.error ? `unreachable · ${g.error}` : 'unreachable'];
+    if (g.status === 'empty' || !(g.results || []).length) return ['plan', 'none'];
+    return ['live', `${g.results.length}${g.took_ms != null ? ` · ${g.took_ms} ms` : ''}`];
+}
+
+function renderSearchPopover() {
+    const S = state.search;
+    const q = S.q.trim();
+    let idx = 0;
+    const rows = [];
+    const groups = SEARCH_SOURCES.map(src => {
+        const g = S.groups[src];
+        const [cls, label] = glyphFor(g);
+        const items = (g?.results || []).map(r => {
+            const i = idx++;
+            rows.push(r);
+            return `<div class="pj-srow${S.sel === i ? ' sel' : ''}" data-action="search-pick" data-idx="${i}">
+                <span class="k">${esc(r.title || r.key)}<small>${esc(r.key)}${r.source ? ` · ${esc(r.source)}` : ''}</small></span>
+                <span class="d">${esc(r.subtitle || '')}</span>
+                <span class="to">files as <b>${esc(r.files_as || 'link')}</b></span></div>`;
+        }).join('');
+        return `<div class="pj-sgroup"><div class="gh">${SEARCH_NAMES[src][0]}<span class="src">· ${SEARCH_NAMES[src][1]}</span><span class="st"><span class="pj-dot ${cls}"></span>${esc(label)}</span></div>${items}</div>`;
+    }).join('');
+    S.rows = rows;
+    S.keepIdx = idx;
+    return `<div class="pj-search" id="pj-search">
+        <div class="top"><input id="pj-search-input" value="${esc(S.q)}" placeholder="a strain, gene, paper, DOI, PMID or term" autocomplete="off" spellcheck="false">
+            <span class="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>↵</kbd> add and keep searching · <kbd>esc</kbd> close</span>
+            <button data-action="search-close" title="Close">×</button></div>
+        ${q.length < 2 ? '<div class="pj-none">Type at least two characters.</div>' : groups}
+        ${q.length >= 2 ? `<div class="pj-srow keep${S.sel === idx ? ' sel' : ''}" data-action="search-keep" data-idx="${idx}">Keep “${esc(q)}” as plain text<small>· always offered, so a lost network never blocks a note</small></div>` : ''}
+        <div class="pj-sfoot">${state.searchMsg ? esc(state.searchMsg) : 'The lab first, then the Alliance, CGC, Europe PMC and OLS. WormBase ids arrive through the Alliance and OLS; each chip links to wormbase.org.'}</div>
+    </div>`;
+}
+
+// Repaint only the popover, so the caret stays where it was.
+function paintSearch() {
+    const el = document.getElementById('pj-search');
+    if (!el || !state.search) return;
+    const input = el.querySelector('input');
+    const pos = input ? input.selectionStart : null;
+    const focused = document.activeElement === input;
+    el.outerHTML = renderSearchPopover();
+    const inp = document.getElementById('pj-search-input');
+    if (inp && focused) {
+        inp.focus();
+        if (pos != null) inp.setSelectionRange(pos, pos);
+    }
+}
+
+function onSearchKey(e) {
+    const S = state.search;
+    if (!S) return;
+    const last = S.keepIdx != null ? S.keepIdx : -1;
+    if (e.key === 'ArrowDown') { e.preventDefault(); S.sel = Math.min(last, S.sel + 1); paintSearch(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); S.sel = Math.max(-1, S.sel - 1); paintSearch(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+    else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (S.sel >= 0 && S.sel < S.rows.length) pickSearch(S.sel);
+        else if (S.q.trim().length >= 2) keepText();
+    }
+}
+
+async function addReference(ref) {
+    const P = enc(state.activeCampaignId);
+    await api('POST', `/api/campaigns/${P}/references`, {
+        source: ref.source, key: ref.key, title: ref.title, url: ref.url || null,
+        subtitle: ref.subtitle || null, files_as: ref.files_as || 'link',
+    });
+    state.searchMsg = `Kept ${ref.title || ref.key} as a ${ref.files_as === 'strain' ? 'strain' : 'link'}.`;
+    await Promise.all([loadDocument(state.activeCampaignId), refreshSummaries()]);
+    renderCanvas();
+    document.getElementById('pj-search-input')?.focus();
+}
+
+async function pickSearch(i) {
+    const S = state.search;
+    const r = S && S.rows[i];
+    if (!r) return;
+    try { await addReference(r); } catch (err) { state.searchMsg = err.message; paintSearch(); }
+}
+
+async function keepText() {
+    const S = state.search;
+    const q = S && S.q.trim();
+    if (!q) return;
+    try { await addReference({ source: 'text', key: q, title: q, files_as: 'link' }); } catch (err) { state.searchMsg = err.message; paintSearch(); }
+}
+
+// ── the actions: every write through the same routes the agent's tools mirror ──
+
+let _intentTimer = null;
+function previewIntent(text) {
+    if (_intentTimer) clearTimeout(_intentTimer);
+    _intentTimer = setTimeout(async () => {
+        const host = document.getElementById('pj-intent-preview');
+        if (!host) return;
+        if (!text || text.trim().length < 4) { host.innerHTML = ''; return; }
+        try {
+            const r = await fetch(`/api/plan/intent?text=${encodeURIComponent(text)}`);
+            const d = await r.json();
+            const read = specSummary(d.spec);
+            host.innerHTML = read
+                ? `reads as <b>${esc(read)}</b> <span class="pj-muted">· the rest stays to fill</span>`
+                : '<span class="pj-muted">no numbers or stages in the sentence yet; the spec can be filled after, or asked of Gently</span>';
+        } catch (_) { host.innerHTML = ''; }
+    }, 200);
+}
+
+async function draftItem(id, note) {
+    const P = enc(state.activeCampaignId);
+    state.transcribeMsg = { id, text: 'Gently is drafting…' };
+    state.openForm = null;
+    renderCanvas();
+    const r = await api('POST', `/api/campaigns/${P}/items/${enc(id)}/draft`, { note: note || null });
+    const read = (r.from_sentence || []).length;
+    const parts = [];
+    if (r.status === 'unavailable') parts.push((r.assumptions || [])[0] || 'no model to ask');
+    else parts.push(`${(r.filled || []).length} field${(r.filled || []).length !== 1 ? 's' : ''} in the spec, ${read} read from the sentence`);
+    state.transcribeMsg = { id, text: parts.join(' · ') };
+    await reloadProject();
+}
+
+async function submitForm(btn) {
+    const form = btn.closest('.pj-form');
+    const kind = btn.dataset.form;
+    const d = fields(form);
+    const cid = state.activeCampaignId;
+    const P = enc(cid);
+    if (kind === 'item') {
+        if (!d.title) return showErr(form, 'A title is needed.');
+        await api('POST', `/api/campaigns/${P}/items`, { type: d.type || 'imaging', title: d.title, phase_id: d.phase_id || null, origin: 'manual', draft: true });
+    } else if (kind === 'expectation') {
+        if (!d.prediction) return showErr(form, 'Say what will happen.');
+        await api('POST', '/api/context/expectations', {
+            target: d.target || 'project', prediction: d.prediction,
+            expected_time: d.expected_time || new Date().toISOString().slice(0, 16),
+            uncertainty: d.uncertainty || null, project_id: cid,
+        });
+    } else if (kind === 'finding') {
+        if (!d.body) return showErr(form, 'Write the finding.');
+        await api('POST', '/api/notebook/notes', { kind: 'finding', body: d.body, projects: [cid] });
+    } else if (kind === 'question') {
+        if (!d.content) return showErr(form, 'Write the question.');
+        await api('POST', '/api/context/questions', { content: d.content, project_id: cid });
+    } else {
+        return;
+    }
+    state.openForm = null;
+    await reloadProject();
+}
+
+async function projectAction(action, el, e) {
+    const cid = state.activeCampaignId;
+    const id = el.dataset.id;
+    const P = enc(cid || '');
+    try {
+        switch (action) {
+            case 'item-draft':
+                await draftItem(id, null);
+                return;
+            case 'item-redraft': {
+                const f = el.closest('.pj-form');
+                const note = f ? (fields(f).note || '') : '';
+                await draftItem(id, note);
+                return;
+            }
+            case 'dep-add':
+                if (!el.value) return;
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/depends`, { depends_on: el.value });
+                await Promise.all([reloadProject(), selectItem(id)]);
+                return;
+            case 'dep-remove':
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/depends`, { depends_on: el.dataset.dep, remove: true });
+                await Promise.all([reloadProject(), selectItem(id)]);
+                return;
+            case 'item-undepend':
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/depends`, { depends_on: el.dataset.dep, remove: true });
+                await reloadProject();
+                return;
+            case 'item-setup': {
+                const it = allItems().find(x => x.id === id);
+                if (it) setUpOnDevices(it);
+                return;
+            }
+            case 'item-accept-spec':
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/spec/accept`, {});
+                state.transcribeMsg = null;
+                await reloadProject();
+                return;
+            case 'section':
+                state.section = el.dataset.section;
+                state.openForm = null;
+                renderAll();
+                loadSection();
+                return;
+            case 'new-project-open':
+                state.newProjectOpen = !state.newProjectOpen;
+                renderNewProjectForm();
+                return;
+            case 'new-project-cancel':
+                state.newProjectOpen = false;
+                renderNewProjectForm();
+                return;
+            case 'new-project-submit': {
+                const host = document.getElementById('new-project-form');
+                const d = fields(host);
+                if (!d.description) { showErr(host, 'Say what the project asks, in one line.'); return; }
+                const r = await api('POST', '/api/campaigns', { description: d.description, shorthand: d.shorthand || null });
+                state.newProjectOpen = false;
+                renderNewProjectForm();
+                await refreshSummaries();
+                renderNavigator();
+                await openCampaign(r.campaign.id);
+                return;
+            }
+            case 'ref-remove':
+                e.preventDefault();
+                await api('DELETE', `/api/campaigns/${P}/references?source=${enc(el.dataset.source)}&key=${enc(el.dataset.key)}`);
+                await Promise.all([loadDocument(cid), refreshSummaries()]);
+                renderCanvas();
+                return;
+            case 'search-open': openSearch(); return;
+            case 'search-close': closeSearch(); return;
+            case 'search-pick': await pickSearch(Number(el.dataset.idx)); return;
+            case 'search-keep': await keepText(); return;
+            case 'item-accept':
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/status`, { status: 'planned' });
+                await reloadProject();
+                return;
+            case 'item-skip':
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/status`, { status: 'skipped' });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            case 'item-remove':
+                await api('DELETE', `/api/campaigns/${P}/items/${enc(id)}`);
+                state.openForm = null;
+                if (state.selectedItemId === id) closeInspector();
+                await reloadProject();
+                return;
+            case 'item-menu':
+                state.openForm = state.openForm === `menu:${id}` ? null : `menu:${id}`;
+                renderCanvas();
+                return;
+            case 'item-move':
+                if (!el.value) return;  // the click that opens the select, not a choice
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/move`, { campaign_id: el.value });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            case 'item-depends':
+                if (!el.value) return;
+                await api('POST', `/api/campaigns/${P}/items/${enc(id)}/depends`, { depends_on: el.value });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            case 'form-open':
+                state.openForm = el.dataset.form;
+                renderCanvas();
+                focusFirst();
+                return;
+            case 'form-close':
+                state.openForm = null;
+                renderCanvas();
+                return;
+            case 'form-submit': await submitForm(el); return;
+            case 'outcome-save': {
+                const d = fields(el.closest('.pj-form'));
+                await api('PATCH', `/api/campaigns/${P}/items/${enc(id)}`, { outcome: d.outcome || '' });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            }
+            case 'exp-resolve':
+                await api('POST', `/api/context/expectations/${enc(id)}/resolve`, { status: el.dataset.status });
+                await reloadProject();
+                return;
+            case 'q-resolve': {
+                const form = el.closest('.pj-form');
+                const resolution = form ? (fields(form).resolution || '') : (el.dataset.resolution || '');
+                await api('POST', `/api/context/questions/${enc(id)}/resolve`, { resolution });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            }
+            case 'note-status':
+                await api('POST', `/api/notebook/notes/${enc(id)}/status`, { status: el.dataset.status });
+                await reloadProject();
+                return;
+            case 'note-supersede': {
+                const form = el.closest('.pj-form');
+                const d = fields(form);
+                if (!d.body) { showErr(form, 'Write the finding that replaces it.'); return; }
+                await api('POST', '/api/notebook/notes', { kind: 'finding', body: d.body, projects: [cid], basis: [id] });
+                await api('POST', `/api/notebook/notes/${enc(id)}/status`, { status: 'superseded' });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            }
+            case 'plan-with-gently': {
+                const r = await api('POST', `/api/campaigns/${P}/plan-mode`);
+                state.planMsg = r.ok ? (r.message || 'In plan mode.') : (r.detail || 'The agent is not running.');
+                if (r.ok) document.getElementById('agent-rail-toggle')?.click();
+                renderCanvas();
+                return;
+            }
+            case 'session-go': goToSession(el.dataset.sessionId); return;
+            case 'session-add-open': {
+                state.openForm = 'add-session';
+                state.unfiled = null;
+                renderCanvas();
+                let list = (await api('GET', '/api/sessions?unfiled=1')).sessions || [];
+                if (!list.length) list = (await api('GET', '/api/sessions')).sessions || [];
+                state.unfiled = list.filter(s => s.project_id !== cid);
+                renderCanvas();
+                return;
+            }
+            case 'session-add-submit': {
+                const d = fields(el.closest('.pj-form'));
+                if (!d.session_id) return;
+                await api('POST', `/api/sessions/${enc(d.session_id)}/project`, { campaign_id: cid });
+                state.openForm = null;
+                await reloadProject();
+                return;
+            }
+            default:
+                return;
+        }
+    } catch (err) {
+        showErr(el, err.message);
     }
 }
 

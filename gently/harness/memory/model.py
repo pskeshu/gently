@@ -52,6 +52,7 @@ class PlanItemStatus(str, Enum):
     COMPLETED = "completed"
     SKIPPED = "skipped"
     BLOCKED = "blocked"
+    PROPOSED = "proposed"  # suggested by the agent; a person accepts it into the plan
 
 
 class PlanItemType(str, Enum):
@@ -115,6 +116,10 @@ class Campaign:
     parent_id: str | None = None  # Parent campaign (for hierarchy)
     status: Status = Status.ACTIVE
     is_shared: bool = False
+    # A root campaign is a project. Each entry is the one reference shape:
+    # {source, key, title, url, subtitle, added_by, added_at}.
+    strains: list[dict] = field(default_factory=list)
+    references: list[dict] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -124,22 +129,6 @@ class Campaign:
         if self.shorthand:
             return self.shorthand
         return self.description[:50] + ("..." if len(self.description) > 50 else "")
-
-
-@dataclass
-class Project:
-    """
-    A project within a campaign — a discrete piece of work.
-
-    Example: "Optimize imaging parameters for early stages"
-    """
-
-    id: str
-    description: str
-    campaign_id: str | None = None
-    status: Status = Status.ACTIVE
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
@@ -252,6 +241,15 @@ class ImagingSpec:
     #         exclusive_burst | oneshot | custom
     # Populated at plan time; later seeds the session's Operation Plan.
     tactics: list[dict] = field(default_factory=list)
+    # Gently's draft of this spec from the item's sentence: {status: drafting |
+    # drafted | unavailable | accepted, rationale, assumptions[], at}. A draft is a
+    # proposal; the fields it filled carry provenance source "model".
+    draft: dict[str, Any] | None = None
+    # The acquisition as Devices › Operate runs it: the same structure a saved
+    # tactic carries and the start route keeps with a session. See
+    # gently/harness/memory/acquisition.py; the flat fields above are the
+    # older way of saying the same thing and are read into it.
+    acquisition: dict[str, Any] | None = None
 
 
 @dataclass
@@ -309,6 +307,7 @@ class PlanItem:
 
     # Ordering
     phase_order: int = 0
+    origin: str = "agent"  # "agent" (plan mode, or a suggestion) or "manual" (set up by hand)
 
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -324,7 +323,6 @@ class Intentions:
     """Collection of the agent's intentions at multiple levels."""
 
     campaigns: list[Campaign] = field(default_factory=list)
-    projects: list[Project] = field(default_factory=list)
     planned_sessions: list[PlannedSession] = field(default_factory=list)
     current_focus: str | None = None
     session_intent: SessionIntent | None = None
@@ -424,6 +422,8 @@ class Expectation:
     uncertainty: str | None = None  # "±30 minutes"
     basis: str | None = None  # Why we expect this
     status: ExpectationStatus = ExpectationStatus.PENDING
+    session_id: str | None = None  # the session it was made in; its project follows from it
+    project_id: str | None = None  # set when made for a project outside any session
     created_at: datetime = field(default_factory=datetime.now)
     resolved_at: datetime | None = None
 
@@ -460,6 +460,8 @@ class Question:
     id: str
     content: str
     status: QuestionStatus = QuestionStatus.OPEN
+    session_id: str | None = None
+    project_id: str | None = None
     resolution: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     resolved_at: datetime | None = None

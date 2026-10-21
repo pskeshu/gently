@@ -470,6 +470,7 @@ class FileStore:
         name: str | None = None,
         description: str | None = None,
         metadata: dict | None = None,
+        project_id: str | None = None,
     ) -> str:
         """Create a new session.  Returns session_id."""
         # If session already exists, return silently (matches INSERT OR IGNORE)
@@ -495,6 +496,7 @@ class FileStore:
             "created_at": now,
             "last_active": now,
             "metadata": metadata,
+            "project_id": project_id,
         }
         _write_yaml(session_path / "session.yaml", session_data)
 
@@ -515,13 +517,21 @@ class FileStore:
             return None
         return data
 
-    def list_sessions(self) -> list[SessionInfo]:
-        """Return all sessions ordered by last_active descending."""
+    def list_sessions(
+        self, *, project_id: str | None = None, unfiled: bool = False
+    ) -> list[SessionInfo]:
+        """Return all sessions ordered by last_active descending. With
+        ``project_id`` only that project's; with ``unfiled`` only those in none."""
         sessions = []
         for sid in self._index:
             info = self.get_session(sid)
-            if info is not None:
-                sessions.append(info)
+            if info is None:
+                continue
+            if project_id is not None and info.get("project_id") != project_id:
+                continue
+            if unfiled and info.get("project_id"):
+                continue
+            sessions.append(info)
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
         return sessions
 
@@ -569,6 +579,20 @@ class FileStore:
             data["name"] = name.strip() or None
         if description is not None:
             data["description"] = description.strip() or None
+        _write_yaml(yaml_path, data)
+        return data
+
+    def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
+        """File a session under a project (a root campaign id), or under none.
+        The one truth of membership; everything else reads it from here."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return None
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return None
+        data["project_id"] = project_id or None
         _write_yaml(yaml_path, data)
         return data
 

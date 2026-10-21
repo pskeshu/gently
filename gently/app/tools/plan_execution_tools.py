@@ -113,13 +113,26 @@ async def execute_plan_item(
     orchestrator = getattr(agent, "timelapse_orchestrator", None)
     if orchestrator:
         try:
-            stop_cond = spec.stop_condition or "manual"
-            interval = spec.interval_s or 120
-            await orchestrator.start(
-                embryo_ids=embryo_ids,
-                stop_condition=stop_cond,
-                base_interval_seconds=interval,
-            )
+            from dataclasses import asdict as _asdict
+
+            from gently.harness.memory.acquisition import effective_acquisition
+
+            # The acquisition the item means, in the pane's shape: an explicit
+            # one wins, else the older flat fields.
+            acq = effective_acquisition(_asdict(spec)) or {}
+            stop_cond = acq.get("stop_condition") or spec.stop_condition or "manual"
+            interval = acq.get("cadence_s") or spec.interval_s or 120
+            start_kwargs: dict = {
+                "embryo_ids": embryo_ids,
+                "stop_condition": stop_cond,
+                "base_interval_seconds": interval,
+            }
+            for key in ("bf", "stop_conditions", "laser_config"):
+                if acq.get(key):
+                    start_kwargs[key] = acq[key]
+            if acq.get("volumes") is False:
+                start_kwargs["volumes"] = False
+            await orchestrator.start(**start_kwargs)
             actions.append(f"timelapse started: {stop_cond}, {interval}s interval")
 
             # 9. Set up adaptive interval rules
@@ -143,18 +156,21 @@ async def execute_plan_item(
         except Exception as e:
             actions.append(f"timelapse start error: {e}")
 
-    # 7. Link this run to the plan item + campaign — AFTER start, so the session exists.
-    #    Appends (an item may run several sessions). Surface failures, don't swallow.
+    # 7. File this run under the item's project — AFTER start, so the session exists.
+    #    One door (gently.app.filing): the session gets its home project if it has
+    #    none, and the item records the session (an item may run several sessions).
     session_id = getattr(agent, "session_id", None)
     if session_id:
         try:
-            cs.link_session_campaign(session_id, item.campaign_id)
-            cs.link_plan_item_session(item.id, session_id)
-            actions.append(
-                f"linked session {session_id[:8]} → plan item + campaign (status → in_progress)"
+            from gently.app.filing import file_session_under
+
+            filed = file_session_under(
+                getattr(agent, "store", None), cs, session_id, item.campaign_id, item.id
             )
+            where = "filed under project" if filed.get("home_set") else "linked to plan item"
+            actions.append(f"{where} {filed.get('project_id', '')[:8]} (session {session_id[:8]})")
         except Exception as e:
-            actions.append(f"⚠ link failed: {e}")
+            actions.append(f"⚠ filing failed: {e}")
     else:
         actions.append("⚠ no active session — could not link this run to the plan item")
 

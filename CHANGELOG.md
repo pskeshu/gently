@@ -758,6 +758,92 @@ on the microscope.
 
 ---
 
+## Unreleased — the project layer
+
+A root campaign is a project, and a project now holds what a biologist asks a
+project to hold: its sessions, its plan, the ledger of what is next, predicted,
+measured and open, the strains and references it rests on, and a view of how
+every night in it went. Nothing moved on disk; the project is a filter over
+the records that were already there, keyed by one new field.
+
+**Sessions belong to a project**
+
+- `session.yaml.project_id` is the one truth of membership. Every caller that
+  used to write the session-intent record goes through one door,
+  `gently/app/filing.py`: the agent when it runs a plan item, the Operate
+  start through the resolution tools, and the Sessions tab's "File under…".
+- A session has one home and can serve plan items in other projects; the
+  Sessions tab says "also serves …" for those. Sessions filed before the
+  field existed get their home from their plan links at startup, once.
+- `GET /api/sessions?project_id=` returns the project's sessions with what the
+  project view shows: errors and warnings from the event capture, the agent's
+  turns and corrections from the interaction log. `?unfiled=1` lists the rest.
+
+**The ledger**
+
+- `GET /api/campaigns/{id}/ledger`: next (unblocked items), proposed, blocked,
+  predicted (expectations), measured (outcomes and findings), open and
+  answered questions. Expectations and questions carry the session they were
+  made in, so a project owns them through its sessions.
+- A plan item can be `proposed`: the agent's suggestion, never runnable until
+  a person accepts it. Outside plan mode the agent's `create_plan_item` makes
+  proposed items; in plan mode, where the plan is written together, planned.
+- A finding is a notebook note of kind `finding` with a `projects` facet. The
+  agent's `propose_finding` files one as proposed; a person confirms,
+  supersedes or dismisses it on the Projects tab. `record_expectation` and
+  `raise_question` give the other two columns a writer; a person adds the same
+  things through `/api/context` and `/api/notebook`.
+- When the live session changes, one deterministic "Session summary" note is
+  written for the night that ends: embryos, timepoints, how the run ended,
+  errors and warnings, agent turns. Nothing for an empty session.
+
+**An intention becomes a spec**
+
+- A plan item written as a sentence is read at once for what it states
+  (embryos, cadence, channels, stop, temperature, strain, exposure, and the
+  "to check…" clause as the success criterion), and Gently drafts the rest in
+  the background: the kind of acquisition, settings inside the instrument's
+  limits, a tactic outline the run can execute, a title, a rationale and its
+  assumptions. The card shows the draft as a proposal with Accept, Edit and
+  Ask again; nothing runs on it until a person accepts. Every field carries
+  where it came from, and a person's field is never overwritten by a draft.
+
+**The spec is the pane's shape**
+
+- A plan item's acquisition is now the structure Devices › Operate runs,
+  the same one a saved tactic carries and a session keeps: cadence, volumes
+  or brightfield-only, slices and exposure, laser preset and per-line powers,
+  the brightfield overview, the ending. The June-era flat fields are read into
+  it, so nothing already written is lost. The card says it in the pane's own
+  sentence.
+- **Set up on Devices** on an item opens Devices › Operate with the
+  Acquisition pane filled from it; Start files the run under the item and the
+  plan records what actually ran. Gently's drafts arrive in this shape.
+
+**References, through one search**
+
+- A project carries `strains[]` and `references[]`, each `{source, key,
+  title, url, subtitle}`. `GET /api/search/{source}?q=` answers one source at
+  a time so the add popover can query five in parallel: the lab's own names
+  (instant, offline), genes from the Alliance of Genome Resources (WormBase
+  ids), CGC strains, papers from Europe PMC, WormBase life-stage and anatomy
+  terms from the EBI Ontology Lookup Service. The agent's `search_references`
+  and `add_reference` tools use the same functions.
+- WormBase's own REST API answers scripts with a browser challenge, so the two
+  WormBase lookups in the research tools, which had been failing silently,
+  are gone; WormBase ids come through the Alliance and OLS, and every chip
+  links to wormbase.org for a person. CGC's search page now links strains by
+  absolute URL; the parser follows.
+- Each C. elegans stage carries its WBls term (`gently/organisms/celegans/
+  stages.py`); the session detail hands the map to the Sessions tab.
+
+**Removed**
+
+- The dormant `Project` dataclass, its writer and the `agent/projects/`
+  directory; the never-written `summary.yaml` from the storage map.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:

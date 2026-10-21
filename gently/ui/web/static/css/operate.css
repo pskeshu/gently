@@ -1850,3 +1850,11 @@
 /* What the plan's "taken from the fields" means, under the select. The
    fields themselves are the list in the left column (panels/fields.js). */
 #op-plan-bf-pin[hidden] { display: none; }
+
+/* ---- a plan item set up on this pane ---- */
+.op-setup-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; padding: 7px 10px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--bg-card); font-size: 12.5px; }
+.op-setup-banner b { font-weight: 600; }
+.op-setup-chip { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 7px; }
+.op-setup-hint { color: var(--text-muted); }
+.op-setup-clear { margin-left: auto; font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
+.op-setup-clear:hover { color: var(--text); border-color: var(--accent); }

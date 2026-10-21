@@ -6,9 +6,14 @@ inform experimental design. Results are returned as context for the
 LLM to interpret, not as final answers.
 
 APIs used:
-- PubMed E-utilities (esearch + esummary) for literature
-- NCBI Gene database for gene search
-- WormBase REST API for strain details per gene
+- PubMed E-utilities (esearch + esummary) and Europe PMC for literature
+- NCBI Gene and the Alliance of Genome Resources for genes (WormBase ids)
+- CGC strain pages (HTML; CGC has no JSON API) for strains
+- EBI Ontology Lookup Service for WormBase life-stage and anatomy terms
+
+WormBase's own REST API answers scripts with a browser challenge, so WormBase
+ids arrive through the Alliance and OLS and each result links to wormbase.org
+for a person.
 """
 
 import json
@@ -222,126 +227,12 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# WormBase strain lookup (by gene ID)
-# ---------------------------------------------------------------------------
-
-
-async def _wormbase_gene_strains(wbgene_id: str) -> list[dict]:
-    """Get strains carrying a gene from WormBase REST API.
-
-    Parameters
-    ----------
-    wbgene_id : str
-        WormBase gene ID, e.g. "WBGene00004295"
-    """
-    import aiohttp
-
-    results: list[dict] = []
-
-    try:
-        url = f"https://rest.wormbase.org/rest/field/gene/{wbgene_id}/strains"
-        async with _http_session() as session:
-            async with session.get(
-                url,
-                headers={"Accept": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning(f"WormBase strains HTTP {resp.status} for {wbgene_id}")
-                    return []
-                data = await resp.json(content_type=None)
-
-        strains_data = data.get("strains", {}).get("data", {})
-        if not strains_data:
-            return []
-
-        # Collect from all categories, noting CGC availability
-        for category, strain_list in strains_data.items():
-            if not isinstance(strain_list, list):
-                continue
-            is_cgc = "cgc" in category.lower()
-            for entry in strain_list:
-                if not isinstance(entry, dict):
-                    continue
-                results.append(
-                    {
-                        "name": entry.get("label", ""),
-                        "genotype": entry.get("genotype", ""),
-                        "cgc_available": is_cgc or category == "available_from_cgc",
-                        "category": category,
-                    }
-                )
-
-    except Exception as e:
-        logger.warning(f"WormBase strain lookup failed: {e}", exc_info=True)
-
-    return results
-
-
-async def _wormbase_gene_id_lookup(gene_name: str) -> str | None:
-    """Look up a WormBase gene ID from an NCBI gene name.
-
-    Uses NCBI gene → dbxrefs to find WormBase ID, or falls back to
-    the WormBase REST API name endpoint.
-    """
-    import aiohttp
-
-    try:
-        # Try NCBI gene search with exact name match
-        async with _http_session() as session:
-            async with session.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params=_ncbi_params(
-                    db="gene",
-                    term=f"{gene_name}[Gene Name] AND Caenorhabditis elegans[orgn]",
-                    retmax="1",
-                ),
-                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json(content_type=None)
-
-            id_list = data.get("esearchresult", {}).get("idlist", [])
-            if not id_list:
-                return None
-
-            # Get full gene record as XML to find WormBase xref
-            # Must use retmode=xml — WBGene IDs don't appear in json
-            efetch_params = _ncbi_params(
-                db="gene",
-                id=id_list[0],
-            )
-            efetch_params["retmode"] = "xml"
-            async with session.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
-                params=efetch_params,
-                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                text = await resp.text()
-
-            # Look for WBGene ID in the response text
-            import re
-
-            match = re.search(r"(WBGene\d+)", text)
-            if match:
-                return match.group(1)
-
-    except Exception as e:
-        logger.warning(f"WormBase gene ID lookup failed for {gene_name}: {e}")
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# CGC strain search (HTML scraping fallback)
+# CGC strain search (HTML — CGC has no JSON API)
 # ---------------------------------------------------------------------------
 
 
 async def _cgc_search(query: str, field: str = "strain") -> list[dict]:
-    """Search CGC (Caenorhabditis Genetics Center) strain database.
+    """Search the CGC (Caenorhabditis Genetics Center) strain database.
 
     Parameters
     ----------
@@ -349,12 +240,12 @@ async def _cgc_search(query: str, field: str = "strain") -> list[dict]:
         Search term (strain name, gene name, or keyword).
     field : str
         Field to search: "strain", "genotype", "description", "all".
+
+    The results page is HTML: one table row per strain, linked by absolute
+    URL, with species in one cell and genotype plus a folded description in
+    the next.
     """
-    import re
-
     import aiohttp
-
-    results: list[dict] = []
 
     try:
         url = "https://cgc.umn.edu/strain/search"
@@ -369,58 +260,42 @@ async def _cgc_search(query: str, field: str = "strain") -> list[dict]:
                     logger.debug(f"CGC search HTTP {resp.status}")
                     return []
                 html = await resp.text()
-
-        # Parse strain entries from HTML table rows
-        # CGC uses table rows with strain name, species, genotype, description
-        # Pattern: look for strain links like /strain/OH904
-        strain_pattern = re.compile(
-            r"/strain/([A-Z]{1,3}\d+).*?"
-            r"<td[^>]*>(.*?)</td>.*?"  # species
-            r"<td[^>]*>(.*?)</td>.*?"  # genotype
-            r"<td[^>]*>(.*?)</td>",  # description
-            re.DOTALL,
-        )
-
-        for match in strain_pattern.finditer(html):
-            strain_name = match.group(1).strip()
-            genotype = re.sub(r"<[^>]+>", "", match.group(3)).strip()
-            description = re.sub(r"<[^>]+>", "", match.group(4)).strip()
-
-            if strain_name:
-                results.append(
-                    {
-                        "name": strain_name,
-                        "genotype": genotype,
-                        "description": description[:200] if description else "",
-                        "source": "CGC",
-                    }
-                )
-
-        # If regex didn't work, try a simpler approach — find strain names
-        if not results:
-            simple_pattern = re.compile(r'href="/strain/([A-Z]{1,3}\d+)"')
-            seen = set()
-            for m in simple_pattern.finditer(html):
-                name = m.group(1)
-                if name not in seen:
-                    seen.add(name)
-                    results.append(
-                        {
-                            "name": name,
-                            "genotype": "",
-                            "description": "",
-                            "source": "CGC",
-                        }
-                    )
-
-        # Check for "no results" message
-        if "no results for this search" in html.lower():
-            return []
-
     except Exception as e:
         logger.warning(f"CGC search failed: {e}", exc_info=True)
+        return []
+    return _parse_cgc_rows(html)[:10]
 
-    return results[:10]
+
+def _parse_cgc_rows(html: str) -> list[dict]:
+    """Strain rows out of a CGC search page."""
+    import html as html_mod
+    import re
+
+    def text(cell: str) -> str:
+        return re.sub(r"\s+", " ", html_mod.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
+
+    results: list[dict] = []
+    seen: set[str] = set()
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+        m = re.search(r'href="(?:https?://cgc\.umn\.edu)?/strain/([A-Za-z]{1,4}\d+)"', row)
+        if not m or m.group(1) in seen:
+            continue
+        cells = [text(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+        cells = [c for c in cells if c]
+        species = cells[1] if len(cells) > 1 else ""
+        rest = cells[2] if len(cells) > 2 else ""
+        genotype, _, description = rest.partition("Show Description")
+        seen.add(m.group(1))
+        results.append(
+            {
+                "name": m.group(1),
+                "species": species,
+                "genotype": genotype.strip().rstrip("."),
+                "description": description.strip()[:200],
+                "source": "CGC",
+            }
+        )
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -655,28 +530,17 @@ async def search_strains(
         if gene["aliases"]:
             lines.append(f"   Aliases: {gene['aliases']}")
 
-        # Step 2: Try to get WormBase strains for the top gene(s)
-        if i <= 2:  # Only look up strains for top 2 to keep latency reasonable
-            wbgene_id = await _wormbase_gene_id_lookup(gene["name"])
-            if wbgene_id:
-                strains = await _wormbase_gene_strains(wbgene_id)
-                if strains:
-                    lines.append(f"   **Strains ({len(strains)} found):**")
-                    # Show up to 6, prioritising CGC-available
-                    sorted_strains = sorted(
-                        strains,
-                        key=lambda s: (not s["cgc_available"], s["name"]),
-                    )
-                    for s in sorted_strains[:6]:
-                        cgc_tag = " [CGC]" if s["cgc_available"] else ""
-                        geno = f" — {s['genotype']}" if s["genotype"] else ""
-                        lines.append(f"   - {s['name']}{cgc_tag}{geno}")
-                    if len(strains) > 6:
-                        lines.append(f"   - ... and {len(strains) - 6} more")
-                else:
-                    lines.append("   No strains found in WormBase for this gene.")
-            else:
-                lines.append("   (WormBase ID not resolved — strain lookup skipped)")
+        # Step 2: the WormBase id and page for the top gene(s), via the Alliance
+        # (WormBase's own API answers scripts with a browser challenge).
+        if i <= 2:
+            hits = await _alliance_autocomplete(gene["name"], limit=8)
+            same = [
+                h
+                for h in hits
+                if h["kind"] == "gene" and h["title"].lower() == str(gene["name"]).lower()
+            ]
+            if same:
+                lines.append(f"   WormBase: {same[0]['key']} — {same[0]['url']}")
 
         if gene["summary"]:
             # Truncate long summaries
@@ -1376,3 +1240,321 @@ async def read_paper(
         f"- Share the PDF file path\n"
         f"- Try a more specific citation (e.g. 'Rapti 2019 Cell nerve ring')"
     )
+
+
+# ---------------------------------------------------------------------------
+# One search for the operator and the agent
+# ---------------------------------------------------------------------------
+
+SEARCH_SOURCES = ("lab", "genes", "strains", "papers", "terms")
+
+_WB_URL = {
+    "WBGene": "https://wormbase.org/species/c_elegans/gene/{key}",
+    "WBls": "https://wormbase.org/species/all/life_stage/{key}",
+    "WBbt": "https://wormbase.org/species/all/anatomy_term/{key}",
+    "WBStrain": "https://wormbase.org/species/c_elegans/strain/{key}",
+}
+
+
+def wormbase_url(key: str) -> str | None:
+    """Where a WormBase id resolves for a person, by its prefix."""
+    for prefix, pattern in _WB_URL.items():
+        if key.startswith(prefix):
+            return pattern.format(key=key)
+    return None
+
+
+def _ref(
+    source: str,
+    kind: str,
+    key: str,
+    title: str,
+    subtitle: str | None = None,
+    url: str | None = None,
+    files_as: str = "link",
+) -> dict:
+    """The one reference shape every source answers in and a project stores."""
+    return {
+        "source": source,
+        "kind": kind,
+        "key": key,
+        "title": title,
+        "subtitle": subtitle or "",
+        "url": url,
+        "files_as": files_as,
+    }
+
+
+async def _get_json(url: str, params: dict | None = None):
+    import aiohttp
+
+    async with _http_session() as session:
+        async with session.get(
+            url,
+            params=params,
+            headers={"Accept": "application/json", "User-Agent": "gently (microscopy agent)"},
+            timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"HTTP {resp.status} from {url}")
+            return await resp.json(content_type=None)
+
+
+async def _alliance_autocomplete(q: str, limit: int = 8) -> list[dict]:
+    """Genes (and genotypes) by name from the Alliance of Genome Resources,
+    worm first. A gene's key is its WormBase id, so the chip can link there."""
+    data = await _get_json("https://www.alliancegenome.org/api/search_autocomplete", {"q": q})
+    rows = data.get("results", data) if isinstance(data, dict) else data
+    out: list[dict] = []
+    for r in rows or []:
+        cat = r.get("category") or ""
+        name_key = r.get("nameKey") or r.get("name") or ""
+        worm = name_key.endswith("(Cel)")
+        if cat == "gene_search_result":
+            curie = r.get("curie") or r.get("primaryKey") or ""
+            key = curie.split(":", 1)[1] if ":" in curie else curie
+            if not key:
+                continue
+            species = "C. elegans" if worm else name_key[name_key.rfind("(") + 1 : -1] or ""
+            url = wormbase_url(key) if worm else None
+            out.append(
+                _ref("alliance", "gene", key, r.get("symbol") or r.get("name") or key, species, url)
+            )
+        elif cat in ("model_search_result", "allele_search_result") and worm:
+            key = (r.get("primaryKey") or r.get("curie") or "").split(":", 1)[-1]
+            title = (r.get("name") or name_key).replace(" (Cel)", "")
+            kind = "genotype" if cat.startswith("model") else "allele"
+            out.append(
+                _ref(
+                    "alliance",
+                    kind,
+                    key or title,
+                    title,
+                    "C. elegans",
+                    None,
+                    "strain" if kind == "genotype" else "link",
+                )
+            )
+    out.sort(key=lambda h: (h["subtitle"] != "C. elegans", h["kind"] != "gene"))
+    return out[:limit]
+
+
+async def _ols_search(q: str, limit: int = 8, ontologies: str = "wbls,wbbt") -> list[dict]:
+    """WormBase life-stage (WBls) and anatomy (WBbt) terms via the EBI Ontology
+    Lookup Service, which carries both and answers JSON."""
+    data = await _get_json(
+        "https://www.ebi.ac.uk/ols4/api/search",
+        {"q": q, "ontology": ontologies, "rows": str(limit)},
+    )
+    out: list[dict] = []
+    for doc in (data.get("response") or {}).get("docs") or []:
+        key = doc.get("obo_id") or ""
+        if not key:
+            continue
+        desc = doc.get("description") or []
+        subtitle = (desc[0] if isinstance(desc, list) and desc else str(desc or ""))[:120]
+        out.append(_ref("ols", "term", key, doc.get("label") or key, subtitle, wormbase_url(key)))
+    return out
+
+
+_DOI_RE = r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)?(10\.\d{4,9}/\S+)$"
+
+
+async def _europepmc_search(q: str, limit: int = 8) -> list[dict]:
+    """Papers from Europe PMC. A DOI or PMID typed in resolves to that paper."""
+    import re
+
+    m = re.match(_DOI_RE, q.strip(), re.I)
+    if m:
+        query = f'DOI:"{m.group(1)}"'
+    elif re.match(r"^(?:PMID[:\s]*)?\d{6,9}$", q.strip(), re.I):
+        query = f"EXT_ID:{re.sub(r'[^0-9]', '', q)} AND SRC:MED"
+    else:
+        query = q
+    data = await _get_json(
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+        {"query": query, "format": "json", "pageSize": str(limit)},
+    )
+    out: list[dict] = []
+    for r in (data.get("resultList") or {}).get("result") or []:
+        pmid, doi = r.get("pmid"), r.get("doi")
+        key = f"PMID:{pmid}" if pmid else (f"doi:{doi}" if doi else r.get("id") or "")
+        authors = (r.get("authorString") or "").rstrip(".")
+        first = authors.split(",")[0].split(" ")[0] if authors else ""
+        bits = [b for b in (authors, r.get("journalTitle"), str(r.get("pubYear") or "")) if b]
+        url = (
+            f"https://europepmc.org/article/MED/{pmid}"
+            if pmid
+            else (f"https://doi.org/{doi}" if doi else None)
+        )
+        title = r.get("title") or key
+        out.append(_ref("europepmc", "paper", key, title, " · ".join(bits), url))
+        out[-1]["short"] = f"{first} {r.get('pubYear') or ''}".strip()
+    return out
+
+
+def _lab_names(cs, store, q: str, limit: int = 8) -> list[dict]:
+    """What the lab has already named, anywhere in gently: a project's strains
+    and links, the strains and genotypes in plan items, the notebook's strain
+    tags. Instant, and the only source that works with no network."""
+    needle = q.lower()
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def keep(ref: dict) -> None:
+        # The same name from two places (a project's strain list, a plan item's
+        # spec) is one lab name; the first place wins.
+        k = str(ref["key"]).lower()
+        hay = " ".join(str(ref.get(f) or "") for f in ("key", "title", "subtitle")).lower()
+        if k not in seen and needle in hay:
+            seen.add(k)
+            out.append(ref)
+
+    if cs is not None:
+        try:
+            for c in cs.get_root_campaigns(status=None):
+                for s_ in getattr(c, "strains", None) or []:
+                    keep(
+                        _ref(
+                            s_.get("source") or "lab",
+                            "strain",
+                            s_.get("key") or "",
+                            s_.get("key") or "",
+                            f"{s_.get('subtitle') or s_.get('title') or ''}"
+                            f" · in {c.shorthand or c.description[:40]}",
+                            s_.get("url"),
+                            "strain",
+                        )
+                    )
+                for r in getattr(c, "references", None) or []:
+                    keep(
+                        _ref(
+                            r.get("source") or "lab",
+                            "link",
+                            r.get("key") or "",
+                            r.get("title") or r.get("key") or "",
+                            f"in {c.shorthand or c.description[:40]}",
+                            r.get("url"),
+                        )
+                    )
+            for item in cs.get_plan_items():
+                spec = item.imaging_spec
+                if spec and spec.strain:
+                    keep(
+                        _ref(
+                            "lab",
+                            "strain",
+                            spec.strain,
+                            spec.strain,
+                            spec.genotype or spec.reporter or f"plan item {item.title[:40]}",
+                            None,
+                            "strain",
+                        )
+                    )
+            nb = getattr(cs, "notebook", None)
+            if nb is not None:
+                for strain, ids in nb._index.get("strain", {}).items():
+                    keep(
+                        _ref(
+                            "lab",
+                            "strain",
+                            strain,
+                            strain,
+                            f"in {len(ids)} note{'s' if len(ids) != 1 else ''}",
+                            None,
+                            "strain",
+                        )
+                    )
+        except Exception:
+            logger.debug("lab names lookup failed", exc_info=True)
+    return out[:limit]
+
+
+async def search(source: str, q: str, *, cs=None, store=None, limit: int = 8) -> dict:
+    """One source, one query, one answer shape. ``status`` is ok, empty or
+    error; a failing source never raises into the caller, it says so."""
+    import time
+
+    t0 = time.monotonic()
+    results: list[dict] = []
+    error: str | None = None
+    try:
+        if source == "lab":
+            results = _lab_names(cs, store, q, limit)
+        elif source == "genes":
+            results = await _alliance_autocomplete(q, limit)
+        elif source == "strains":
+            rows = await _cgc_search(q, field="all")
+            results = [
+                _ref(
+                    "cgc",
+                    "strain",
+                    r["name"],
+                    r["name"],
+                    " · ".join(b for b in (r.get("genotype"), r.get("description")) if b)[:140],
+                    f"https://cgc.umn.edu/strain/{r['name']}",
+                    "strain",
+                )
+                for r in rows[:limit]
+            ]
+        elif source == "papers":
+            results = await _europepmc_search(q, limit)
+        elif source == "terms":
+            results = await _ols_search(q, limit)
+        else:
+            raise ValueError(f"unknown source {source!r}")
+    except Exception as e:  # noqa: BLE001 — a source that is down is a status, not a crash
+        error = str(e)[:200]
+        logger.info("search %s failed for %r: %s", source, q, error)
+    return {
+        "source": source,
+        "status": "error" if error else ("ok" if results else "empty"),
+        "took_ms": int((time.monotonic() - t0) * 1000),
+        "results": results[:limit],
+        "error": error,
+    }
+
+
+@tool(
+    name="search_references",
+    description=(
+        "Search what the lab has named, genes (Alliance, with WormBase ids), CGC "
+        "strains, papers (Europe PMC) and WormBase life-stage and anatomy terms "
+        "(OLS) for one query, grouped by source. Each hit is a reference the "
+        "project can keep with add_reference: source, key, title, url."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Find rab-3 strains and the gene page",
+            tool_input={"query": "rab-3"},
+        ),
+    ],
+)
+async def search_references(
+    query: str,
+    sources: list[str] | str | None = None,
+    context: dict | None = None,
+) -> str:
+    """The same search the add control runs, as text for the agent."""
+    import asyncio
+
+    agent = context.get("agent") if context else None
+    cs = getattr(agent, "context_store", None) if agent else None
+    store = getattr(agent, "store", None) if agent else None
+    if isinstance(sources, str):
+        sources = [s.strip() for s in sources.split(",") if s.strip()]
+    wanted = [s for s in (sources or SEARCH_SOURCES) if s in SEARCH_SOURCES] or list(SEARCH_SOURCES)
+    answers = await asyncio.gather(*(search(s, query, cs=cs, store=store, limit=5) for s in wanted))
+    lines = [f"Search for '{query}':"]
+    for a in answers:
+        head = f"\n**{a['source']}** — {a['status']}"
+        if a["error"]:
+            head += f" ({a['error']})"
+        lines.append(head)
+        for r in a["results"]:
+            sub = f" · {r['subtitle']}" if r.get("subtitle") else ""
+            url = f" · {r['url']}" if r.get("url") else ""
+            lines.append(f"- {r['title']} [{r['source']}:{r['key']}]{sub}{url}")
+    lines.append("\nKeep one with add_reference(campaign_id, source, key, title, url, as_strain).")
+    return "\n".join(lines)

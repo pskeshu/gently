@@ -1,8 +1,10 @@
 {# Plans workspace — shared between index.html (SPA tab) and campaigns.html (standalone) #}
 <div class="page-toolbar" id="page-toolbar">
     <div class="page-toolbar-left">
-        <span class="page-toolbar-title" id="header-title">Campaigns</span>
+        <span class="page-toolbar-title" id="header-title">Projects</span>
         <span class="header-breadcrumb" id="header-breadcrumb"></span>
+        <button class="hdr-btn" id="new-project-btn" data-action="new-project-open" title="A new project: one line saying what it asks">+ New project</button>
+        <div class="pj-newform hidden" id="new-project-form"></div>
         <div class="view-switcher hidden" id="plan-view-switcher">
             <button class="view-btn active" data-view="doc" title="Document (1)">Doc</button>
             <button class="view-btn" data-view="graph" title="Dependency Graph (2)">Graph</button>

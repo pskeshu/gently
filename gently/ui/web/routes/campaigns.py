@@ -1,5 +1,6 @@
 """Campaign routes - browse experimental plans and campaign hierarchy."""
 
+import asyncio
 import json
 import logging
 from dataclasses import asdict
@@ -8,7 +9,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from gently.harness.memory.model import PlanItemStatus
+from gently.harness.memory.acquisition import acquisition_from_legacy, effective_acquisition
+from gently.harness.memory.model import PlanItem, PlanItemStatus
+from gently.harness.memory.notebook import NoteKind, NoteStatus, note_to_dict
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +40,22 @@ def _serialize_enum(obj: Any) -> Any:
 
 
 def _serialize(obj: Any) -> Any:
-    """Full serialization: dataclass → dict → enums → datetimes."""
+    """Full serialization: dataclass → dict → enums → datetimes. A plan item's
+    spec goes out with the acquisition it means, in the pane's shape, whether
+    it was written that way or only in the older flat fields."""
     d = asdict(obj) if hasattr(obj, "__dataclass_fields__") else obj
     d = _serialize_enum(d)
     d = _serialize_datetime(d)
+    if (
+        isinstance(obj, PlanItem)
+        and isinstance(d, dict)
+        and isinstance(d.get("imaging_spec"), dict)
+    ):
+        spec = d["imaging_spec"]
+        explicit = bool(spec.get("acquisition"))
+        acq = effective_acquisition(spec)
+        spec["acquisition"] = acq
+        spec["acquisition_derived"] = bool(acq) and not explicit
     return d
 
 
@@ -59,6 +75,56 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="Campaign not found")
         return campaign
 
+    def _gently_store():
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge is not None else None
+        return getattr(agent, "store", None) or getattr(server, "gently_store", None)
+
+    def _active_session_id():
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge is not None else None
+        return getattr(agent, "session_id", None) if agent is not None else None
+
+    def _member_sessions(root_id: str) -> list[dict]:
+        store = _gently_store()
+        if store is None:
+            return []
+        try:
+            return store.list_sessions(project_id=root_id)
+        except Exception:
+            return []
+
+    def _project_summary(cs, root_id: str) -> dict:
+        """What Home and the project list say about a project: how many sessions,
+        whether one is live, when the last ran, what waits on a person."""
+        sessions = _member_sessions(root_id)
+        active = _active_session_id()
+        out = {
+            "sessions": len(sessions),
+            "live": any(s.get("session_id") == active for s in sessions),
+            "last_run_at": max((s.get("last_active") or "" for s in sessions), default="") or None,
+            "proposed_items": 0,
+            "proposed_findings": 0,
+        }
+        try:
+            out["proposed_items"] = int(cs.get_plan_status(root_id).get("proposed", 0))
+        except Exception:
+            pass
+        nb = getattr(cs, "notebook", None)
+        if nb is not None:
+            try:
+                out["proposed_findings"] = len(
+                    nb.query_notes(
+                        kind=NoteKind.FINDING, status=NoteStatus.PROPOSED, project=root_id
+                    )
+                )
+            except Exception:
+                pass
+        return out
+
+    def _root(cs, campaign) -> str:
+        return cs.root_campaign_id(campaign.id) or campaign.id
+
     @router.get("/api/campaigns")
     async def list_campaigns():
         """List all campaigns as a tree."""
@@ -67,8 +133,433 @@ def create_router(server) -> APIRouter:
         trees = []
         for root in roots:
             tree = _build_campaign_tree(cs, root.id)
+            tree["project"] = _project_summary(cs, root.id)
             trees.append(tree)
         return {"campaigns": trees}
+
+    # ------------------------------------------------------------------
+    # Projects: a root campaign is a project. These are the writes a person
+    # makes from the Projects tab; the agent's tools call the same store
+    # methods, so both announce (PLAN_UPDATED) and both land in the history.
+    # ------------------------------------------------------------------
+
+    @router.post("/api/campaigns", dependencies=[Depends(require_control)])
+    async def create_campaign(request: Request):
+        """A new project (no ``parent_id``) or a phase of one (``parent_id``)."""
+        body = await request.json()
+        cs = _get_store()
+        description = (body.get("description") or "").strip()
+        if not description:
+            raise HTTPException(status_code=400, detail="description required")
+        parent_id = body.get("parent_id") or None
+        if parent_id:
+            _resolve(cs, parent_id)
+        cid = cs.create_campaign(
+            description=description,
+            shorthand=(body.get("shorthand") or None),
+            target=(body.get("target") or None),
+            parent_id=parent_id,
+            strains=body.get("strains") or None,
+            references=body.get("references") or None,
+        )
+        return {"ok": True, "campaign": _serialize(cs.get_campaign(cid))}
+
+    @router.patch("/api/campaigns/{campaign_id}", dependencies=[Depends(require_control)])
+    async def update_campaign(campaign_id: str, request: Request):
+        body = await request.json()
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        fields = {
+            k: body.get(k) for k in ("description", "shorthand", "summary", "target", "status")
+        }
+        if all(v is None for v in fields.values()):
+            raise HTTPException(status_code=400, detail="No editable fields supplied")
+        try:
+            cs.update_campaign(campaign.id, **{k: v for k, v in fields.items() if v is not None})
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        cs._notify_plan_change(campaign.id)
+        return {"ok": True, "campaign": _serialize(cs.get_campaign(campaign.id))}
+
+    @router.post("/api/campaigns/{campaign_id}/references", dependencies=[Depends(require_control)])
+    async def add_reference(campaign_id: str, request: Request):
+        """Keep a search result on the project: {source, key, title, url,
+        subtitle}; ``as_strain`` files it with the strains."""
+        body = await request.json()
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        if not (body.get("key") or body.get("title")):
+            raise HTTPException(status_code=400, detail="key or title required")
+        as_strain = bool(body.get("as_strain")) or body.get("files_as") == "strain"
+        entry = cs.add_campaign_reference(_root(cs, campaign), body, as_strain=as_strain)
+        return {"ok": True, "entry": entry, "as_strain": as_strain}
+
+    @router.delete(
+        "/api/campaigns/{campaign_id}/references", dependencies=[Depends(require_control)]
+    )
+    async def remove_reference(campaign_id: str, source: str, key: str):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        return {
+            "ok": True,
+            "removed": cs.remove_campaign_reference(_root(cs, campaign), source, key),
+        }
+
+    @router.post("/api/campaigns/{campaign_id}/items", dependencies=[Depends(require_control)])
+    async def create_item(campaign_id: str, request: Request):
+        """A plan item by hand (``origin: manual``) in the campaign or one of its
+        phases (``phase_id``). ``status`` may be ``proposed`` for a suggestion."""
+        body = await request.json()
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        target = campaign.id
+        if body.get("phase_id"):
+            target = _resolve(cs, body["phase_id"]).id
+        title = (body.get("title") or "").strip()
+        item_type = body.get("type") or "imaging"
+        if not title:
+            raise HTTPException(status_code=400, detail="title required")
+        spec = body.get("spec") if isinstance(body.get("spec"), dict) else None
+        if spec is None and item_type == "imaging":
+            # The sentence states some of the spec outright; take those fields
+            # now, with their provenance, and leave the rest for the person or
+            # the model (POST …/transcribe).
+            from gently.harness.memory.intent_spec import merge_spec, parse_intent
+
+            read = parse_intent(f"{title}. {body.get('description') or ''}")
+            spec = merge_spec(None, read) if read["spec"] else {"provenance": {}}
+            if body.get("draft", True) is not False:
+                from gently.harness.memory.intent_spec import draft_record
+
+                spec["draft"] = draft_record("drafting", sentence=title)
+        try:
+            item_id = cs.create_plan_item(
+                campaign_id=target,
+                type=item_type,
+                title=title,
+                description=body.get("description") or None,
+                spec=spec,
+                depends_on=body.get("depends_on") or None,
+                estimated_days=body.get("estimated_days"),
+                status=body.get("status") or "planned",
+                origin=body.get("origin") or "manual",
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        if spec is not None and (spec.get("draft") or {}).get("status") == "drafting":
+            asyncio.create_task(_draft_in_background(cs, item_id))
+        return {"ok": True, "item": _serialize(cs.get_plan_item(item_id))}
+
+    @router.delete(
+        "/api/campaigns/{campaign_id}/items/{item_id}", dependencies=[Depends(require_control)]
+    )
+    async def delete_item(campaign_id: str, item_id: str):
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        if not cs.get_plan_item(item_id):
+            raise HTTPException(status_code=404, detail="Plan item not found")
+        return {"ok": True, "deleted": bool(cs.delete_plan_item(item_id))}
+
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/move", dependencies=[Depends(require_control)]
+    )
+    async def move_item(campaign_id: str, item_id: str, request: Request):
+        """Move an item to another phase (``campaign_id``) and/or position (``phase_order``)."""
+        body = await request.json()
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        if not cs.get_plan_item(item_id):
+            raise HTTPException(status_code=404, detail="Plan item not found")
+        to = body.get("campaign_id")
+        if to:
+            to = _resolve(cs, to).id
+        order = body.get("phase_order")
+        cs.update_plan_item(
+            item_id,
+            campaign_id=to or None,
+            phase_order=int(order) if order is not None else None,
+        )
+        return {"ok": True, "item": _serialize(cs.get_plan_item(item_id))}
+
+    def _reaches(cs, start: str, target: str, limit: int = 200) -> bool:
+        """Does following depends_on from ``start`` arrive at ``target``?"""
+        seen: set[str] = set()
+        stack = [start]
+        while stack and len(seen) < limit:
+            cur = stack.pop()
+            if cur == target:
+                return True
+            if cur in seen:
+                continue
+            seen.add(cur)
+            it = cs.get_plan_item(cur)
+            if it:
+                stack.extend(it.depends_on or [])
+        return False
+
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/depends",
+        dependencies=[Depends(require_control)],
+    )
+    async def set_dependency(campaign_id: str, item_id: str, request: Request):
+        body = await request.json()
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        dep = body.get("depends_on")
+        if not dep or not cs.get_plan_item(item_id) or not cs.get_plan_item(dep):
+            raise HTTPException(status_code=404, detail="Plan item not found")
+        if body.get("remove"):
+            cs.remove_plan_item_dependency(item_id, dep)
+        else:
+            if dep == item_id or _reaches(cs, dep, item_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail="That would make a cycle: the other item already waits on this one.",
+                )
+            cs.add_plan_item_dependency(item_id, dep)
+        return {"ok": True, "item": _serialize(cs.get_plan_item(item_id))}
+
+    @router.get("/api/plan/intent")
+    async def read_intent(text: str = ""):
+        """What a sentence states of an imaging spec, read deterministically,
+        with the words each field came from. For the form's live preview."""
+        from gently.harness.memory.intent_spec import parse_intent
+
+        return parse_intent(text or "")
+
+    async def _model_client():
+        """The Anthropic client to draft with, or None when there is no key."""
+        client = getattr(server, "claude_async", None)
+        if client is not None:
+            return client
+        try:
+            import anthropic
+
+            return anthropic.AsyncAnthropic()
+        except Exception:
+            return None
+
+    async def draft_item(
+        cs,
+        item_id: str,
+        *,
+        note: str | None = None,
+        overwrite: bool = False,
+        use_model: bool = True,
+    ) -> dict:
+        """Read the item's sentence into its spec, then ask Gently to draft the
+        rest. Writes the merged spec and the draft record; returns a summary."""
+        from dataclasses import asdict
+
+        from gently.harness.memory.intent_spec import (
+            draft_record,
+            draft_spec_with_model,
+            merge_spec,
+            parse_intent,
+            project_context,
+        )
+        from gently.settings import settings
+
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise KeyError(item_id)
+        sentence = (
+            item.description
+            if item.imaging_spec and item.imaging_spec.draft and item.description
+            else item.title
+        )
+        text = (
+            f"{sentence}. {item.description or ''}".strip() if sentence == item.title else sentence
+        )
+        read = parse_intent(text + (f". {note}" if note else ""))
+        layers = [read]
+        existing = asdict(item.imaging_spec) if item.imaging_spec else {}
+        rationale = None
+        assumptions: list[str] = []
+        title = None
+        status = "drafted"
+        client = await _model_client() if use_model else None
+        if use_model and client is None:
+            status = "unavailable"
+            assumptions = ["no model to ask: ANTHROPIC_API_KEY is not set in this run"]
+        elif use_model:
+            try:
+                drafted = await draft_spec_with_model(
+                    client,
+                    settings.models.main,
+                    text,
+                    known=read["spec"],
+                    context=project_context(cs, item.campaign_id),
+                    note=note,
+                )
+                layers.append(drafted)
+                rationale = drafted.get("rationale")
+                assumptions = drafted.get("assumptions") or []
+                title = drafted.get("title")
+            except Exception as err:  # noqa: BLE001 — the model being unreachable is an answer
+                status = "unavailable"
+                assumptions = [f"the model could not be asked: {str(err)[:140]}"]
+        merged = merge_spec(existing, *layers, overwrite=overwrite)
+        if isinstance(merged.get("acquisition"), dict) and read["spec"]:
+            # What the sentence said outright, in the pane's shape, over the draft.
+            merged["acquisition"].update(acquisition_from_legacy(read["spec"]))
+        merged["draft"] = draft_record(
+            status, rationale=rationale, assumptions=assumptions, sentence=sentence
+        )
+        kwargs: dict = {"spec": merged}
+        if title and title.strip() and title.strip() != item.title:
+            # The draft's short title goes on the card; the sentence stays as the description.
+            kwargs["title"] = title.strip()
+            if not item.description or item.description == sentence:
+                kwargs["description"] = sentence
+        cs.update_plan_item(item_id=item_id, **kwargs)
+        return {
+            "ok": True,
+            "item": _serialize(cs.get_plan_item(item_id)),
+            "status": status,
+            "from_sentence": sorted(read["spec"]),
+            "filled": sorted(
+                k
+                for k in merged
+                if k not in ("provenance", "tactics", "draft")
+                and merged[k] not in (None, "", [], {})
+            ),
+            "rationale": rationale,
+            "assumptions": assumptions,
+        }
+
+    async def _draft_in_background(cs, item_id: str) -> None:
+        try:
+            await draft_item(cs, item_id)
+        except Exception:
+            logger.debug("background draft failed for %s", item_id, exc_info=True)
+
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/draft",
+        dependencies=[Depends(require_control)],
+    )
+    async def draft_item_route(campaign_id: str, item_id: str, request: Request):
+        """Draft (or redraft) the item's spec from its sentence. Body: ``note`` is
+        a constraint the researcher adds; ``model: false`` reads the sentence
+        only; ``overwrite`` lets the draft replace typed fields."""
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        if not cs.get_plan_item(item_id):
+            raise HTTPException(status_code=404, detail="Plan item not found")
+        body = await request.json() if int(request.headers.get("content-length") or 0) > 0 else {}
+        return await draft_item(
+            cs,
+            item_id,
+            note=(body.get("note") or None),
+            overwrite=bool(body.get("overwrite")),
+            use_model=body.get("model", True) is not False,
+        )
+
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/spec/accept",
+        dependencies=[Depends(require_control)],
+    )
+    async def accept_spec(campaign_id: str, item_id: str):
+        """A person accepts Gently's draft: the drafted fields become theirs."""
+        from dataclasses import asdict
+
+        from gently.harness.memory.intent_spec import draft_record
+
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item or not item.imaging_spec:
+            raise HTTPException(status_code=404, detail="Plan item or spec not found")
+        spec = asdict(item.imaging_spec)
+        prov = dict(spec.get("provenance") or {})
+        for field, p in prov.items():
+            if p.get("source") == "model":
+                prov[field] = {**p, "source": "accepted"}
+        spec["provenance"] = prov
+        old = spec.get("draft") or {}
+        spec["draft"] = draft_record(
+            "accepted",
+            rationale=old.get("rationale"),
+            assumptions=old.get("assumptions"),
+            sentence=old.get("sentence"),
+        )
+        cs.update_plan_item(item_id=item_id, spec=spec)
+        return {"ok": True, "item": _serialize(cs.get_plan_item(item_id))}
+
+    @router.get("/api/campaigns/{campaign_id}/ledger")
+    async def get_ledger(campaign_id: str):
+        """The project's ledger: what is next (unblocked plan items), what the
+        agent suggested, what was predicted (expectations), what was measured
+        (outcomes and findings), what is open (questions). Every entry is read
+        back from the store; expectations and questions belong to the project
+        through the session they were made in, or by being made for it."""
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        root = _root(cs, campaign)
+        members = {s.get("session_id") for s in _member_sessions(root)}
+        items = cs.get_plan_items(campaign_id=root, include_children=True)
+        by_status: dict[str, list] = {}
+        for it in items:
+            by_status.setdefault(it.status.value, []).append(it)
+        next_items = cs.get_unblocked_plan_items(root)
+        measured_items = [
+            it for it in items if it.status in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
+        ]
+        expectations = cs.list_expectations(project_id=root, session_ids=members)
+        questions = cs.list_questions(project_id=root, session_ids=members)
+        findings: list[dict] = []
+        nb = getattr(cs, "notebook", None)
+        if nb is not None:
+            seen: set[str] = set()
+            pool = nb.query_notes(kind=NoteKind.FINDING, project=root)
+            pool += [n for n in nb.query_notes(kind=NoteKind.FINDING) if set(n.sessions) & members]
+            for n in pool:
+                if n.id in seen or n.status == NoteStatus.SUPERSEDED:
+                    continue
+                seen.add(n.id)
+                findings.append(note_to_dict(n))
+            findings.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        return {
+            "project_id": root,
+            "members": sorted(m for m in members if m),
+            "next": [_serialize(i) for i in next_items],
+            "in_progress": [_serialize(i) for i in by_status.get("in_progress", [])],
+            "proposed": [_serialize(i) for i in by_status.get("proposed", [])],
+            "blocked": [
+                _serialize(i)
+                for i in by_status.get("planned", [])
+                if i.id not in {n.id for n in next_items}
+            ],
+            "predicted": [_serialize(e) for e in expectations],
+            "measured": {
+                "outcomes": [_serialize(i) for i in measured_items],
+                "findings": findings,
+            },
+            "open": [
+                _serialize(q) for q in questions if q.status.value in ("open", "investigating")
+            ],
+            "answered": [
+                _serialize(q) for q in questions if q.status.value not in ("open", "investigating")
+            ],
+        }
+
+    @router.post("/api/campaigns/{campaign_id}/plan-mode", dependencies=[Depends(require_control)])
+    async def plan_with_gently(campaign_id: str):
+        """Enter plan mode with this project as the focus, so the chat picks up
+        where the plan is. The agent's own items arrive as suggestions."""
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        root = _root(cs, campaign)
+        try:
+            cs.set_state("current_focus", root)
+        except Exception:
+            pass
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge is not None else None
+        if agent is None or not hasattr(agent, "enter_plan_mode"):
+            return {"ok": False, "detail": "agent not running", "project_id": root}
+        message = agent.enter_plan_mode()
+        return {"ok": True, "project_id": root, "message": message}
 
     @router.get("/api/campaigns/{campaign_id}")
     async def get_campaign(campaign_id: str):
@@ -403,8 +894,11 @@ def create_router(server) -> APIRouter:
         if isinstance(spec_patch, dict):
             current = item.imaging_spec or item.bench_spec
             merged = asdict(current) if current else {}
+            prov = dict(merged.get("provenance") or {})
             for k, v in spec_patch.items():
                 merged[k] = None if v == "" else v
+                prov[k] = {"source": "typed", "text": ""}
+            merged["provenance"] = prov
             kwargs["spec"] = merged
 
         if not kwargs:

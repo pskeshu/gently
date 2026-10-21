@@ -239,6 +239,19 @@ class VisualizationServer(Service):
     def set_context_store(self, context_store) -> None:
         """Set the FileContextStore for campaign/plan data access."""
         self.context_store = context_store
+        # Sessions filed before the project field existed get their home from
+        # the plan links, once; nothing happens for sessions with no link.
+        if self.gently_store is not None and context_store is not None:
+            try:
+                from gently.app.filing import backfill_session_projects
+
+                filed = backfill_session_projects(self.gently_store, context_store)
+                if filed:
+                    logging.getLogger(__name__).info(
+                        "Filed %d session(s) under their projects from plan links", filed
+                    )
+            except Exception:
+                logging.getLogger(__name__).debug("project backfill failed", exc_info=True)
 
     def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> str | None:
         """Resolve volume file path from timelapse tracker or FileStore."""

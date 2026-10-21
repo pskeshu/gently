@@ -18,7 +18,6 @@ from .model import (
     Observation,
     PlannedSession,
     PlannedSessionStatus,
-    Project,
     Question,
     SessionIntent,
     Watchpoint,
@@ -34,7 +33,6 @@ def context_to_dict(context: Context) -> dict[str, Any]:
     return {
         "intentions": {
             "campaigns": [_campaign_to_dict(c) for c in context.intentions.campaigns],
-            "projects": [_project_to_dict(p) for p in context.intentions.projects],
             "planned_sessions": [
                 _planned_session_to_dict(ps) for ps in context.intentions.planned_sessions
             ],
@@ -149,17 +147,6 @@ def _campaign_to_dict(c: Campaign) -> dict[str, Any]:
         "status": c.status.value,
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
-    }
-
-
-def _project_to_dict(p: Project) -> dict[str, Any]:
-    return {
-        "id": p.id,
-        "description": p.description,
-        "campaign_id": p.campaign_id,
-        "status": p.status.value,
-        "created_at": p.created_at.isoformat(),
-        "updated_at": p.updated_at.isoformat(),
     }
 
 

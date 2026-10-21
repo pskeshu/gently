@@ -147,8 +147,13 @@ class TestTheRoute:
         )
 
     def test_it_opens_no_image(self):
-        fn = ROUTES[ROUTES.index("    def _what_a_session_holds(") :]
-        fn = fn[: fn.index("    @router.get(")]
+        # What a session holds is read from its folder (gently/core/session_summary.py,
+        # shared with the project view and the session-end note): no image decoded.
+        import inspect
+
+        from gently.core.session_summary import what_a_session_holds
+
+        fn = inspect.getsource(what_a_session_holds)
         assert "imread" not in fn and "Image.open" not in fn
 
 
