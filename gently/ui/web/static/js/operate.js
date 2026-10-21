@@ -1158,6 +1158,11 @@ const OperateManager = (function () {
 
     async function confirmMarks() {
         if (!_markers.length) return;
+        // While the agent is waiting on these marks, Register IS the answer.
+        // Registering them through the pane's own route instead left the
+        // agent's session open with nothing in it: Done then told the agent
+        // "0 embryos" while four sat in the roster, and it detected again.
+        if (_markSession) { finishMarkingSession(); return; }
         const f = frameOf(_lastBottom), cap = stageOf(_lastBottom);
         if (!cap) { toastFail('Stage position unknown — cannot register markers'); return; }
         const b = $('op-confirm'); if (b) b.disabled = true;

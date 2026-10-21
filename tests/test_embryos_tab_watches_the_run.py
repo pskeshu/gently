@@ -136,3 +136,71 @@ class TestTheCopy:
         assert (
             "${stageColor}" not in EMBRYOS
         )  # the function was once interpolated instead of called
+
+
+class TestTheVolumeStatIsNotTheRoundCounter:
+    """ "the gui in the embryos tab - it is showing -1 round"
+
+    `current_round` is the orchestrator's acquisition counter: it starts at -1
+    and bumps once per embryo volume, so it is neither a round nor a count.
+    The tab shows the volumes taken instead and never that counter.
+    """
+
+    def test_the_summary_counts_volumes_not_the_round_counter(self):
+        summary = _fn(EMBRYOS, "renderSummary() {", 3600)
+        assert "stat(this.state.totalTimepoints, 'volumes')" in summary
+        assert "r.current_round" not in summary
+        assert "'round')" not in summary
+
+
+class TestTheEmbryoHasTheSamePlayerAsTheOverview:
+    """ "there is no nice timelapse viewing features that were there for the
+    brightfield images. the show latest feature etc. the player was rather nice."
+
+    The overview's stage is a factory now; the selected embryo mounts its own
+    instance on its projections, with the bar coloured by each timepoint's
+    call, following newest as the run goes, and the detail pane following it.
+    """
+
+    def test_the_stage_is_a_factory_and_the_overview_keeps_its_instance(self):
+        assert "function createOverviewStage()" in STAGE
+        assert "const OverviewStage = createOverviewStage();" in STAGE
+        assert "OverviewStage.mount('embryos-overview'" in EMBRYOS
+
+    def test_the_selected_embryo_gets_a_stage_of_its_projections(self):
+        panel = _fn(EMBRYOS, "renderReasoningPanel() {", 8000)
+        assert 'id="embryo-stage"' in panel
+        assert "this._mountEmbryoStage(embryo.embryoId, !keepStage)" in panel
+        mount = _fn(EMBRYOS, "_mountEmbryoStage(embryoId, fresh) {", 2600)
+        assert "createOverviewStage()" in mount
+        assert "corrected: false" in mount and "references: false" in mount
+        frames = _fn(EMBRYOS, "_embryoFrames(embryoId) {", 1400)
+        assert "/projection?embryo=" in frames and "scalable: false" in frames
+
+    def test_the_stage_survives_a_re_render(self):
+        panel = _fn(EMBRYOS, "renderReasoningPanel() {", 8000)
+        assert "panel.querySelector('#embryo-stage').replaceWith(keepStage)" in panel
+
+    def test_the_detail_follows_the_stage_and_the_stage_follows_a_chosen_call(self):
+        mount = _fn(EMBRYOS, "_mountEmbryoStage(embryoId, fresh) {", 2600)
+        assert "onFrame:" in mount and "this._syncDetailToFrame(i + 1)" in mount
+        opened = _fn(
+            EMBRYOS, "openDetailPanel(detectorName, timepoint, userInitiated = false) {", 1500
+        )
+        assert "this._embryoStage.go(timepoint - 1, true)" in opened
+        assert "this._embryoStage.reset()" in _fn(EMBRYOS, "selectEmbryo(embryoId) {", 900)
+
+    def test_the_arrows_step_the_stage_once_not_the_stage_and_the_detail(self):
+        keys = _fn(EMBRYOS, "setupKeyboardNavigation() {", 1200)
+        assert "document.querySelector('#embryo-stage .ov')" in keys
+        assert "if (stage && stage.offsetParent) return;" in keys
+
+    def test_with_two_stages_the_keys_go_to_the_one_last_touched(self):
+        assert "if (_activeStage && _activeStage !== api) return;" in STAGE
+        assert "host.addEventListener('pointerdown', () => { _activeStage = api; });" in STAGE
+
+    def test_the_rail_cannot_run_under_the_panel(self):
+        """ "here it is like something else is rendered on top kinda feeling":
+        each tile sized itself to its content, 320 px in a 183 px rail."""
+        cards = MAIN_CSS[MAIN_CSS.index(".embryo-cards { display: grid;") :][:120]
+        assert "grid-template-columns: minmax(0, 1fr)" in cards

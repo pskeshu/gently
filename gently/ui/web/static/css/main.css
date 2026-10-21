@@ -4492,7 +4492,10 @@ kbd {
     scrollbar-width: thin;                              /* when it must scroll, a hairline, not a bar */
     scrollbar-color: var(--border-strong) transparent;
 }
-.embryo-cards { display: grid; gap: 8px; }
+/* One shrinkable column. The implicit `auto` column sized each tile to its
+   own content (320 px in a 183 px rail), and the panel beside it was drawn
+   over the tiles' ends. */
+.embryo-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .tile-empty { font-size: 0.8rem; color: var(--text-muted); padding: 6px 2px; line-height: 1.4; }
 .embryo-tile {
     display: grid; grid-template-columns: 64px minmax(0, 1fr); grid-template-areas: "thumb head" "thumb stage" "thumb live" "bar bar";
@@ -4522,7 +4525,7 @@ kbd {
 .embryo-tile .stage-bar.is-empty span { background: var(--border); }
 .tile-stage { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
-.tile-live { font-size: 0.74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tile-live { font-size: 0.74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tile-live .tile-countdown { color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .view-default.is-overview-only .embryo-list, .view-default.is-overview-only .reasoning-panel { display: none; }
 
@@ -11803,6 +11806,12 @@ a.settings-btn { display: inline-block; text-decoration: none; }
 .view-default.is-overview-only .overview-stage, .view-default.is-overview-only .ov { height: 100%; box-sizing: border-box; }
 .view-default.is-overview-only .ov { grid-template-rows: minmax(0, 1fr); }
 .view-default.is-overview-only .ov-stage { height: 100%; }
+/* The selected embryo's stage, inside the reasoning panel: the same component
+   as the overview, sized for a projection, above the calls it was given. */
+.reasoning-panel .embryo-stage { flex: none; border-bottom: 1px solid var(--border); background: var(--bg-card); }
+.reasoning-panel .embryo-stage:empty { display: none; }
+.reasoning-panel .embryo-stage .ov-stage { height: clamp(180px, 30vh, 420px); }
+.reasoning-panel .embryo-stage .ov { padding: 8px 12px; }
 .ov-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .ov-side > .ov-keys { margin-top: auto; }  /* the hint sits just above the timeline, at the bottom */
 .ov-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }

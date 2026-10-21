@@ -123,7 +123,7 @@ def _make_dl_buffer(mode: str = "snap") -> DeviceLayerServer:
     dl = DeviceLayerServer.__new__(DeviceLayerServer)
     core = BufferFakeCore()
     dl.system = type("S", (), {"core": core})()
-    cam_a = type("C", (), {"name": "HamCam1"})()
+    cam_a = type("C", (), {"name": "HamCam1", "clear_roi": lambda self: None})()
     dl.devices = {
         "camera": cam_a,
         "scanner": FakeScanner("Scanner:AB:33"),

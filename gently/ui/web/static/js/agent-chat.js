@@ -753,6 +753,63 @@ const AgentChat = (() => {
         else markAnswered('*');
     }
 
+    // ── the agent is waiting for marks ──────────────────────────────────
+    // One card per request, under the tool row that asked. Its count follows
+    // the map (SharedState 'marking'); Register answers from here with the
+    // marks as they stand, Open the map goes where they can be adjusted. When
+    // the session ends, from here or from the pane, the card says so.
+    let markingCard = null;
+
+    function renderMarkingCard(d) {
+        const n = d && Array.isArray(d.initial_markers) ? d.initial_markers.length : 0;
+        const card = document.createElement('div');
+        card.className = 'ac-choice ac-marking';
+        card.innerHTML =
+            `<div class="ac-choice-q" data-role="q"></div>` +
+            `<div class="ac-marking-acts">` +
+            `<button type="button" class="ac-choice-opt" data-act="open">` +
+            `<span class="ac-choice-label">Open the map</span>` +
+            `<span class="ac-choice-desc">Adjust the marks, set roles</span></button>` +
+            `<button type="button" class="ac-choice-opt ac-marking-register" data-act="register">` +
+            `<span class="ac-choice-label" data-role="label">Register</span>` +
+            `<span class="ac-choice-desc">Answer the agent with the marks as they are</span></button>` +
+            `</div>`;
+        card.querySelector('[data-act="open"]').addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('devices');
+            if (typeof OperateManager !== 'undefined' && OperateManager.roster) OperateManager.roster.goTo('bottom');
+        });
+        card.querySelector('[data-act="register"]').addEventListener('click', () => {
+            if (typeof OperateManager !== 'undefined' && OperateManager.marking) OperateManager.marking.done();
+        });
+        if (markingCard) markingCard.remove();
+        markingCard = card;
+        const running = [...log.querySelectorAll('.ac-tool-running')].pop();
+        if (running) running.after(card); else log.appendChild(card);
+        updateMarkingCard({ marked: n, session: { pending: [] } });
+        scrollToBottom();
+    }
+
+    function updateMarkingCard(s) {
+        if (!markingCard) return;
+        const q = markingCard.querySelector('[data-role="q"]');
+        const btn = markingCard.querySelector('[data-act="register"]');
+        const label = markingCard.querySelector('[data-role="label"]');
+        if (s && s.session) {
+            const n = s.marked || 0;
+            q.textContent = n
+                ? `Gently found ${n} embryo${n === 1 ? '' : 's'} and is waiting for you to confirm them.`
+                : 'Gently is waiting for you to mark the embryos on the map.';
+            label.textContent = n ? `Register ${n}` : 'Register';
+            btn.disabled = !n || !hasControl;
+            return;
+        }
+        // Answered, from here or from the map.
+        markingCard.classList.add('ac-choice-picked');
+        q.textContent = 'Marks sent to the agent.';
+        markingCard.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        markingCard = null;
+    }
+
     function renderChoice(msg) {
         const data = msg.choice_data || {};
         const reqId = msg.request_id || data.request_id || '';
@@ -1356,7 +1413,13 @@ const AgentChat = (() => {
             ClientEventBus.on('SETTINGS_CHANGED', ({ path } = {}) => {
                 if (!path || path === 'agentPanel') rememberPanel();
             });
+            // The agent's marking request, where the eye is. The map shows the
+            // marks; this card says the agent is waiting and offers the answer.
+            // "i suppose the register button can show up in the chat window --
+            // it was hard to notice that"
+            ClientEventBus.on('MARKING_IMAGE', (d) => renderMarkingCard(d));
         }
+        if (typeof SharedState !== 'undefined') SharedState.on('marking', updateMarkingCard);
         if (railBtn) railBtn.addEventListener('click', () => togglePanel(true));
         closeBtn.addEventListener('click', () => togglePanel(false));
         setupResize();

@@ -1486,6 +1486,29 @@ class FileStore:
         result.sort(key=lambda s: s.get("captured_at", ""))
         return result
 
+    def count_snapshots(self, session_id: str, source: str) -> int:
+        """How many snapshots of ``source`` a session holds, by file name alone.
+
+        ``list_snapshots`` parses every sidecar. A night of overview frames is
+        thousands of them, and the Sessions tab asks for every session at
+        once: that was the tab taking a minute and more to appear. The file is
+        named ``{source}_{stem}``, so the count is one directory listing.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return 0
+        snap_dir = sd / "snapshots"
+        if not snap_dir.exists():
+            return 0
+        prefix = f"{source}_"
+        try:
+            with os.scandir(snap_dir) as it:
+                return sum(
+                    1 for e in it if e.name.startswith(prefix) and e.name.endswith(".meta.yaml")
+                )
+        except OSError:
+            return 0
+
     # ==================================================================
     # Incoming cleanup
     # ==================================================================

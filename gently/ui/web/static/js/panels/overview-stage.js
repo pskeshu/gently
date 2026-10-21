@@ -1,21 +1,37 @@
 /**
- * The overview stage: the brightfield frames of a run, one large, with a
- * timeline beneath.
+ * A stage: a series of frames, one large, with a timeline beneath.
  *
- *     OverviewStage.mount('embryos-overview-stage', {
+ * Built for the brightfield overview, and the same thing an embryo's
+ * projections want: "the show latest feature etc. the player was rather
+ * nice." So it is a factory; each surface mounts its own instance.
+ *
+ *     const stage = createOverviewStage();
+ *     stage.mount('embryos-overview', {
  *         frames: () => EmbryosManager._bfFrames,     // oldest first
  *         references: () => EmbryosManager.run?.bf?.references,
  *     });
- *     OverviewStage.framesChanged();                   // after a frame lands
+ *     stage.framesChanged();                           // after a frame lands
  *
- * In a brightfield-only run the frames ARE the experiment, so they get the
- * space: the newest frame large, a 44 px frame-indexed bar under it (every
- * frame an equal slot; a pause in the run is a seam, not a gap), a hover
- * preview above the bar, press-and-drag to scrub, ←/→ to step (Shift ×10),
- * Space to play, N for newest, C for corrected. Hover never moves the big
- * frame — a room may be watching it — only a drag does. "Following newest"
- * is an explicit state: any navigation disengages it, the Newest button
- * re-engages it, and a tag on the image says which it is.
+ * `OverviewStage` is the instance the brightfield overview has always used.
+ *
+ * The newest frame large, a 44 px frame-indexed bar under it (every frame an
+ * equal slot; a pause in the run is a seam, not a gap), a hover preview above
+ * the bar, press-and-drag to scrub, ←/→ to step (Shift ×10), Space to play,
+ * N for newest, C for corrected. Hover never moves the big frame — a room may
+ * be watching it — only a drag does. "Following newest" is an explicit state:
+ * any navigation disengages it, the Newest button re-engages it, and a tag on
+ * the image says which it is. With two stages on screen the keys go to the
+ * one last touched.
+ *
+ * Options beyond `frames`:
+ *   tools      which controls exist: {corrected, compare, references, reveal,
+ *              fields} — all on for the overview, most off for projections.
+ *   meta(f, i, all)  the caption under the controls, as HTML; the default
+ *              reads the overview frame's record.
+ *   color(f)   a colour per frame for the bar, e.g. the stage call at that
+ *              timepoint; null leaves the slot plain.
+ *   onFrame(i, {playing, byUser})  after the stage moves, so a detail pane
+ *              can follow.
  *
  * Scrubbing shows the ?max=640 PNG; on settle the full frame is swapped in.
  * ?corrected=1 asks the server to divide the session's dark and flat out
@@ -23,15 +39,19 @@
  * Compare shows frame 1 under a draggable divider on the same pixels, which
  * is how drift and growth are seen.
  */
-const OverviewStage = (() => {
+let _activeStage = null;   // the instance the keyboard talks to: the last mounted or touched
+
+function createOverviewStage() {
     'use strict';
 
     const SCRUB_MAX = 640;
     const PREVIEW_MAX = 128;
     const SETTLE_MS = 350;
+    const TOOLS = { corrected: true, compare: true, references: true, reveal: true, fields: true };
 
     let host = null;
-    let opts = { frames: () => [], references: () => null, onTakeReferences: null, onFold: null, fields: null, onField: null };
+    let opts = { frames: () => [], references: () => null, onTakeReferences: null, onFold: null, fields: null, onField: null,
+                 tools: TOOLS, meta: null, color: null, onFrame: null, label: 'Overview frames' };
     let cur = -1;               // index into frames(); -1 = none yet
     let follow = true;
     let playing = false;
@@ -44,22 +64,27 @@ const OverviewStage = (() => {
     let timer = null;
     let settleTimer = null;
     let loadSeq = 0;
+    let wired = false;          // document and window listeners, once per instance
+    let observer = null;
     const cache = new Map();    // url -> HTMLImageElement (decoded), LRU by insertion
     const CACHE_MAX = 160;
     let lastKey = '';           // what the file buttons and references line were last built for
+    let api = null;
 
     const $ = id => host && host.querySelector('#' + id);
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
     const fmtT = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }); };
     const fmtEl = ms => `${Math.floor(ms / 36e5)}h ${String(Math.floor(ms / 6e4) % 60).padStart(2, '0')}m`;
     const frames = () => opts.frames() || [];
+    const tools = () => Object.assign({}, TOOLS, opts.tools || {});
+    const supportsMax = f => !!(f && f.url && f.scalable !== false);
 
     function urlFor(f, max) {
         if (!f || !f.url) return f && f.thumb ? f.thumb : '';
         const q = [];
-        if (max) q.push(`max=${max}`);
+        if (max && supportsMax(f)) q.push(`max=${max}`);
         if (corrected && f.correctable) q.push('corrected=1');
-        return f.url + (q.length ? `?${q.join('&')}` : '');
+        return f.url + (q.length ? `${f.url.includes('?') ? '&' : '?'}${q.join('&')}` : '');
     }
 
     function load(url) {
@@ -88,15 +113,16 @@ const OverviewStage = (() => {
         }
         if (cur < 0 || cur >= all.length) cur = all.length - 1;
         const f = all[cur];
-        const refs = opts.references ? opts.references() : null;
-        const canCorrect = !!f.correctable;
+        const t = tools();
+        const refs = t.references && opts.references ? opts.references() : null;
+        const canCorrect = t.corrected && !!f.correctable;
         if (!host.querySelector('.ov')) {
             lastKey = '';
             host.innerHTML = `
-                <div class="ov" tabindex="0" aria-label="Overview frames: drag the bar or use arrow keys to scrub, space to play">
+                <div class="ov" tabindex="0" aria-label="${esc(opts.label)}: drag the bar or use arrow keys to scrub, space to play">
                     <div class="ov-stage" id="ov-stage">
-                        <img class="ov-img" id="ov-img" alt="Overview frame">
-                        <img class="ov-img ov-img-b" id="ov-img-b" alt="Overview frame 1, for comparison" hidden>
+                        <img class="ov-img" id="ov-img" alt="${esc(opts.label)}">
+                        <img class="ov-img ov-img-b" id="ov-img-b" alt="Frame 1, for comparison" hidden>
                         <div class="ov-divider" id="ov-divider" hidden><span></span></div>
                         <span class="ov-live" id="ov-live"></span>
                     </div>
@@ -107,16 +133,16 @@ const OverviewStage = (() => {
                             <button type="button" class="op-btn" id="ov-play" title="Space"></button>
                             <select id="ov-fps" class="op-sel" title="Frames per second"><option>2</option><option>5</option><option selected>10</option><option>20</option></select><span class="ov-keys">fps</span>
                             <button type="button" class="op-btn" id="ov-loop" title="Play again from the start">Loop</button>
-                            <button type="button" class="op-btn" id="ov-corr" title="C — divide the session's dark and flat out"></button>
-                            <button type="button" class="op-btn" id="ov-cmp" title="Frame 1 under a divider you can drag — drift and growth show at the line">Compare with first</button>
+                            ${t.corrected ? '<button type="button" class="op-btn" id="ov-corr" title="C — divide the session\'s dark and flat out"></button>' : ''}
+                            ${t.compare ? '<button type="button" class="op-btn" id="ov-cmp" title="Frame 1 under a divider you can drag — drift and growth show at the line">Compare with first</button>' : ''}
                             <button type="button" class="op-btn" id="ov-newest" title="N — the newest frame, and the ones that follow"></button>
                             ${opts.onFold ? '<button type="button" class="op-btn" id="ov-fold" title="Back to the row of thumbnails">Fold ⌃</button>' : ''}
                         </div>
-                        <div class="ov-controls">
+                        ${t.reveal || t.references ? `<div class="ov-controls">
                             <span class="ov-reveal" id="ov-reveal"></span>
                             <span class="ov-refs" id="ov-refs"></span>
-                        </div>
-                        <span class="ov-keys"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> ×10 · <kbd>Space</kbd> play · <kbd>N</kbd> newest · <kbd>C</kbd> corrected</span>
+                        </div>` : ''}
+                        <span class="ov-keys"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> ×10 · <kbd>Space</kbd> play · <kbd>N</kbd> newest${t.corrected ? ' · <kbd>C</kbd> corrected' : ''}</span>
                         <div class="ov-bar-wrap">
                             <div class="ov-preview" id="ov-preview"><img id="ov-pv-img" alt=""><span id="ov-pv-cap"></span></div>
                             <canvas class="ov-bar" id="ov-bar" height="44" aria-hidden="true"></canvas>
@@ -132,7 +158,7 @@ const OverviewStage = (() => {
         }
         // Taken from more than one position: one field on the stage at a
         // time, the others a click away.
-        const fl = opts.fields ? opts.fields() : null;
+        const fl = t.fields && opts.fields ? opts.fields() : null;
         const fieldsEl = $('ov-fields');
         if (fl && fl.list && fl.list.length > 1) {
             const key = `${fl.list.join(',')}|${fl.current}`;
@@ -150,11 +176,13 @@ const OverviewStage = (() => {
         $('ov-play').textContent = playing ? '❚❚ Pause' : '▶ Play';
         $('ov-loop').classList.toggle('is-on', loop);
         const corr = $('ov-corr');
-        corr.textContent = corrected ? 'Corrected' : 'Raw';
-        corr.classList.toggle('is-on', corrected);
-        corr.disabled = !canCorrect;
-        corr.title = canCorrect ? 'C — divide the session\'s dark and flat out' : 'No dark and flat for this frame yet';
-        $('ov-cmp').classList.toggle('is-on', compare);
+        if (corr) {
+            corr.textContent = corrected ? 'Corrected' : 'Raw';
+            corr.classList.toggle('is-on', corrected);
+            corr.disabled = !canCorrect;
+            corr.title = canCorrect ? 'C — divide the session\'s dark and flat out' : 'No dark and flat for this frame yet';
+        }
+        if ($('ov-cmp')) $('ov-cmp').classList.toggle('is-on', compare);
         $('ov-newest').textContent = follow ? '● Following newest' : 'Newest ⤓';
         $('ov-newest').classList.toggle('is-follow', follow);
         $('ov-img-b').hidden = !compare;
@@ -163,14 +191,15 @@ const OverviewStage = (() => {
             $('ov-img-b').style.clipPath = `inset(0 ${(100 - divider * 100).toFixed(2)}% 0 0)`;
             $('ov-divider').style.left = `${(divider * 100).toFixed(2)}%`;
         }
-        renderMeta(f, all);
+        if (typeof opts.meta === 'function') $('ov-meta').innerHTML = opts.meta(f, cur, all) || '';
+        else renderMeta(f, all);
         // Rebuilt only when the frame (or its correction) changes: rebuilding
         // these every tick of playback made the controls flicker.
         const key = `${f.stem}|${canCorrect}|${corrected}|${refs && refs.record}`;
         if (!playing && key !== lastKey) {
             lastKey = key;
-            renderRefs(f, refs);
-            if (typeof Reveal !== 'undefined' && $('ov-reveal')) {
+            if (t.references) renderRefs(f, refs);
+            if (t.reveal && typeof Reveal !== 'undefined' && $('ov-reveal')) {
                 Reveal.fill($('ov-reveal'), f.stem ? { what: 'bf', stem: f.stem } : null);
             }
         }
@@ -252,7 +281,15 @@ const OverviewStage = (() => {
         const ctx = bar.getContext('2d');
         const css = getComputedStyle(document.documentElement), tok = v => css.getPropertyValue(v).trim() || '#888';
         ctx.fillStyle = tok('--bg-hover'); ctx.fillRect(0, 0, W, H);
-        if (slot >= 4 * dpr) {
+        // A colour per frame — the stage call at that timepoint — as a band
+        // through the middle, so the series reads before any frame is opened.
+        if (typeof opts.color === 'function') {
+            for (let i = 0; i < n; i++) {
+                const c = opts.color(all[i]);
+                if (!c) continue;
+                ctx.fillStyle = c; ctx.fillRect(i * slot, H * 0.3, Math.max(slot, 1), H * 0.4);
+            }
+        } else if (slot >= 4 * dpr) {
             ctx.fillStyle = tok('--border');
             for (let i = 0; i < n; i++) ctx.fillRect(i * slot + slot / 2 - 0.5, H * 0.35, 1, H * 0.3);
         }
@@ -276,6 +313,7 @@ const OverviewStage = (() => {
         cur = Math.max(0, Math.min(n - 1, i));
         if (byUser) follow = false;
         render();
+        if (typeof opts.onFrame === 'function') opts.onFrame(cur, { playing, byUser: !!byUser });
     }
 
     function idxAt(ev) {
@@ -291,7 +329,7 @@ const OverviewStage = (() => {
         pv.style.left = `${Math.min(r.width - 56, Math.max(56, ev.clientX - r.left))}px`;
         const url = f.thumb && f.thumb.startsWith('data:') ? f.thumb : urlFor(f, PREVIEW_MAX);
         load(url).then(im => { if (im && hover === i) $('ov-pv-img').src = im.src; });
-        $('ov-pv-cap').textContent = `${f.frame ?? i + 1}${f.when ? ` · ${fmtT(f.when)}` : ''}`;
+        $('ov-pv-cap').textContent = `${f.frame ?? i + 1}${f.when ? ` · ${fmtT(f.when)}` : ''}${f.caption ? ` · ${f.caption}` : ''}`;
         drawBar();
     }
 
@@ -306,12 +344,17 @@ const OverviewStage = (() => {
         timer = setInterval(tick, 1000 / fps);
         render();
     }
-    function stop() { playing = false; clearInterval(timer); timer = null; render(); }
+    function stop() {
+        const was = playing;
+        playing = false; clearInterval(timer); timer = null; render();
+        if (was && typeof opts.onFrame === 'function') opts.onFrame(cur, { playing: false, byUser: true });
+    }
     function newest() { stop(); follow = true; go(frames().length - 1, false); }
-    function toggleCorrected() { const f = frames()[cur]; if (!f || !f.correctable) return; corrected = !corrected; render(); }
+    function toggleCorrected() { const f = frames()[cur]; if (!f || !f.correctable || !tools().corrected) return; corrected = !corrected; render(); }
 
     function onKey(ev) {
         if (!host || !host.offsetParent) return;                  // the tab is not showing
+        if (_activeStage && _activeStage !== api) return;         // another stage was touched last
         const t = ev.target, tag = t && t.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
         const k = ev.key, step = ev.shiftKey ? 10 : 1;
@@ -333,8 +376,8 @@ const OverviewStage = (() => {
         bar.addEventListener('pointerleave', () => { hover = -1; $('ov-preview').style.display = 'none'; drawBar(); });
         $('ov-play').addEventListener('click', () => playing ? stop() : play());
         $('ov-loop').addEventListener('click', () => { loop = !loop; render(); });
-        $('ov-corr').addEventListener('click', toggleCorrected);
-        $('ov-cmp').addEventListener('click', () => { compare = !compare; render(); });
+        if ($('ov-corr')) $('ov-corr').addEventListener('click', toggleCorrected);
+        if ($('ov-cmp')) $('ov-cmp').addEventListener('click', () => { compare = !compare; render(); });
         $('ov-fields').addEventListener('click', ev => {
             const b = ev.target.closest('[data-ov-field]');
             if (b && opts.onField) { stop(); opts.onField(Number(b.dataset.ovField)); }
@@ -353,15 +396,22 @@ const OverviewStage = (() => {
         let hold = null;
         stage.addEventListener('pointerdown', ev => { if (compare || ev.pointerType !== 'touch') return; hold = setTimeout(play, 350); });
         stage.addEventListener('pointerup', () => { clearTimeout(hold); if (playing) stop(); });
-        document.addEventListener('keydown', onKey);
-        window.addEventListener('resize', drawBar);
-        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => drawBar()).observe(bar);
+        // whichever stage was touched last owns the keys
+        host.addEventListener('pointerdown', () => { _activeStage = api; });
+        if (observer) observer.disconnect();
+        if (typeof ResizeObserver !== 'undefined') { observer = new ResizeObserver(() => drawBar()); observer.observe(bar); }
+        if (!wired) {
+            wired = true;
+            document.addEventListener('keydown', onKey);
+            window.addEventListener('resize', drawBar);
+        }
     }
 
     function mount(hostId, options) {
-        host = document.getElementById(hostId);
+        const el = document.getElementById(hostId);
         opts = Object.assign(opts, options || {});
-        if (!host) return;
+        if (!el) return;
+        if (host !== el) { host = el; _activeStage = api; }   // a new host takes the keys; a re-mount keeps them where they are
         render();
     }
 
@@ -373,7 +423,18 @@ const OverviewStage = (() => {
         render();
     }
 
-    return { mount, framesChanged, go, newest, play, stop, current: () => cur, following: () => follow };
-})();
+    /** A different series on the same stage: start at its newest, following. */
+    function reset() {
+        stop();
+        cur = -1; follow = true; compare = false; hover = -1; lastKey = '';
+        if (host) host.innerHTML = '';
+    }
 
-if (typeof module !== 'undefined') module.exports = OverviewStage;
+    api = { mount, framesChanged, go, newest, play, stop, reset, current: () => cur, following: () => follow, playing: () => playing };
+    return api;
+}
+
+/** The brightfield overview's stage, as it has always been reached. */
+const OverviewStage = createOverviewStage();
+
+if (typeof module !== 'undefined') { module.exports = OverviewStage; module.exports.createOverviewStage = createOverviewStage; }

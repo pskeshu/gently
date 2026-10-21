@@ -844,6 +844,67 @@ the records that were already there, keyed by one new field.
 
 ---
 
+## Unreleased — a day on the rig, 2026-10-21
+
+The scan calibration's first day on hardware, and what the rig turned up
+while it ran. Four embryos scanned in 37 s each with the slope agreeing to
+2 µm/deg across the slide; the rest of this entry is what was wrong around it.
+
+**A dark reporter is not an empty field**
+
+- The reporter detector's "no puncta" was filed as `no_object`, the perception
+  pipeline's word for an empty field, and the role's patience for empty
+  fields stopped three nuclear-marker embryos after five rounds as "likely
+  hatched". A reporter that has not switched on is now `no_signal`, and the
+  reporter path never touches the empty-field counter
+  (`reporter_pseudo_stage`, `gently/app/orchestration/timelapse.py`). The
+  tab names and colours the reporter's readings as their own, off the stage
+  ramp.
+
+**The SPIM camera comes back full frame**
+
+- Calibration and volumes set the camera to the light-sheet band and nothing
+  put it back, so the SPIM camera view after a calibration was the 2048×512
+  strip. The live view clears the ROI whenever it reconfigures
+  (`DiSPIMCamera.clear_roi`).
+
+**The Embryos tab**
+
+- The selected embryo has the overview's stage: its projections large, a
+  timeline coloured by each timepoint's call, play, scrub, compare, and
+  following newest; the detail pane follows the stage and a chosen call puts
+  its frame on the stage. The stage is a factory now (`createOverviewStage`);
+  the overview keeps its instance.
+- The embryo tiles sized themselves to their content and ran under the panel
+  beside them; the rail has one shrinkable column.
+- The header counted the orchestrator's acquisition counter as "rounds",
+  which starts at −1. It counts volumes.
+
+**The Sessions tab opens at once**
+
+- The list parsed every brightfield sidecar of every session (a night is
+  thousands) and walked every file for its size: over a minute for the rig's
+  353 sessions. Frames are counted by name (`FileStore.count_snapshots`),
+  sizes come from the cache or not at all, and the tab asks
+  `/api/sessions/sizes` for the rest in batches once the list is drawn.
+
+**The agent's marking request**
+
+- Pressing the pane's own Register while the agent waited filed the embryos
+  through a different door and answered the agent with nothing; it detected
+  again. Register is the answer while a session is open, the tool names the
+  embryos registered meanwhile rather than saying "0", and the request shows
+  in the chat with Open the map and Register, where the eye is.
+- `get_plan_status` accepts a plan item's reference, which is what the pane
+  hands the agent. The LED command the pane sends as it opens is a 503 before
+  the device layer is up, not a traceback.
+
+**Dev**
+
+- `httpx2` in the dev group: Starlette's test client asks for it.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:

@@ -1306,6 +1306,9 @@ class DeviceLayerServer(Service):
                 if core.getCameraDevice() != cam.name:
                     core.setCameraDevice(cam.name)
                 core.setExposure(cam.name, float(p["exposure"]))
+                # A calibration or a volume leaves the camera on the 2048x512
+                # light-sheet band; the live view is the full frame.
+                cam.clear_roi()
                 self._ls_seq_started = True  # "camera configured" flag; no sequence running
                 self._ls_applied["exposure"] = p["exposure"]
                 self._ls_applied["side"] = side
@@ -1317,6 +1320,7 @@ class DeviceLayerServer(Service):
                 if core.getCameraDevice() != cam.name:
                     core.setCameraDevice(cam.name)
                 core.setExposure(cam.name, float(p["exposure"]))
+                cam.clear_roi()  # see snap mode: the band a calibration left behind
                 # Hard cap: prevent buffer balloon that crashed the production box.
                 try:
                     core.setCircularBufferMemoryFootprint(256)

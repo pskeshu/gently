@@ -564,7 +564,17 @@ async def get_plan_status(
     store = agent.context_store
     campaign = store.resolve_campaign(campaign_id)
     if not campaign:
-        return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
+        # The pane hands the agent plan item ids ("Start imaging for plan item
+        # b8f48d34"); an item names its campaign, so answer for that.
+        resolve_item = getattr(store, "resolve_plan_item", None)
+        item = resolve_item(campaign_id) if callable(resolve_item) else None
+        if item is not None and getattr(item, "campaign_id", None):
+            campaign = store.resolve_campaign(item.campaign_id)
+    if not campaign:
+        return (
+            f"'{campaign_id}' is neither a campaign nor a plan item. "
+            "Try a shorthand, name, or UUID."
+        )
     campaign_id = campaign.id
 
     status = store.get_plan_status(campaign_id)

@@ -124,8 +124,8 @@ def _make_dl(
     """
     dl = DeviceLayerServer.__new__(DeviceLayerServer)
     dl.system = type("S", (), {"core": FakeCore()})()
-    cam_a = type("C", (), {"name": "HamCam1"})()
-    cam_b = type("C", (), {"name": "HamCam2"})()
+    cam_a = type("C", (), {"name": "HamCam1", "clear_roi": lambda self: None})()
+    cam_b = type("C", (), {"name": "HamCam2", "clear_roi": lambda self: None})()
     dl.devices = {
         "camera": cam_a,
         "scanner": FakeScanner("Scanner:AB:33"),

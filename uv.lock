@@ -676,6 +676,7 @@ torch-gpu = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx2" },
     { name = "mypy" },
     { name = "playwright" },
     { name = "pre-commit" },
@@ -721,6 +722,7 @@ provides-extras = ["sam", "hub", "torch-gpu", "torch-cpu"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "mypy", specifier = "==2.1.0" },
     { name = "playwright", specifier = ">=1.44.0" },
     { name = "pre-commit", specifier = ">=3.7.0" },

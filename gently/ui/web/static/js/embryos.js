@@ -1973,7 +1973,10 @@ const EmbryosManager = {
             stat(embryos.length, `embryo${embryos.length !== 1 ? 's' : ''}`),
             going ? stat(going, 'going') : '',
             done ? stat(done, 'done') : '',
-            r.current_round != null ? stat(r.current_round, 'round') : stat(this.state.totalTimepoints, 'timepoints'),
+            // Volumes taken, not `current_round`: the orchestrator starts that
+            // counter at -1 and bumps it once per embryo volume, so it read
+            // "-1 round" before the first volume and acquisitions-minus-one after.
+            stat(this.state.totalTimepoints, 'volumes'),
             going ? stat(this.getNextCountdown(), 'next volume', 'summary-next-countdown', 'is-live') : '',
             kind === 'mixed' ? stat(bf.frames ?? this._bfFrames.length, 'overview frames') : '',
             kind === 'mixed' ? stat(this.getOverviewCountdown(), 'next frame', 'summary-next-overview') : '',
@@ -2172,6 +2175,12 @@ const EmbryosManager = {
             'hatched': 'Hatched',
             'arrested': 'Arrested',
             'no_object': 'Empty',
+            // a reporter's reading, filed as a stage-shaped word
+            'no_signal': 'No signal',
+            'weak_signal': 'Weak signal',
+            'lit_up': 'Lit up',
+            'lit_up_saturating': 'Saturating',
+            'uncertain': 'Uncertain',
         };
         return names[this._sk(stage).replace('1_5_fold', '1.5fold').replace('2_fold', '2fold').replace('3_fold', '3fold')] || String(stage).replace(/_/g, ' ');
     },
@@ -2186,6 +2195,8 @@ const EmbryosManager = {
             // Clear detail panel state to prevent stale embryoId in timepoint links
             this.currentDetailItem = null;
             this.detailPanelVisible = false;
+            // another embryo's series: its newest frame, following
+            if (this._embryoStage) this._embryoStage.reset();
         }
 
         this._setSelectedEmbryo(embryoId);
@@ -2328,6 +2339,10 @@ const EmbryosManager = {
             : `${positiveDetections.length} detection${positiveDetections.length !== 1 ? 's' : ''} · ${embryo.timepoints} timepoint${embryo.timepoints !== 1 ? 's' : ''}`;
         void statusIcon;
 
+        // The embryo's stage survives a re-render: its image, its playback and
+        // the keys stay where they are while the calls around it refresh.
+        const kept = panel.querySelector('#embryo-stage');
+        const keepStage = kept && kept.dataset.embryo === embryo.embryoId ? kept : null;
         panel.innerHTML = `
             <div class="reasoning-header">
                 <div class="reasoning-embryo-info">
@@ -2342,14 +2357,86 @@ const EmbryosManager = {
                     ${quickJumpsHtml}
                 </div>
             </div>
+            <div class="embryo-stage" id="embryo-stage" data-embryo="${this.escapeHtml(embryo.embryoId)}"></div>
             ${this.renderTimelineSparkline(reasoning, embryo.timepoints)}
             <div class="inline-detail-container" id="inline-detail-container"></div>
         `;
+        if (keepStage) panel.querySelector('#embryo-stage').replaceWith(keepStage);
+        this._mountEmbryoStage(embryo.embryoId, !keepStage);
 
         // Re-render current detail if one was open
         if (this.currentDetailItem) {
             this.renderInlineDetail(this.currentDetailItem);
         }
+    },
+
+    // ── the embryo's stage: its projections, one large, with the timeline ──
+    // "there is no nice timelapse viewing features that were there for the
+    // brightfield images. the show latest feature etc. the player was rather
+    // nice." The same stage the overview has, on the selected embryo: the
+    // newest projection large, every timepoint a slot on the bar coloured by
+    // its stage call, play, scrub, and following newest as the run goes.
+    _embryoStage: null,
+    _stageSyncing: false,
+
+    /** The selected embryo's projections, oldest first, with what each was called. */
+    _embryoFrames(embryoId) {
+        const embryo = this.state.embryos[embryoId];
+        const sid = this.currentSessionId;
+        if (!embryo || !sid) return [];
+        const calls = {};
+        (this.detectionReasoning[embryoId] || []).forEach(r => {
+            if (r && r.timepoint != null && (!calls[r.timepoint] || calls[r.timepoint]._pending)) calls[r.timepoint] = r;
+        });
+        const n = Math.max(Number(embryo.timepoints) || 0, ...Object.keys(calls).map(Number));
+        const out = [];
+        for (let t = 1; t <= n; t++) {
+            const c = calls[t];
+            out.push({
+                url: `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryoId)}&t=${t}`,
+                scalable: false,            // the projection route serves the JPEG as it is
+                frame: t,
+                when: c && c.timestamp ? c.timestamp : null,
+                stage: c && !c._pending ? c.stage : null,
+                detector: c && !c._pending ? c.detector_name : null,
+                caption: c && !c._pending && c.stage ? this.formatStageName(c.stage) : '',
+            });
+        }
+        return out;
+    },
+
+    _mountEmbryoStage(embryoId, fresh) {
+        if (typeof createOverviewStage === 'undefined') return;
+        if (!document.getElementById('embryo-stage')) return;
+        if (!this._embryoStage) this._embryoStage = createOverviewStage();
+        if (fresh) this._embryoStage.reset();
+        const color = s => (typeof stageColor === 'function') ? stageColor(s) : '#8b949e';
+        this._embryoStage.mount('embryo-stage', {
+            frames: () => this._embryoFrames(embryoId),
+            label: `${embryoId.replace(/embryo_?/i, 'E')} projections`,
+            tools: { corrected: false, compare: true, references: false, reveal: false, fields: false },
+            color: f => (f.stage ? color(f.stage) : null),
+            meta: (f, i, all) => [
+                `<span class="ov-now">${f.when ? `<b>${this.formatTime(f.when)}</b> · ` : ''}t<b>${f.frame}</b>/${all.length}</span>`,
+                f.stage
+                    ? `<span><i class="tile-swatch" style="background:${color(f.stage)}" aria-hidden="true"></i> ${this.escapeHtml(this.formatStageName(f.stage))}</span>`
+                    : '<span>no call yet</span>',
+                f.detector && f.detector !== 'perception' ? `<span>${this.escapeHtml(this.formatDetectorName(f.detector))}</span>` : '',
+            ].filter(Boolean).join(''),
+            // The detail pane follows the stage once it rests; not every tick of playback.
+            onFrame: (i, { playing }) => { if (!playing) this._syncDetailToFrame(i + 1); },
+        });
+        this._embryoStage.framesChanged();
+    },
+
+    /** Open the call for the timepoint the stage shows, if there is one. */
+    _syncDetailToFrame(t) {
+        if (this._stageSyncing) return;
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        const item = reasoning.find(r => r.timepoint === t && !r._pending) || reasoning.find(r => r.timepoint === t);
+        if (!item || (this.currentDetailItem && this.currentDetailItem.timepoint === t)) return;
+        this._stageSyncing = true;
+        try { this.openDetailPanel(item.detector_name, t, false); } finally { this._stageSyncing = false; }
     },
 
     // Render detections with range collapse for "not detected" sequences
@@ -2376,6 +2463,12 @@ const EmbryosManager = {
         this.highlightEvalDot(timepoint, detectorName);
 
         this.renderInlineDetail(item, userInitiated);
+
+        // A call the operator chose puts its frame on the stage.
+        if (userInitiated && this._embryoStage && !this._stageSyncing) {
+            this._stageSyncing = true;
+            try { this._embryoStage.go(timepoint - 1, true); } finally { this._stageSyncing = false; }
+        }
     },
 
     // Highlight the currently selected eval dot in the timeline
@@ -3785,6 +3878,10 @@ const EmbryosManager = {
             if (!this.currentDetailItem || !this.selectedEmbryoId) return;
             if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+            // With the embryo's stage on screen the arrows are its: it steps
+            // the frame and the detail follows. Stepping both moved two.
+            const stage = document.querySelector('#embryo-stage .ov');
+            if (stage && stage.offsetParent) return;
 
             if (e.key === 'ArrowLeft') {
                 e.preventDefault();
