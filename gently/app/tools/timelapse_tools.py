@@ -4,6 +4,7 @@ Timelapse Orchestration Tools
 Tools for managing adaptive timelapse acquisitions.
 """
 
+from gently.harness.roles import DEFAULT_ROLE
 from gently.harness.tools.helpers import (
     ctx_get,
     get_embryo_or_error,
@@ -1069,7 +1070,7 @@ def set_photodose_budget(
             # was disabled); otherwise it would just immediately re-pause.
             if base_dose_budget_ms is not None:
                 rdef = (
-                    ROLE_REGISTRY.get(getattr(e, "role", "test"))
+                    ROLE_REGISTRY.get(getattr(e, "role", DEFAULT_ROLE))
                     if hasattr(ROLE_REGISTRY, "get")
                     else None
                 )
@@ -1115,7 +1116,7 @@ def get_photodose_status(context: dict | None = None) -> str:
     for eid in sorted(states):
         e = states[eid]
         used = getattr(e, "total_exposure_ms", 0.0) or 0.0
-        role = getattr(e, "role", "test")
+        role = getattr(e, "role", DEFAULT_ROLE)
         if base is not None:
             rdef = ROLE_REGISTRY.get(role) if hasattr(ROLE_REGISTRY, "get") else None
             mult = getattr(rdef, "photodose_budget_multiplier", 1.0) if rdef else 1.0

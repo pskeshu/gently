@@ -165,11 +165,16 @@ Behavior:
 - Cadence: stays at the role default (5 min) throughout the run.
 - Photodose budget: relaxed (10× multiplier by default).
 
+## lineaging — the default
+An embryo nobody has said anything about is `lineaging`: it goes to the
+nuclear perception pipeline and is staged, like a calibration embryo, and
+it is usually what the run is for. `test` is the reporter run's role and is
+chosen on purpose, never assumed.
+
 ## unassigned
-Embryo detected but not yet classified. **Treat conservatively — like
-test** (the safer default: protect photodose). Ask the user to assign a
-role via the map view or `assign_embryo_roles` tool when role-specific
-behavior is needed.
+Embryo detected but not yet classified. Imaged like the default. Ask the
+user to assign a role via the map view or `assign_embryo_roles` tool when
+role-specific behavior is needed.
 
 ## Common pitfalls to avoid
 - Suggesting to "calibrate using embryo_X" without checking that

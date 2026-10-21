@@ -297,7 +297,8 @@ embryos. Use when the user has marked embryos in the map view and is classifying
 biological subjects (test) vs reference/calibration samples (calibration).
 Roles drive cadence policy, detector selection, photodose budget, and UI color. Pass a dict
 mapping embryo_id -> role name.
-Available roles come from gently.harness.roles.REGISTRY: 'test', 'calibration', 'unassigned'.""",
+Available roles come from gently.harness.roles.REGISTRY: 'lineaging' (the default: nuclear
+perception, staged), 'calibration', 'test' (a reporter run's subject), 'unassigned'.""",
     category=ToolCategory.EMBRYO,
     examples=[
         ToolExample("Mark embryo 1 as calibration", {"roles": {"embryo_1": "calibration"}}),
