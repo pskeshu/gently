@@ -609,6 +609,12 @@ class VisualizationServer(Service):
         """
         Start an embryo marking session in the web UI (map view).
 
+        ``pixel_size_um`` is µm per image pixel AT THE SAMPLE (0.65 for the
+        bottom camera through its 10× objective), never the camera's own
+        pixel. The map scales every mark by it; a wrong one sends the stage
+        to the wrong place, which is why a value no objective could give is
+        refused here rather than drawn.
+
         Broadcasts the bottom camera image to all clients and waits
         for the user to mark/edit embryo positions via clicks. Each
         marker carries a role (test / calibration / unassigned).
@@ -637,6 +643,12 @@ class VisualizationServer(Service):
         str
             Session ID for this marking session
         """
+        if not 0.01 <= float(pixel_size_um) <= 5.0:
+            raise ValueError(
+                f"pixel_size_um={pixel_size_um} is not a sample-plane pixel (expected ~0.65 "
+                "for the bottom camera); refusing to start a marking session the stage "
+                "would follow to the wrong place"
+            )
         import uuid
 
         if not hasattr(self, "_marking_sessions"):

@@ -3310,10 +3310,17 @@ const OperateManager = (function () {
     function onMarkingImage(d) {
         if (!d || !d.image_b64) return;
 
+        // The session's scale is µm per image pixel at the sample (0.65 here).
+        // A camera pixel (6.5) once came through this field and every mark
+        // landed ten times too far out; the pane's own scale is used instead
+        // of anything no objective could give.
+        const scale = Number(d.pixel_size_um);
+        const sane = Number.isFinite(scale) && scale >= 0.01 && scale <= 5;
+        if (d.pixel_size_um != null && !sane) console.error('marking session pixel_size_um is not a sample-plane pixel:', d.pixel_size_um);
         _markSession = {
             sessionId: d.session_id,
             defaultRole: d.default_role || 'lineaging',
-            pixelSizeUm: d.pixel_size_um || undefined,
+            pixelSizeUm: sane ? scale : undefined,
         };
 
         // A pushed still, in the shape a live frame arrives in. `mime` matters:

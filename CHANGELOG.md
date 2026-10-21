@@ -899,6 +899,17 @@ while it ran. Four embryos scanned in 37 s each with the slope agreeing to
   hands the agent. The LED command the pane sends as it opens is a 503 before
   the device layer is up, not a traceback.
 
+**The map is told what a pixel is at the sample**
+
+- The agent's detect tool handed the map its image with `pixel_size_um=6.5`,
+  the camera's physical pixel; through the 10× bottom objective a pixel is
+  0.65 µm. The map scaled every mark by it, so every embryo registered
+  through the agent's marking session was filed ten times too far from
+  where the frame was taken, and the stage drove there. The hand-off carries
+  the sample-plane pixel (`get_um_per_pixel`), the server refuses to start a
+  marking session with a scale no objective could give, and the pane ignores
+  one. Embryos marked through the pane's own Detect were never affected.
+
 **The default role is lineaging**
 
 - An embryo nobody has said anything about was `test`: read by the

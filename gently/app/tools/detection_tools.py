@@ -32,14 +32,25 @@ async def _route_to_map_view(
     initial_markers: list[dict],
     stage_position: tuple[float, float],
     default_role: str = DEFAULT_ROLE,
-    pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+    um_per_px: float = get_um_per_pixel(DEFAULT_PIXEL_SIZE_UM, DEFAULT_OBJECTIVE_MAG),
     timeout: float | None = None,
 ) -> tuple[list[dict] | None, str | None]:
     """Hand off image + markers to the web map view; await user-edited result.
 
+    ``um_per_px`` is what one pixel of the image is at the sample: the camera's
+    6.5 µm pixel through the 10× bottom objective is 0.65 µm. The map converts
+    every mark to stage µm with it. This used to hand the map the camera's own
+    pixel (6.5), so every embryo marked through the agent landed ten times too
+    far from where the frame was taken; on 2026-10-21 the stage drove there.
+
     Returns ``(marked, None)`` on success or ``(None, error_message)`` if the
     map view isn't available.
     """
+    if not 0.01 <= um_per_px <= 5.0:
+        raise ValueError(
+            f"um_per_px={um_per_px} is not a sample-plane pixel; a camera pixel must be "
+            "divided by the objective's magnification first (get_um_per_pixel)"
+        )
     if getattr(agent, "viz_server", None) is None:
         return None, (
             "Map view requires the web visualization server. Start it with start_viz_server first."
@@ -51,7 +62,7 @@ async def _route_to_map_view(
         viz_server=agent.viz_server,
         image=image,
         initial_stage_position=stage_position,
-        pixel_size_um=pixel_size_um,
+        pixel_size_um=um_per_px,
         initial_markers=initial_markers,
         default_role=default_role,
         timeout=timeout,
