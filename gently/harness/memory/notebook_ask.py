@@ -13,11 +13,12 @@ def select_notes(
     *,
     thread: str | None = None,
     strain: str | None = None,
+    project: str | None = None,
     limit: int = 12,
 ) -> list[Note]:
-    """Structural narrowing: scope by thread/strain when given, else recent.
+    """Structural narrowing: scope by thread/strain/project when given, else recent.
     Returns newest-first, capped at ``limit``."""
-    notes = store.query_notes(thread=thread, strain=strain)
+    notes = store.query_notes(thread=thread, strain=strain, project=project)
     return notes[:limit]
 
 

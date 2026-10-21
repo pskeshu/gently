@@ -11851,3 +11851,9 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .eval-dot-swatch { display: block; width: 12px; height: 12px; border-radius: 3px; margin: auto; }
 .no-detections-text { font-weight: 600; }
 .no-detections-hint { color: var(--text-muted); font-size: 0.85rem; }
+
+/* Home · Projects card: a project's chip on a session row, and how far its plan is */
+.home-tag-project { color: var(--text); border: 1px solid var(--border-strong); }
+.home-tag-unfiled { color: var(--text-muted); border: 1px dashed var(--text-muted); }
+.home-bar { display: inline-block; width: 56px; height: 5px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.home-bar i { display: block; height: 100%; background: var(--accent); }

@@ -110,6 +110,7 @@ class Note:
     embryos: list[str] = field(default_factory=list)
     sessions: list[str] = field(default_factory=list)
     threads: list[str] = field(default_factory=list)
+    projects: list[str] = field(default_factory=list)  # root campaign ids
     basis: list[str] = field(default_factory=list)  # note ids this rests on
     links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
     artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
@@ -123,6 +124,7 @@ class Note:
         self.embryos = as_tags(self.embryos)
         self.sessions = as_tags(self.sessions)
         self.threads = as_tags(self.threads)
+        self.projects = as_tags(self.projects)
 
 
 def note_to_dict(n: Note) -> dict[str, Any]:
@@ -138,6 +140,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "embryos": list(n.embryos),
         "sessions": list(n.sessions),
         "threads": list(n.threads),
+        "projects": list(n.projects),
         "basis": list(n.basis),
         "links": list(n.links),
         "artifacts": list(n.artifacts),
@@ -161,6 +164,7 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         embryos=as_tags(d.get("embryos")),
         sessions=as_tags(d.get("sessions")),
         threads=as_tags(d.get("threads")),
+        projects=as_tags(d.get("projects")),
         basis=list(d.get("basis") or []),
         links=list(d.get("links") or []),
         artifacts=list(d.get("artifacts") or []),
@@ -204,7 +208,7 @@ class NotebookStore:
     """File-backed store for notebook Notes. One YAML per note under notes/;
     flat pool, rebuildable reverse-indexes (added in Task 3)."""
 
-    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads"}
+    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads", "project": "projects"}
 
     def __init__(self, notebook_dir: Path):
         self.root = Path(notebook_dir)
@@ -213,7 +217,12 @@ class NotebookStore:
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         # reverse indexes: facet -> {value: [note_id, ...]}
-        self._index: dict[str, dict[str, list[str]]] = {"strain": {}, "embryo": {}, "thread": {}}
+        self._index: dict[str, dict[str, list[str]]] = {
+            "strain": {},
+            "embryo": {},
+            "thread": {},
+            "project": {},
+        }
         self.rebuild_index()
 
     # ---- reverse indexes (notes are authoritative; indexes are caches) ----
@@ -226,7 +235,7 @@ class NotebookStore:
 
     def rebuild_index(self) -> None:
         """Rebuild reverse-indexes by scanning notes/."""
-        self._index = {"strain": {}, "embryo": {}, "thread": {}}
+        self._index = {"strain": {}, "embryo": {}, "thread": {}, "project": {}}
         for f in sorted(self.notes_dir.glob("*.yaml")):
             data = self._read_yaml(f)
             if data:
@@ -240,6 +249,9 @@ class NotebookStore:
 
     def ids_for_thread(self, thread: str) -> list[str]:
         return list(self._index["thread"].get(thread, []))
+
+    def ids_for_project(self, project: str) -> list[str]:
+        return list(self._index["project"].get(project, []))
 
     # ---- helpers (mirror FileContextStore conventions) ----
     @staticmethod
@@ -298,6 +310,7 @@ class NotebookStore:
         strain: str | None = None,
         embryo: str | None = None,
         thread: str | None = None,
+        project: str | None = None,
     ) -> list[Note]:
         """Structural query: narrow by scope via the indexes, then filter by
         kind/author/status. Returned newest-first. (No semantic ranking here —
@@ -310,6 +323,8 @@ class NotebookStore:
             scope_sets.append(set(self.ids_for_embryo(embryo)))
         if thread is not None:
             scope_sets.append(set(self.ids_for_thread(thread)))
+        if project is not None:
+            scope_sets.append(set(self.ids_for_project(project)))
         candidate_ids: set[str] | None = set.intersection(*scope_sets) if scope_sets else None
 
         # 2. load + filter

@@ -731,3 +731,56 @@
 .session-chip.is-empty { opacity: .5; }
 .session-filters-reset { justify-self: start; font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 0 0 0 16px; }
 .session-filters-reset:hover { text-decoration: underline; }
+
+/* ── Projects: a session's home, and filing it ────────────────────────────
+   One home per session (a chip), many plan items served (muted text).
+   Shapes as well as colour: unfiled is dashed, a project is a filled mark. */
+.chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600; letter-spacing: .03em;
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+    color: var(--text-muted); white-space: nowrap; vertical-align: middle;
+}
+.chip-proj { color: var(--text); border-color: var(--border-strong); }
+.chip-proj::before { content: '▣'; font-size: 10px; color: var(--accent); }
+.chip-unfiled { border-style: dashed; }
+.session-item.active .chip, .session-item:hover .chip { color: inherit; border-color: currentColor; }
+.session-item.active .chip-proj::before, .session-item:hover .chip-proj::before { color: inherit; }
+.session-project { margin-top: 5px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.session-plan-served { font-size: 11.5px; color: var(--text-muted); }
+.session-file-link { font-size: 11.5px; color: var(--accent); text-decoration: none; }
+.session-item:hover .session-file-link, .session-item:hover .session-plan-served,
+.session-item.active .session-file-link, .session-item.active .session-plan-served { color: inherit; }
+
+/* the detail header: where the session is filed, and what else it served */
+.session-filed { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap; margin-top: 6px; }
+.session-filed b { color: var(--text); font-weight: 500; }
+.session-filed a { color: var(--accent); text-decoration: none; }
+.session-filed .session-edit-btn { margin-left: 2px; }
+
+/* the file-under popover: one project, optionally one more plan item */
+.filing-pop {
+    border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-card);
+    padding: 10px 12px; display: grid; gap: 8px; font-size: 12.5px; color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,.35); margin-top: 6px; max-width: 420px; text-align: left; cursor: default;
+}
+.filing-pop .filing-title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.filing-pop label.filing-opt { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.filing-pop label.filing-opt small { color: var(--text-muted); }
+.filing-pop input[type="text"], .filing-pop select {
+    font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--bg-dark); color: var(--text); width: 100%; box-sizing: border-box;
+}
+.filing-pop .filing-also { border-top: 1px solid var(--border); padding-top: 8px; display: grid; gap: 4px; color: var(--text-muted); }
+.filing-pop .filing-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.filing-pop .filing-btns button {
+    font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); color: var(--text-muted); background: transparent;
+}
+.filing-pop .filing-btns button.go { border-color: var(--accent); color: var(--accent); }
+.filing-pop .filing-btns button.danger { border-color: var(--accent-red); color: var(--accent-red); }
+.filing-pop .filing-err { color: var(--accent-red); font-size: 12px; }
+
+/* a stage carries its WormBase life-stage id */
+.stage-ontology { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+.stage-ontology a { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); text-decoration: none; }

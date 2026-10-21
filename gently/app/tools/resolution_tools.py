@@ -112,17 +112,20 @@ async def attach_session_to_plan(
     # Two sources of truth for the active plan item
     _set_active_plan_item(agent, item.id)
 
-    # Link the session into the campaign's intent record AND onto the plan item
-    # itself (item-level, appends — an item may have several sessions).
+    # File the session under the item's project and onto the item itself,
+    # through the one door (gently.app.filing).
     session_id = getattr(agent, "session_id", None)
     linked = False
     if session_id:
         try:
-            cs.link_session_campaign(session_id, item.campaign_id)
-            cs.link_plan_item_session(item.id, session_id)
+            from gently.app.filing import file_session_under
+
+            file_session_under(
+                getattr(agent, "store", None), cs, session_id, item.campaign_id, item.id
+            )
             linked = True
         except Exception as e:
-            logger.warning(f"session↔plan link failed: {e}")
+            logger.warning(f"session↔plan filing failed: {e}")
 
     # Invalidate prompt cache so the next system prompt picks up the
     # active item (the memory awareness layer injects its spec).

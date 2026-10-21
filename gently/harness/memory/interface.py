@@ -83,6 +83,14 @@ class AgentMemory:
 
     def format_imaging_spec_summary(self, spec) -> str:
         """One-line summary of an ImagingSpec for briefings."""
+        acq = getattr(spec, "acquisition", None)
+        if acq:
+            from dataclasses import asdict
+
+            from .acquisition import describe_acquisition, effective_acquisition
+
+            sentence = describe_acquisition(effective_acquisition(asdict(spec)), spec.num_embryos)
+            return f"{spec.strain}, {sentence}" if spec.strain else sentence
         parts = []
         if spec.strain:
             parts.append(spec.strain)
@@ -307,6 +315,28 @@ class AgentMemory:
             lines.append(f"**Target**: {campaign.target}")
         if campaign.progress:
             lines.append(f"**Progress**: {campaign.progress}")
+        strains = getattr(campaign, "strains", None) or []
+        if strains:
+            lines.append(
+                "**Strains**: "
+                + ", ".join(
+                    f"{s.get('key')}"
+                    + (
+                        f" ({s.get('subtitle') or s.get('title')})"
+                        if (s.get("subtitle") or s.get("title"))
+                        else ""
+                    )
+                    for s in strains[:6]
+                )
+            )
+        refs = getattr(campaign, "references", None) or []
+        if refs:
+            lines.append(
+                "**Links**: "
+                + ", ".join(
+                    f"{r.get('title') or r.get('key')} [{r.get('source')}]" for r in refs[:6]
+                )
+            )
 
         # Phases (subcampaigns)
         try:
@@ -352,13 +382,31 @@ class AgentMemory:
         except Exception:
             pass
 
-        # Relevant learnings
-        learnings = self.store.get_learnings(limit=50)
-        if learnings:
-            lines.append("\n**Recent learnings**:")
-            for learning in learnings[:5]:
-                conf = learning.confidence.value if learning.confidence else "?"
-                lines.append(f"  - [{conf}] {learning.content[:150]}")
+        # The project's findings, else the lab's learnings
+        findings = []
+        nb = getattr(self.store, "notebook", None)
+        if nb is not None:
+            try:
+                from .notebook import NoteKind, NoteStatus
+
+                findings = [
+                    n
+                    for n in nb.query_notes(kind=NoteKind.FINDING, project=campaign.id)
+                    if n.status != NoteStatus.SUPERSEDED
+                ]
+            except Exception:
+                findings = []
+        if findings:
+            lines.append("\n**Findings**:")
+            for n in findings[:5]:
+                lines.append(f"  - [{n.status.value}] {n.body[:150]}")
+        else:
+            learnings = self.store.get_learnings(limit=50)
+            if learnings:
+                lines.append("\n**Recent learnings**:")
+                for learning in learnings[:5]:
+                    conf = learning.confidence.value if learning.confidence else "?"
+                    lines.append(f"  - [{conf}] {learning.content[:150]}")
 
         # Other active root campaigns (brief mention)
         root_campaigns = self.store.get_root_campaigns()
@@ -367,8 +415,19 @@ class AgentMemory:
             names = [_short_name(c) for c in others[:3]]
             lines.append(f"\n**Other active campaigns**: {', '.join(names)}")
 
-        # Open questions
-        questions = self.store.get_open_questions()
+        # Open questions, the project's own when it has any
+        questions = []
+        if hasattr(self.store, "list_questions"):
+            try:
+                questions = [
+                    q
+                    for q in self.store.list_questions(project_id=campaign.id)
+                    if q.status.value in ("open", "investigating")
+                ]
+            except Exception:
+                questions = []
+        if not questions:
+            questions = self.store.get_open_questions()
         if questions:
             lines.append("\n**Open questions**:")
             for q in questions[:3]:

@@ -39,7 +39,7 @@ const ReviewApp = {
         list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         try {
-            const resp = await fetch('/api/sessions');
+            const [resp] = await Promise.all([fetch('/api/sessions'), this.loadProjects()]);
             const data = await resp.json();
             this.sessions = data.sessions || [];
             this.renderSessionList();
@@ -47,6 +47,201 @@ const ReviewApp = {
             list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);
         }
+        this.watchForFiling();
+    },
+
+    // ---- projects: a session has one home, and may serve items elsewhere ----
+
+    projects: [],          // root campaign trees from /api/campaigns
+    _projectRoot: {},      // any campaign id (root or phase) -> its root id
+
+    async loadProjects() {
+        try {
+            const data = await (await fetch('/api/campaigns')).json();
+            this.projects = data.campaigns || [];
+        } catch (_) { this.projects = []; }
+        const roots = {};
+        const walk = (node, rootId) => {
+            const c = node.campaign || {};
+            if (c.id) roots[c.id] = rootId;
+            (node.children || []).forEach(ch => walk(ch, rootId));
+        };
+        this.projects.forEach(t => walk(t, (t.campaign || {}).id));
+        this._projectRoot = roots;
+    },
+
+    projectName(id) {
+        const t = this.projects.find(p => (p.campaign || {}).id === id);
+        const c = t ? t.campaign : null;
+        return c ? (c.shorthand || c.description || id) : (id ? id.slice(0, 8) : '');
+    },
+
+    rootOf(campaignId) { return this._projectRoot[campaignId] || campaignId; },
+
+    // Every plan item in every project, for the "also serves" select.
+    allPlanItems() {
+        const out = [];
+        const walk = (node, rootId) => {
+            (node.items || []).forEach(it => out.push({ id: it.id, title: it.title, campaign_id: it.campaign_id || (node.campaign || {}).id, root: rootId }));
+            (node.children || []).forEach(ch => walk(ch, rootId));
+        };
+        this.projects.forEach(t => walk(t, (t.campaign || {}).id));
+        return out;
+    },
+
+    projectChip(s) {
+        if (!s.project_id) {
+            return `<span class="chip chip-unfiled">unfiled</span> <a href="#" class="session-file-link" onclick="event.preventDefault(); event.stopPropagation(); ReviewApp.openFiling('${this.escapeHtml(s.session_id)}')">file under…</a>`;
+        }
+        const items = (s.plan_items || []).filter(it => this.rootOf(it.campaign_id) === s.project_id);
+        const served = items.length
+            ? `<span class="session-plan-served">plan: ${items.map(it => this.escapeHtml(it.title) + (it.origin === 'manual' ? ' · manual' : '')).join(', ')}</span>`
+            : '';
+        return `<span class="chip chip-proj" title="Filed under this project">${this.escapeHtml(this.projectName(s.project_id))}</span>${served}`;
+    },
+
+    // Filing done elsewhere (the agent, the Projects tab) shows up here.
+    _filingWatched: false,
+    watchForFiling() {
+        if (this._filingWatched || typeof ClientEventBus === 'undefined') return;
+        this._filingWatched = true;
+        let timer = null;
+        const bump = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => { timer = null; this.loadSessions().catch(() => {}); }, 500);
+        };
+        ClientEventBus.on('PLAN_UPDATED', bump);
+        ClientEventBus.on('CONTEXT_UPDATED', bump);
+    },
+
+    // ---- filing: one home, chosen here; a second project reached through its item ----
+
+    _filing: null,   // {sid, where: 'list'|'detail', choice, also, newName, error}
+
+    openFiling(sid, where) {
+        const s = this.sessions.find(x => x.session_id === sid) || this.currentSession || {};
+        this._filing = { sid, where: where || 'list', choice: s.project_id || '', also: '', newName: '', error: '' };
+        this.renderSessionList();
+        if (this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+    },
+
+    closeFiling() {
+        const sid = this._filing && this._filing.sid;
+        this._filing = null;
+        this.renderSessionList();
+        if (sid && this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+    },
+
+    filingChoice(value) { if (this._filing) this._filing.choice = value; },
+    filingAlso(value) { if (this._filing) this._filing.also = value; },
+    filingNewName(value) { if (this._filing) this._filing.newName = value; },
+
+    renderFilingPopover(s) {
+        const f = this._filing;
+        if (!f) return '';
+        const esc = v => this.escapeHtml(v);
+        const home = s.project_id || '';
+        const opts = this.projects.map(t => {
+            const c = t.campaign || {};
+            const p = t.project || {};
+            const on = f.choice === c.id;
+            return `<label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="${esc(c.id)}" ${on ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> ${esc(c.shorthand || c.description || c.id)} <small>· ${p.sessions || 0} session${p.sessions === 1 ? '' : 's'}${c.id === home ? ' · its home now' : ''}</small></label>`;
+        }).join('');
+        const newOn = f.choice === '__new__';
+        const items = this.allPlanItems().filter(it => it.root !== (f.choice && f.choice !== '__new__' ? f.choice : home));
+        const already = new Set((s.plan_items || []).map(it => it.id));
+        const alsoOpts = items.filter(it => !already.has(it.id)).map(it =>
+            `<option value="${esc(it.root)}|${esc(it.campaign_id)}|${esc(it.id)}" ${f.also === `${it.root}|${it.campaign_id}|${it.id}` ? 'selected' : ''}>${esc(this.projectName(it.root))} › ${esc(it.title)}</option>`).join('');
+        return `<div class="filing-pop" onclick="event.stopPropagation()">
+            <div class="filing-title">Its project · one</div>
+            ${opts || '<div class="session-plan-served">No projects yet.</div>'}
+            <label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="__new__" ${newOn ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> New project…</label>
+            ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)" autofocus>` : ''}
+            ${alsoOpts ? `<div class="filing-also"><span>Also serves a plan item elsewhere?</span>
+                <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${alsoOpts}</select></div>` : ''}
+            ${f.error ? `<div class="filing-err">${esc(f.error)}</div>` : ''}
+            <div class="filing-btns">
+                <button type="button" class="go" onclick="ReviewApp.submitFiling()">File</button>
+                ${home ? `<button type="button" class="danger" onclick="ReviewApp.unfileSession('${esc(s.session_id)}')">Unfile</button>` : ''}
+                <button type="button" onclick="ReviewApp.closeFiling()">Cancel</button>
+            </div>
+        </div>`;
+    },
+
+    async _post(url, body) {
+        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(d.detail || `HTTP ${resp.status}`);
+        return d;
+    },
+
+    async submitFiling() {
+        const f = this._filing;
+        if (!f) return;
+        const s = this.sessions.find(x => x.session_id === f.sid) || this.currentSession || {};
+        try {
+            let campaignId = f.choice;
+            if (campaignId === '__new__') {
+                const name = (f.newName || '').trim();
+                if (!name) { f.error = 'Give the new project a line of description.'; this.renderSessionList(); return; }
+                const made = await this._post('/api/campaigns', { description: name });
+                campaignId = made.campaign.id;
+            }
+            if (campaignId && campaignId !== s.project_id) {
+                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, move: !!s.project_id });
+            }
+            if (f.also) {
+                const [, itemCampaign, itemId] = f.also.split('|');
+                await this._post(`/api/campaigns/${encodeURIComponent(itemCampaign)}/items/${encodeURIComponent(itemId)}/sessions`, { session_id: f.sid });
+            }
+            this._filing = null;
+            await this.loadSessions();
+            if (this.currentSession && this.currentSession.session_id === f.sid) await this.loadSession(f.sid);
+        } catch (e) {
+            f.error = `Could not file: ${e.message || e}`;
+            this.renderSessionList();
+            if (this.currentSession && this.currentSession.session_id === f.sid) this.renderSessionContent();
+        }
+    },
+
+    async unfileSession(sid) {
+        try {
+            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null });
+            this._filing = null;
+            await this.loadSessions();
+            if (this.currentSession && this.currentSession.session_id === sid) await this.loadSession(sid);
+        } catch (e) {
+            if (this._filing) { this._filing.error = `Could not unfile: ${e.message || e}`; this.renderSessionList(); }
+        }
+    },
+
+    // The detail header's two lines: where the session lives, and what else it served.
+    renderFiled(s) {
+        const esc = v => this.escapeHtml(v);
+        const home = s.project_id;
+        const items = s.plan_items || [];
+        const own = items.filter(it => this.rootOf(it.campaign_id) === home);
+        const elsewhere = items.filter(it => this.rootOf(it.campaign_id) !== home);
+        const openBtn = (label) => `<button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">${label}</button>`;
+        let first;
+        if (home) {
+            const ownText = own.length
+                ? ` · plan item ${own.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(home)}')">${esc(it.title)}</a>${it.origin === 'manual' ? ' <span class="chip">manual</span>' : ''}`).join(', ')}`
+                : '';
+            first = `<div class="session-filed">in <b>${esc(this.projectName(home))}</b>${ownText} ${openBtn('File elsewhere…')}</div>`;
+        } else {
+            first = `<div class="session-filed"><span class="chip chip-unfiled">unfiled</span> in no project yet ${openBtn('File under…')}</div>`;
+        }
+        const also = elsewhere.length
+            ? `<div class="session-filed">also serves ${elsewhere.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(this.rootOf(it.campaign_id))}')">${esc(this.projectName(this.rootOf(it.campaign_id)))} › ${esc(it.title)}</a>`).join(', ')} <button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">+ link to another plan item</button></div>`
+            : '';
+        const pop = this._filing && this._filing.sid === s.session_id && this._filing.where === 'detail' ? this.renderFilingPopover(s) : '';
+        return first + also + pop;
+    },
+
+    goToProject(id) {
+        try { sessionStorage.setItem('gently-open-project', id); } catch (_) { /* fine */ }
+        if (typeof switchTab === 'function') switchTab('plans');
     },
 
     async loadSession(sessionId) {
@@ -181,12 +376,31 @@ const ReviewApp = {
             },
             defaults: [],
         },
+        // The chips come from the sessions loaded: one per project present, plus unfiled.
+        project: { label: 'Project', dynamic: true, chips: {}, defaults: [] },
     },
 
     SORTS: {
         newest: { label: 'newest', key: s => s.created_at || '', desc: true },
         timepoints: { label: 'most timepoints', key: s => Number(s.timepoints) || 0, desc: true },
         size: { label: 'largest', key: s => Number(s.bytes) || 0, desc: true },
+    },
+
+    // A group's chips: the static table, or the projects the loaded sessions belong to.
+    chipsOf(group) {
+        const def = this.FILTERS[group];
+        return def.dynamic ? this.projectChips() : def.chips;
+    },
+
+    projectChips() {
+        const chips = {};
+        const seen = new Set();
+        this.sessions.forEach(s => { if (s.project_id) seen.add(s.project_id); });
+        [...seen].sort((a, b) => this.projectName(a).localeCompare(this.projectName(b))).forEach(pid => {
+            chips[pid] = { label: this.projectName(pid), test: s => s.project_id === pid };
+        });
+        chips.unfiled = { label: 'unfiled', test: s => !s.project_id };
+        return chips;
     },
 
     _filterState: null,
@@ -198,7 +412,7 @@ const ReviewApp = {
         const state = { on: {}, sort: 'newest', open: false };
         Object.entries(this.FILTERS).forEach(([g, def]) => {
             const want = saved && saved.on && Array.isArray(saved.on[g]) ? saved.on[g] : def.defaults;
-            state.on[g] = want.filter(k => def.chips[k]);
+            state.on[g] = def.dynamic ? want : want.filter(k => def.chips[k]);
         });
         if (saved && this.SORTS[saved.sort]) state.sort = saved.sort;
         if (saved && typeof saved.open === 'boolean') state.open = saved.open;
@@ -234,9 +448,11 @@ const ReviewApp = {
 
     passesGroup(s, group, on) {
         const def = this.FILTERS[group];
-        if (def.any) return on.every(k => def.chips[k].test(s, this));           // requirements
+        const chips = this.chipsOf(group);
+        on = on.filter(k => chips[k]);                                         // a project that is gone filters nothing
+        if (def.any) return on.every(k => chips[k].test(s, this));             // requirements
         if (!on.length) return true;                                           // nothing chosen = no filter
-        return on.some(k => def.chips[k].test(s, this));                       // partition
+        return on.some(k => chips[k].test(s, this));                           // partition
     },
 
     searched() {
@@ -253,12 +469,13 @@ const ReviewApp = {
     filterSummary(st) {
         const bits = [];
         Object.entries(this.FILTERS).forEach(([g, def]) => {
-            const on = st.on[g] || [];
+            const chips = this.chipsOf(g);
+            const on = (st.on[g] || []).filter(k => chips[k]);
             const same = [...on].sort().join() === [...def.defaults].sort().join();
             if (same) return;
-            if (def.any) { on.forEach(k => bits.push(def.chips[k].label)); return; }
+            if (def.any) { on.forEach(k => bits.push(chips[k].label)); return; }
             if (!on.length) bits.push(`any ${def.label.toLowerCase()}`);
-            else bits.push(on.map(k => def.chips[k].label).join(' or '));
+            else bits.push(on.map(k => chips[k].label).join(' or '));
         });
         if (st.sort !== 'newest') bits.push(this.SORTS[st.sort].label + ' first');
         return bits;
@@ -281,7 +498,7 @@ const ReviewApp = {
             // The count a chip shows: the searched sessions that pass every OTHER
             // group and this chip — what turning it on alone would keep.
             const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || []));
-            const chips = Object.entries(def.chips).map(([k, chip]) => {
+            const chips = Object.entries(this.chipsOf(g)).map(([k, chip]) => {
                 const n = searchedSessions.filter(s => others(s) && chip.test(s, this)).length;
                 const on = (st.on[g] || []).includes(k);
                 return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.any ? 'Require' : 'Show'} sessions: ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
@@ -341,6 +558,8 @@ const ReviewApp = {
                     ${held.map(h => `<span class="dot"></span><span>${h}</span>`).join('')}
                     ${this.runBadge(this.runOf(s))}
                 </div>
+                <div class="session-project">${this.projectChip(s)}</div>
+                ${this._filing && this._filing.sid === s.session_id && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
                 ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 ${typeof Reveal !== 'undefined' ? Reveal.button(
@@ -415,6 +634,7 @@ const ReviewApp = {
                         : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 </div>
                 <div id="session-name-form"></div>
+                ${this.renderFiled(s)}
                 ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
@@ -790,14 +1010,24 @@ const ReviewApp = {
         });
     },
 
+    // A stage's WormBase life-stage id, from the session payload's stage_ontology.
+    stageTerm(stage) {
+        const map = (this.currentSession && this.currentSession.stage_ontology) || {};
+        return map[stage] || map[String(stage).replace(/-/g, '')] || null;
+    },
+
     stageBar(e) {
         const preds = e.predictions || [];
         if (!preds.length || typeof stageColor !== 'function') return '';
+        const last = preds[preds.length - 1];
+        const term = this.stageTerm(last.stage);
+        const tip = p => `t${p.timepoint} · ${this.stageText(p.stage)}${this.stageTerm(p.stage) ? ` · ${this.stageTerm(p.stage)}` : ''}`;
         return `
             <div class="stage-bar" title="Stage call per timepoint">
-                ${preds.map(p => `<span style="background:${stageColor(p.stage)}" title="t${p.timepoint} · ${this.escapeHtml(this.stageText(p.stage))}"></span>`).join('')}
+                ${preds.map(p => `<span style="background:${stageColor(p.stage)}" title="${this.escapeHtml(tip(p))}"></span>`).join('')}
             </div>
-            <div class="stage-bar-key"><span>t${preds[0].timepoint} ${this.escapeHtml(this.stageText(preds[0].stage))}</span><span>${this.escapeHtml(this.stageText(preds[preds.length - 1].stage))} t${preds[preds.length - 1].timepoint}</span></div>`;
+            <div class="stage-bar-key"><span>t${preds[0].timepoint} ${this.escapeHtml(this.stageText(preds[0].stage))}</span><span>${this.escapeHtml(this.stageText(last.stage))} t${last.timepoint}</span></div>
+            ${term ? `<div class="stage-ontology">${this.escapeHtml(this.stageText(last.stage))} · <a href="https://wormbase.org/species/all/life_stage/${encodeURIComponent(term)}" target="_blank" rel="noopener" title="WormBase life stage">${this.escapeHtml(term)}</a></div>` : ''}`;
     },
 
     dose(e) {

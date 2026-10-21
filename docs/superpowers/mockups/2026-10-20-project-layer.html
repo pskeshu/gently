@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The project layer — mockup (2026-10-20)</title>
+<link rel="stylesheet" href="../../../gently/ui/web/static/css/main.css">
+<style>
+  /* main.css pins body to the viewport for the app shell; this page scrolls. */
+  html, body { height: auto; overflow: auto; display: block; }
+  body { padding: 24px; font-size: 14px; line-height: 1.4; }
+
+  .mock-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: var(--text-muted); font-size: 13px; flex-wrap: wrap; }
+  .mock-bar h1 { font-size: 15px; font-weight: 600; color: var(--text); margin-right: 8px; }
+  .mock-bar .seg { margin-left: auto; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; }
+  .seg button { font: inherit; font-size: 12px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+  .seg button.on { background: var(--bg-card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+
+  /* ---- the app frame: rail + page ---- */
+  .frame { display: grid; grid-template-columns: 148px minmax(0, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-dark); }
+  .rail { background: var(--bg-card); border-right: 1px solid var(--border); padding: 12px 8px; display: grid; align-content: start; gap: 14px; }
+  .rail .grp { display: grid; gap: 2px; }
+  .rail .lbl { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); padding: 0 8px 4px; }
+  .rail .it { font-size: 13px; padding: 6px 8px; border-radius: 6px; color: var(--text-muted); }
+  .rail .it.on { background: var(--bg-hover); color: var(--text); font-weight: 600; }
+  .rail .it.new { color: var(--text); }
+  .rail .it .was { font-size: 10px; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
+  .page { min-width: 0; }
+
+  .toolbar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-card); font-size: 13px; }
+  .toolbar .title { font-weight: 600; color: var(--text); }
+  .toolbar .crumb { color: var(--text-muted); }
+  .toolbar .views { display: inline-flex; gap: 2px; margin-left: 8px; }
+  .toolbar .views span { padding: 3px 9px; border-radius: 6px; color: var(--text-muted); font-size: 12px; }
+  .toolbar .views span.on { background: var(--bg-hover); color: var(--text); }
+  .toolbar .right { margin-left: auto; display: flex; gap: 8px; color: var(--text-muted); font-size: 12px; }
+  .toolbar .right span { border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; }
+
+  .content { padding: 16px; display: grid; gap: 16px; }
+
+  /* ---- shared bits ---- */
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+  .card-head { display: flex; align-items: baseline; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .card-head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .card-head .n { color: var(--text-muted); font-weight: 400; }
+  .card-head .r { margin-left: auto; font-size: 12px; color: var(--accent); }
+  .card-head .r small { color: var(--text-muted); margin-left: 10px; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .muted { color: var(--text-muted); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* status by shape as well as colour (STATUS SHAPES) */
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-green); flex: none; vertical-align: -1px; }
+  .dot.done { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+  .dot.cut { background: linear-gradient(90deg, var(--accent-amber) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--accent-amber); }
+  .dot.err { background: var(--accent-red); border-radius: 1px; transform: rotate(45deg); width: 8px; height: 8px; }
+  .dot.plan { background: transparent; border: 1px dashed var(--text-muted); box-sizing: border-box; }
+  .dot.live { box-shadow: 0 0 8px var(--accent-green); }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; letter-spacing: .03em; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--text-muted); white-space: nowrap; vertical-align: middle; }
+  .chip.proj { color: var(--text); border-color: var(--border-strong); }
+  .chip.proj::before { content: '▣'; font-size: 10px; color: var(--accent); }
+  .chip.unfiled { border-style: dashed; }
+  .chip.live { color: var(--accent-green); border-color: var(--accent-green); text-transform: uppercase; font-size: 10px; }
+  .chip.diag { color: var(--accent-purple); border-color: var(--accent-purple); text-transform: uppercase; font-size: 10px; }
+  .chip.ai { color: var(--accent-purple); border-color: var(--accent-purple); }
+  .chip.src { font-weight: 500; letter-spacing: 0; }
+  .chip.src b { font-weight: 700; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+  .chip.src a { color: var(--accent); text-decoration: none; }
+  .chip.wbls { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; }
+
+  /* ---- Projects: header ---- */
+  .proj-head { padding: 16px 18px; display: grid; gap: 10px; }
+  .proj-head .row1 { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .proj-head h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+  .proj-head .state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+  .proj-head .since { color: var(--text-muted); font-size: 13px; }
+  .proj-head .stats { margin-left: auto; display: flex; gap: 16px; font-size: 13px; color: var(--text-muted); }
+  .proj-head .stats b { color: var(--text); font-weight: 600; }
+  .proj-head .q { font-size: 14px; color: var(--text); }
+  .proj-head .q small { color: var(--text-muted); margin-left: 8px; }
+  .facets { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 13px; align-items: baseline; }
+  .facets .k { color: var(--text-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .facets .v { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .facets .v .add { color: var(--accent); font-size: 12px; }
+  .sections { display: flex; gap: 4px; padding: 0 14px; border-top: 1px solid var(--border); }
+  .sections span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; padding: 9px 12px; font-size: 13px; color: var(--text-muted); border-bottom: 2px solid transparent; }
+  .sections span.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .sections span i { font-style: normal; color: var(--text-muted); margin-left: 4px; }
+
+  /* ---- Projects: the ledger ---- */
+  .ledger { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+  .col { padding: 12px 14px; border-right: 1px solid var(--border); display: grid; align-content: start; gap: 10px; }
+  .col:last-child { border-right: 0; }
+  .col h4 { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); display: flex; align-items: baseline; gap: 8px; }
+  .col h4 small { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+  .entry { display: grid; gap: 3px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--bg-dark); border: 1px solid var(--border); }
+  .entry .t { display: flex; align-items: center; gap: 7px; }
+  .entry .t b { font-weight: 600; }
+  .entry .t .id { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-muted); }
+  .entry .m { font-size: 12px; color: var(--text-muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .entry .m a { color: var(--accent); text-decoration: none; }
+  .entry .v { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: var(--text); }
+  .entry .ok { color: var(--accent-green); }
+  .entry .miss { color: var(--accent-red); }
+  .entry .amb { color: var(--accent-amber); }
+  .entry.find { border-color: color-mix(in srgb, var(--accent-purple) 45%, var(--border)); }
+  .entry .act { display: flex; gap: 6px; margin-top: 3px; }
+  .entry .act span { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); }
+
+  /* ---- Projects: sessions (observability) ---- */
+  table.obs { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.obs th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  table.obs td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.obs tr:last-child td { border-bottom: 0; }
+  table.obs tr.live td { background: color-mix(in srgb, var(--accent-green) 7%, transparent); }
+  table.obs td .name { font-weight: 600; }
+  table.obs td .sub { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+  table.obs td .sub a { color: var(--accent); text-decoration: none; }
+  table.obs .ended { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  table.obs .sig { white-space: nowrap; }
+  table.obs .sig .w { color: var(--accent-amber); }
+  table.obs .sig .e { color: var(--accent-red); }
+  table.obs .sig .z { color: var(--text-muted); }
+  table.obs .ag { white-space: nowrap; color: var(--text-muted); }
+  table.obs .ag b { color: var(--text); font-weight: 500; }
+  table.obs .ag .corr { color: var(--accent-amber); }
+
+  /* ---- Projects: ask ---- */
+  .ask { display: grid; gap: 10px; padding: 14px; }
+  .ask .in { display: flex; gap: 8px; }
+  .ask .in div { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; color: var(--text); background: var(--bg-dark); font-size: 14px; }
+  .ask .in span { border-radius: 10px; padding: 9px 16px; background: var(--accent); color: #fff; font-weight: 600; font-size: 13px; }
+  .ask .out { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--accent-soft); display: grid; gap: 8px; font-size: 13.5px; }
+  .ask .cov { justify-self: start; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; color: var(--bg-dark); background: var(--accent-green); }
+  .ask .pts { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+  .ask .pts li { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+  .cite { font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+  .ask .next { color: var(--text-muted); font-size: 13px; }
+
+  /* ---- Sessions tab ---- */
+  .sess { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 560px; }
+  .sidebar { background: var(--bg-card); border-right: 1px solid var(--border); display: grid; align-content: start; }
+  .sidebar .hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar .hd h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .sidebar .hd span { font-size: 12px; color: var(--accent); }
+  .sidebar .filt { padding: 12px 16px 10px; border-bottom: 1px solid var(--border); display: grid; gap: 10px; }
+  .sidebar .search { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; color: var(--text-muted); background: var(--bg-card); }
+  .fgroup { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .fgroup .k { color: var(--text-muted); width: 48px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+  .fchip { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; color: var(--text-muted); }
+  .fchip.on { color: var(--text); border-color: var(--accent); }
+  .fchip i { font-style: normal; color: var(--text-muted); margin-left: 3px; font-size: 10.5px; }
+  .fgroup.new .k { color: var(--accent); width: auto; }
+  .slist { padding: 12px; display: grid; gap: 10px; }
+  .sitem { padding: 12px 14px 10px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 4px; }
+  .sitem.active { border-left: 2px solid var(--accent-green); }
+  .sitem.sel { border-color: var(--accent); }
+  .sitem .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sitem .meta { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sitem .meta .d { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+  .sitem .runb { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; border: 1px solid currentColor; }
+  .sitem .runb.cut { color: var(--accent-amber); border-style: dashed; }
+  .sitem .runb.done { color: var(--accent); }
+  .sitem .proj { margin-top: 3px; display: flex; gap: 6px; align-items: center; }
+  .sdetail { padding: 18px 22px; display: grid; gap: 14px; align-content: start; }
+  .sdetail h2 { margin: 0; font-size: 1.15rem; }
+  .sdetail .filed { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap; }
+  .sdetail .filed b { color: var(--text); font-weight: 500; }
+  .sdetail .filed a { color: var(--accent); text-decoration: none; }
+  .sdetail .btn { font-size: 12px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--accent); color: var(--accent); }
+  .sdetail .stats { display: flex; gap: 18px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap; }
+  .sdetail .stats b { color: var(--text); font-weight: 600; }
+  .stage-row { display: grid; gap: 6px; }
+  .stage-row .lab { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+  .sbar { display: flex; height: 12px; border-radius: 5px; overflow: hidden; gap: 1px; background: var(--bg-hover); max-width: 720px; }
+  .sbar span { flex: 1 1 0; }
+  .stage-key { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; align-items: center; }
+  .stage-key span { display: inline-flex; align-items: center; gap: 5px; }
+  .stage-key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .tip { position: relative; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--accent); border-radius: 8px; padding: 5px 9px; font-size: 12px; background: var(--bg-card); }
+  .tip b { font-weight: 600; }
+  .tip .wb { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--accent); }
+  .tip .wb small { color: var(--text-muted); font-family: inherit; margin-left: 4px; }
+  .notable { display: grid; gap: 4px; font-size: 12.5px; max-width: 720px; }
+  .notable div { display: grid; grid-template-columns: 54px 1fr; gap: 10px; }
+  .notable .at { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-muted); font-size: 11.5px; }
+  .notable .warn { color: var(--accent-amber); }
+
+  /* ---- Home ---- */
+  .home { padding: 20px 22px; display: grid; gap: 16px; }
+  .hero { display: flex; align-items: center; gap: 14px; }
+  .hero h2 { margin: 0; font-size: 1.3rem; font-weight: 700; }
+  .hero .st { font-size: 12.5px; color: var(--text-muted); }
+  .hgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .hcard { display: flex; flex-direction: column; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); gap: 8px; }
+  .hcard .hh { display: flex; align-items: baseline; justify-content: space-between; }
+  .hcard .hh h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .hcard .hh h3 small { font-weight: 400; color: var(--text-muted); margin-left: 6px; font-size: 11px; }
+  .hcard .hh a { font-size: 11.5px; color: var(--accent); text-decoration: none; }
+  .hitem { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(127,127,127,.05); border: 1px solid transparent; }
+  .hitem .mn { display: grid; gap: 2px; min-width: 0; }
+  .hitem .nm { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .hitem .mt { font-size: 11.5px; color: var(--text-muted); }
+  .hitem .pr { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+  .hitem .bar { width: 72px; height: 6px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+  .hitem .bar i { display: block; height: 100%; background: var(--accent); }
+
+  /* ---- edit affordances: one door per write, person and agent alike ---- */
+  .toolbar .right .act { border-color: var(--accent); color: var(--accent); }
+  .chip .x { font-style: normal; color: var(--text-muted); margin-left: 2px; cursor: pointer; }
+  .chip .x:hover { color: var(--accent-red); }
+  .inline-in { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .inline-in input { font: inherit; font-size: 12.5px; padding: 2px 8px; width: 210px; border: 1px solid var(--accent); border-radius: 999px; background: var(--bg-dark); color: var(--text); }
+  .inline-in .detect { font-size: 11.5px; color: var(--text-muted); }
+  .inline-in .detect::before { content: '→ '; color: var(--accent); }
+  .inline-in kbd { font-family: 'JetBrains Mono', monospace; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; color: var(--text-muted); }
+  .entry { position: relative; }
+  .entry .tools { position: absolute; top: 6px; right: 8px; display: flex; gap: 4px; }
+  .entry .tools span { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; background: var(--bg-card); }
+  .entry.hover { border-color: var(--border-strong); }
+  .entry.hover .tools span { color: var(--text); }
+  .entry.suggest { border-style: dashed; border-color: color-mix(in srgb, var(--accent-purple) 55%, var(--border)); }
+  .entry .menu { display: grid; gap: 2px; position: absolute; top: 28px; right: 8px; background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 0; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); z-index: 2; }
+  .entry .menu span { padding: 3px 12px; color: var(--text); }
+  .entry .menu span.danger { color: var(--accent-red); }
+  .entry .menu span.sep { border-top: 1px solid var(--border); padding: 0; margin: 3px 0; }
+  .col .addrow { font-size: 12px; color: var(--accent); padding: 4px 2px; }
+  .col .addrow small { color: var(--text-muted); margin-left: 6px; }
+  .editable { border-bottom: 1px dashed var(--border-strong); cursor: text; }
+
+  /* ---- add-to-project search: one box, many sources, each group lands when its source answers ---- */
+  .search-pop { margin-top: 8px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-card); box-shadow: 0 10px 30px rgba(0,0,0,.45); max-width: 900px; display: grid; }
+  .search-pop .top { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .search-pop .top .q { flex: 1; display: flex; align-items: center; gap: 8px; border: 1px solid var(--accent); border-radius: 9px; padding: 7px 10px; background: var(--bg-dark); font-size: 14px; }
+  .search-pop .top .q .caret { display: inline-block; width: 1px; height: 16px; background: var(--text); }
+  .search-pop .top .keys { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .search-pop kbd { font-family: 'JetBrains Mono', monospace; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; color: var(--text-muted); }
+  .sgroup { padding: 6px 12px 8px; border-bottom: 1px solid var(--border); display: grid; gap: 3px; }
+  .sgroup .gh { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); padding: 2px 0 4px; }
+  .sgroup .gh .src { letter-spacing: 0; text-transform: none; font-size: 11px; }
+  .sgroup .gh .st { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+  .srow { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 7px; font-size: 13px; }
+  .srow.sel { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .srow .k { font-weight: 600; white-space: nowrap; }
+  .srow .k small { display: block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--text-muted); font-weight: 400; }
+  .srow .d { color: var(--text-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow .d b { color: var(--text); font-weight: 500; }
+  .srow .to { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .srow .to b { color: var(--accent); font-weight: 600; }
+  .skeep { display: flex; align-items: center; gap: 8px; padding: 8px 20px; font-size: 12.5px; color: var(--text-muted); border-top: 1px dashed var(--border); }
+  .skeep b { color: var(--text); font-weight: 500; }
+  .sfoot { padding: 6px 12px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); }
+
+  /* ---- Plan section: today's Plans tab, unchanged, with its six views ---- */
+  .plan-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .plan-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .plan-head .views { display: inline-flex; gap: 2px; margin-left: 6px; }
+  .plan-head .views span { padding: 3px 9px; border-radius: 6px; color: var(--text-muted); font-size: 12px; }
+  .plan-head .views span.on { background: var(--bg-hover); color: var(--text); }
+  .plan-head .right { margin-left: auto; display: flex; gap: 8px; font-size: 12px; }
+  .plan-head .right span { border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; color: var(--text-muted); }
+  .plan-head .right span.act { border-color: var(--accent); color: var(--accent); }
+  .plan-head .right span.ai { border-color: var(--accent-purple); color: var(--accent-purple); }
+  .plan-doc { display: grid; grid-template-columns: 220px 1fr; }
+  .plan-nav { border-right: 1px solid var(--border); padding: 12px 14px; font-size: 12.5px; display: grid; align-content: start; gap: 4px; }
+  .plan-nav .ph { color: var(--text); font-weight: 600; margin-top: 6px; }
+  .plan-nav .it { color: var(--text-muted); padding-left: 10px; }
+  .plan-nav .it.sel { color: var(--accent); }
+  .plan-body { padding: 12px 16px; display: grid; gap: 8px; font-size: 13px; }
+  .plan-body .ph { display: flex; align-items: baseline; gap: 10px; font-weight: 600; margin-top: 4px; }
+  .plan-body .ph small { color: var(--text-muted); font-weight: 400; }
+  .plan-body .it { display: grid; grid-template-columns: 16px 34px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; background: var(--bg-dark); border: 1px solid var(--border); }
+  .plan-body .it .id { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
+  .plan-body .it .r { color: var(--text-muted); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .plan-body .it.suggest { border-style: dashed; border-color: color-mix(in srgb, var(--accent-purple) 55%, var(--border)); }
+  .plan-body .addrow { font-size: 12px; color: var(--accent); padding: 2px 8px; }
+
+  /* ---- file-under popover on a session ---- */
+  .popover { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-card); padding: 10px 12px; display: grid; gap: 8px; font-size: 12.5px; box-shadow: 0 8px 24px rgba(0,0,0,.45); margin-top: 6px; }
+  .popover .ttl { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+  .popover .opt { display: flex; align-items: center; gap: 8px; }
+  .popover .opt i { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--text-muted); display: inline-block; }
+  .popover .opt i.on { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--accent); }
+  .popover .opt small { color: var(--text-muted); }
+  .popover .also { border-top: 1px solid var(--border); padding-top: 8px; color: var(--text-muted); }
+  .popover .also b { color: var(--text); font-weight: 500; }
+  .popover .btns { display: flex; gap: 6px; }
+  .popover .btns span { font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-muted); }
+  .popover .btns span.go { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- what's new under each screen ---- */
+  .notes { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+  .note { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); padding: 10px 12px; font-size: 12.5px; display: grid; gap: 4px; }
+  .note b { font-size: 13px; }
+  .note b::before { content: attr(data-n); display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; margin-right: 7px; vertical-align: 1px; }
+  .note span { color: var(--text-muted); }
+  .note code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: var(--text); }
+  .mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; vertical-align: 2px; margin-left: 4px; }
+
+  [data-screen="projects"] .only-sessions, [data-screen="projects"] .only-home,
+  [data-screen="sessions"] .only-projects, [data-screen="sessions"] .only-home,
+  [data-screen="home"] .only-projects, [data-screen="home"] .only-sessions { display: none !important; }
+</style>
+</head>
+<body data-screen="projects">
+
+<div class="mock-bar">
+  <h1>The project layer</h1>
+  <span>2026-10-20 · a mockup of the design, example data · pairs with <code>docs/architecture/project-layer-study.md</code></span>
+  <div class="seg">
+    <button data-screen="projects" class="on">Projects tab</button>
+    <button data-screen="sessions">Sessions tab</button>
+    <button data-screen="home">Home</button>
+  </div>
+  <div class="seg"><button id="theme">light</button></div>
+</div>
+
+<!-- ============================ PROJECTS TAB ============================ -->
+<div class="only-projects">
+<div class="frame">
+  <div class="rail">
+    <div class="grp"><div class="lbl">Now</div><div class="it">Home</div><div class="it">Operations</div><div class="it">Embryos</div></div>
+    <div class="grp"><div class="lbl">Library</div><div class="it on">Projects<span class="was">was Plans</span></div><div class="it">Sessions</div><div class="it">Notebook</div><div class="it">Gallery</div></div>
+    <div class="grp"><div class="lbl">System</div><div class="it">Devices</div><div class="it">Calibration</div><div class="it">Logs</div><div class="it">Settings</div></div>
+  </div>
+  <div class="page">
+    <div class="toolbar">
+      <span class="title">Projects</span><span class="crumb">› Hatching timing under temperature stress</span>
+      <div class="right"><span class="act">+ New project<span class="mark">6</span></span></div>
+    </div>
+    <div class="content">
+
+      <div class="card">
+        <div class="proj-head">
+          <div class="row1">
+            <h2>Hatching timing under temperature stress</h2>
+            <span class="state"><span class="dot live"></span> active</span>
+            <span class="since">since 12 Sep</span>
+            <div class="stats"><span><b>7</b> sessions</span><span><b>1</b> live</span><span><b>3</b> findings</span><span><b>4</b> documents</span></div>
+          </div>
+          <div class="q">Does a 20 → 25 °C shift change the twitching-to-hatching interval?<small>the description, as the researcher said it</small></div>
+          <div class="facets">
+            <span class="k">Strains<span class="mark">4</span></span>
+            <div class="v">
+              <span class="chip src"><b>cgc</b><a href="#">OH10689</a><span class="muted">otIs355 [rab-3p(prom1)::2xNLS::TagRFP] IV</span><i class="x" title="Remove from the project">×</i></span>
+              <span class="chip src"><b>cgc</b><a href="#">N2</a><span class="muted">wild type</span></span>
+              <span class="add">+ add<span class="mark">8</span></span>
+            </div>
+            <span class="k">Links<span class="mark">4</span></span>
+            <div class="v">
+              <span class="chip src"><b>wormbase</b><a href="#">WBGene00004267</a><span class="muted">rab-3</span></span>
+              <span class="chip src"><b>wormbase</b><a href="#" class="mono">WBls:0000017</a><span class="muted">comma embryo</span></span>
+              <span class="chip src"><b>wormatlas</b><a href="#">Embryo · hatching</a></span>
+              <span class="chip src"><b>pubmed</b><a href="#">Stefanakis et al. 2015</a><span class="muted">cited by 2.1</span></span>
+              <span class="add">+ add</span>
+            </div>
+          </div>
+          <div class="search-pop">
+            <div class="top"><div class="q"><span class="muted">⌕</span><span>rab-3</span><span class="caret"></span></div><span class="keys"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>↵</kbd> add and keep searching · <kbd>esc</kbd> close</span></div>
+            <div class="sgroup">
+              <div class="gh">This lab<span class="src muted">· strains and genes already named anywhere in gently</span><span class="st"><span class="dot"></span>instant, works offline</span></div>
+              <div class="srow sel"><span class="k">OH10689<small>cgc · already in this project</small></span><span class="d"><b>otIs355 [rab-3p(prom1)::2xNLS::TagRFP] IV</b> · 7 sessions · pan-neuronal nuclear RFP</span><span class="to">files as <b>strain</b></span></div>
+            </div>
+            <div class="sgroup">
+              <div class="gh">Genes<span class="src muted">· Alliance of Genome Resources, WormBase ids</span><span class="st"><span class="dot"></span>6 · 0.3 s</span></div>
+              <div class="srow"><span class="k">rab-3<small>WB:WBGene00004267</small></span><span class="d"><b>C. elegans</b> · RAB family member 3</span><span class="to">files as <b>link</b></span></div>
+              <div class="srow"><span class="k">rab-30<small>WB:WBGene00004282</small></span><span class="d">C. elegans</span><span class="to"></span></div>
+              <div class="srow"><span class="k">rab-33<small>WB:WBGene00004283</small></span><span class="d">C. elegans</span><span class="to"></span></div>
+            </div>
+            <div class="sgroup">
+              <div class="gh">Strains<span class="src muted">· CGC, by genotype</span><span class="st"><span class="dot cut"></span>3 of 21 · fetching the rest</span></div>
+              <div class="srow"><span class="k">NM791<small>cgc</small></span><span class="d"><b>rab-3(js49) II</b> · Ric; very slightly slow and loopy movement</span><span class="to">files as <b>strain</b></span></div>
+              <div class="srow"><span class="k">NM210<small>cgc</small></span><span class="d"><b>rab-3(y250) II</b></span><span class="to"></span></div>
+              <div class="srow"><span class="k">NM2777<small>cgc</small></span><span class="d"><b>aex-6(sa24) I; rab-3(js49) II</b></span><span class="to"></span></div>
+            </div>
+            <div class="sgroup">
+              <div class="gh">Papers<span class="src muted">· Europe PMC · a pasted DOI or PMID resolves directly</span><span class="st"><span class="dot"></span>2,198 · 0.6 s</span></div>
+              <div class="srow"><span class="k">Stefanakis 2015<small>PMID 26291158</small></span><span class="d"><b>Regulatory logic of pan-neuronal gene expression in C. elegans</b> · Stefanakis, Carrera, Hobert</span><span class="to">files as <b>link</b></span></div>
+              <div class="srow"><span class="k">Kurashina 2025<small>Genetics</small></span><span class="d">A modular system to label endogenous presynaptic proteins using split fluorophores</span><span class="to"></span></div>
+            </div>
+            <div class="sgroup">
+              <div class="gh">Terms<span class="src muted">· WBls life stages and WBbt anatomy, via OLS</span><span class="st"><span class="dot plan"></span>none for “rab-3”</span></div>
+            </div>
+            <div class="sgroup">
+              <div class="gh">WormBase direct<span class="src muted">· rest.wormbase.org</span><span class="st"><span class="dot err"></span>unreachable from scripts · ids above come from the Alliance</span></div>
+            </div>
+            <div class="skeep">Keep <b>“rab-3”</b> as plain text<span class="muted">· always offered, so a lost network never blocks a note</span></div>
+            <div class="sfoot">One search for the operator and the agent: the popover and the agent's search tools call the same server function, source by source, and a chosen row is stored as the one reference shape. Each group appears when its source answers; the status glyph says answered, still fetching, none, or unreachable.</div>
+          </div>
+        </div>
+        <div class="sections">
+          <span class="on">Ledger</span><span>Plan<i>5 items</i><span class="mark">6</span></span><span>Sessions<i>7</i></span><span>Findings<i>3</i></span><span>Documents<i>4</i></span><span>Notes<i>12</i></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Ledger<span class="mark">3</span></h3><span class="n">what is next, what was predicted, what was measured, what is open</span><span class="r">Ask the project <small>every entry is read back from the store</small></span></div>
+        <div class="ledger">
+          <div class="col">
+            <h4>Next <small>unblocked plan items</small></h4>
+            <div class="entry hover">
+              <div class="tools"><span title="Edit in place">✎</span><span title="More">…</span></div>
+              <div class="menu"><span>Edit spec…</span><span>Move to phase…</span><span>Depends on…</span><span class="sep"></span><span>Skip</span><span class="danger">Remove</span></div>
+              <div class="t"><span class="dot plan"></span><span class="id">2.1</span><b class="editable">Shift to 25 °C</b></div>
+              <div class="m">6 embryos · every 60 s · 488+561 · until hatching</div>
+              <div class="m"><span class="chip ai">agent</span> not run yet</div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot cut"></span><span class="id">2.2</span><b>Quick look at 25 °C</b></div>
+              <div class="m">2 embryos · every 30 s · 12 timepoints</div>
+              <div class="m"><span class="chip">manual</span> 1 run · <a href="#">30 Sep</a></div>
+            </div>
+            <div class="entry suggest">
+              <div class="t"><span class="chip ai">suggested by the agent</span><span class="mark">7</span></div>
+              <div class="t"><span class="id">2.3</span><b>Repeat 25 °C with 488 only</b></div>
+              <div class="m">6 embryos · every 60 s · 488 · until hatching · "so 561 is not confounded with temperature"</div>
+              <div class="act"><span>Accept</span><span>Edit</span><span>Dismiss</span></div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot plan"></span><span class="id">3</span><b>Decide: keep 561?</b></div>
+              <div class="m">decision point · waits on 2.1</div>
+            </div>
+            <div class="addrow">+ item<small>by hand, from the Operate pane, or from a template</small></div>
+          </div>
+          <div class="col">
+            <h4>Predicted <small>expectations</small></h4>
+            <div class="entry">
+              <div class="t"><span class="dot"></span><b>e3 reaches comma</b></div>
+              <div class="v">by 14:20 ± 30 min</div>
+              <div class="m">pending · basis: 715 min baseline · <a href="#">live session</a></div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot done"></span><b>e2 hatches</b></div>
+              <div class="v">by 02:10 · <span class="ok">✓ met 01:52</span></div>
+              <div class="m"><a href="#">29 Sep</a></div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot err"></span><b>e5 hatches</b></div>
+              <div class="v">by 02:40 · <span class="miss">✕ missed</span></div>
+              <div class="m">arrested at 2-fold · <a href="#">29 Sep</a> · opened a question →</div>
+            </div>
+            <div class="addrow">+ expectation<small>yours or the agent's; ✓ ✕ to resolve</small></div>
+          </div>
+          <div class="col">
+            <h4>Measured <small>outcomes and findings</small></h4>
+            <div class="entry">
+              <div class="t"><span class="dot done"></span><span class="id">1.1</span><b>Baseline at 20 °C</b></div>
+              <div class="v"><span class="editable">715 ± 22 min</span> <span class="muted">n = 14</span></div>
+              <div class="m">done 3/3 · runs <a href="#">12 Sep</a> <a href="#">18 Sep</a> <a href="#">29 Sep</a></div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot done"></span><span class="id">1.2</span><b>Repeat</b></div>
+              <div class="v">702 ± 31 min <span class="muted">n = 6</span></div>
+              <div class="m">done · <a href="#">24 Sep</a></div>
+            </div>
+            <div class="entry find">
+              <div class="t"><span class="chip ai">finding · proposed</span></div>
+              <div class="m" style="color:var(--text)">At 25 °C the interval shortens by about 18 % on two embryos; too few to call.</div>
+              <div class="m">basis <span class="cite">n_4f2a</span> <span class="cite">n_9c01</span> · agent · 30 Sep 06:12</div>
+              <div class="act"><span>Confirm</span><span>Supersede</span><span>Discard</span></div>
+            </div>
+            <div class="addrow">+ finding<small>a claim; proposed until a person confirms</small></div>
+          </div>
+          <div class="col">
+            <h4>Open <small>questions</small></h4>
+            <div class="entry">
+              <div class="t"><span class="dot plan"></span><b>Does 561 add phototoxicity at 60 s?</b></div>
+              <div class="m">asked by agent · blocks decision 3</div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot plan"></span><b>Why did e5 arrest at 2-fold?</b></div>
+              <div class="m">from the missed expectation · <a href="#">29 Sep</a></div>
+            </div>
+            <div class="entry">
+              <div class="t"><span class="dot done"></span><b>Is 1 % LED enough for the overview?</b></div>
+              <div class="m">answered 6 Oct: yes, since the dark/flat refs</div>
+            </div>
+            <div class="addrow">+ question<small>answer or close in place</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="plan-head">
+          <h3>Plan<span class="mark">6</span></h3>
+          <span class="muted" style="font-size:12px">today's Plans tab, unchanged · 2 phases · 5 items</span>
+          <div class="views"><span class="on">Doc</span><span>Graph</span><span>Board</span><span>Decide</span><span>Matrix</span><span>Timeline</span></div>
+          <div class="right"><span>v3 ▾</span><span>Print</span><span class="act">+ item</span><span class="act">From template</span><span class="ai">Plan with Gently</span></div>
+        </div>
+        <div class="plan-doc">
+          <div class="plan-nav">
+            <div class="ph">1 Baseline at 20 °C</div><div class="it">1.1 six embryos until hatching</div><div class="it">1.2 repeat</div>
+            <div class="ph">2 Shift to 25 °C</div><div class="it sel">2.1 six embryos until hatching</div><div class="it">2.2 quick look</div><div class="it">2.3 repeat, 488 only · suggested</div>
+            <div class="ph">3 Decide: keep 561?</div>
+          </div>
+          <div class="plan-body">
+            <div class="ph">1 Baseline at 20 °C <small>done 3/3 · 4 sessions</small></div>
+            <div class="it"><span class="dot done"></span><span class="id">1.1</span><span>6 embryos · every 90 s · 488 · until hatching</span><span class="r"><span class="chip ai">agent</span>3 runs</span></div>
+            <div class="it"><span class="dot done"></span><span class="id">1.2</span><span>repeat · inherits 1.1</span><span class="r"><span class="chip ai">agent</span>1 run</span></div>
+            <div class="ph">2 Shift to 25 °C <small>in progress · 2 sessions</small></div>
+            <div class="it"><span class="dot plan"></span><span class="id">2.1</span><span>6 embryos · every 60 s · 488+561 · until hatching</span><span class="r"><span class="chip ai">agent</span>—</span></div>
+            <div class="it"><span class="dot cut"></span><span class="id">2.2</span><span>quick look · 2 embryos · every 30 s · 12 timepoints</span><span class="r"><span class="chip">manual</span>1 run</span></div>
+            <div class="it suggest"><span></span><span class="id">2.3</span><span>repeat 25 °C with 488 only</span><span class="r"><span class="chip ai">suggested</span>Accept · Edit · Dismiss</span></div>
+            <div class="addrow">+ item in this phase</div>
+            <div class="ph">3 Decide: keep 561? <small>decision point · waits on 2.1</small></div>
+            <div class="addrow">+ phase</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Sessions<span class="mark">1</span><span class="mark">5</span></h3><span class="n">7 in this project · aggregated from each session's own records, nothing new on disk</span><span class="r">Open in Sessions ›</span></div>
+        <table class="obs">
+          <thead><tr><th>When</th><th>Session</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead>
+          <tbody>
+            <tr class="live">
+              <td class="num">1 Oct 21:04</td>
+              <td><div class="name">six embryos until hatching</div><div class="sub">plan <a href="#">2.1</a> · 6 emb · 60 s · 488+561</div></td>
+              <td>6 embryos · 143 tp</td>
+              <td><span class="ended"><span class="dot live"></span> live · next in 42 s</span></td>
+              <td class="sig"><span class="z">—</span></td>
+              <td class="ag"><b>9</b> turns · 0 corrections</td>
+              <td><span class="chip live">active</span></td>
+            </tr>
+            <tr>
+              <td class="num">30 Sep 09:02</td>
+              <td><div class="name">quick look at 25 °C</div><div class="sub">plan <a href="#">2.2</a> (manual) · 2 emb · 30 s · 12 tp</div></td>
+              <td>2 embryos · 12 tp</td>
+              <td><span class="ended"><span class="dot done"></span> complete</span></td>
+              <td class="sig"><span class="w">1 warning</span></td>
+              <td class="ag"><b>14</b> turns · <span class="corr">1 correction</span></td>
+              <td></td>
+            </tr>
+            <tr>
+              <td class="num">29 Sep 21:10</td>
+              <td><div class="name">baseline, third night</div><div class="sub">plan <a href="#">1.1</a> · 6 emb · 90 s · 488</div></td>
+              <td>6 embryos · 329 tp</td>
+              <td><span class="ended"><span class="dot cut"></span> cut short · 05:40</span></td>
+              <td class="sig"><span class="e">1 error</span> · <span class="w">3 warnings</span></td>
+              <td class="ag"><b>31</b> turns · <span class="corr">2 corrections</span></td>
+              <td><span class="chip diag">advanced diagnostics</span></td>
+            </tr>
+            <tr>
+              <td class="num">24 Sep 20:48</td>
+              <td><div class="name">repeat at 20 °C</div><div class="sub">plan <a href="#">1.2</a> · 6 emb · 90 s · 488</div></td>
+              <td>6 embryos · 301 tp</td>
+              <td><span class="ended"><span class="dot done"></span> complete</span></td>
+              <td class="sig"><span class="z">—</span></td>
+              <td class="ag"><b>6</b> turns · 0 corrections</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td class="num">18 Sep 21:30</td>
+              <td><div class="name">baseline, second night</div><div class="sub">plan <a href="#">1.1</a> · 6 emb · 90 s · 488</div></td>
+              <td>6 embryos · 318 tp</td>
+              <td><span class="ended"><span class="dot done"></span> complete</span></td>
+              <td class="sig"><span class="w">2 warnings</span></td>
+              <td class="ag"><b>12</b> turns · 0 corrections</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td class="num">14 Sep 10:15</td>
+              <td><div class="name">overview only</div><div class="sub">no plan item · brightfield every 30 s</div></td>
+              <td>412 brightfield frames</td>
+              <td><span class="ended"><span class="dot done"></span> complete</span></td>
+              <td class="sig"><span class="z">—</span></td>
+              <td class="ag"><b>3</b> turns</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td class="num">12 Sep 20:55</td>
+              <td><div class="name">baseline, first night</div><div class="sub">plan <a href="#">1.1</a> · 6 emb · 90 s · 488</div></td>
+              <td>5 embryos · 334 tp</td>
+              <td><span class="ended"><span class="dot err"></span> failed · 03:12 stage timeout</span></td>
+              <td class="sig"><span class="e">2 errors</span></td>
+              <td class="ag"><b>22</b> turns · <span class="corr">1 correction</span></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Ask the project<span class="mark">3</span></h3><span class="n">the notebook's ask, scoped to this project's notes · prose on demand, nothing stored</span></div>
+        <div class="ask">
+          <div class="in"><div>What do we know about the interval at 25 °C?</div><span>Ask</span></div>
+          <div class="out">
+            <span class="cov">partial</span>
+            <div>Two embryos imaged at 25 °C hatched about 18 % sooner than the 20 °C baseline. The baseline is well measured; the 25 °C side rests on one short run, so it is a lead, not a result.</div>
+            <ul class="pts">
+              <li>Baseline twitching-to-hatching interval is 715 ± 22 min over three nights. <span class="cite">n_1b77</span> <span class="cite">n_2c03</span></li>
+              <li>At 25 °C, e1 and e2 hatched at 588 and 601 min. <span class="cite">n_4f2a</span></li>
+              <li>The 25 °C run used 561 as well, which the baseline did not. <span class="cite">n_9c01</span></li>
+            </ul>
+            <div class="next">Next: plan item 2.1 would give six embryos at 25 °C with the same channels as the baseline.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div class="note"><b data-n="1">Sessions belong to the project</b><span>One field on the session record, <code>session.yaml.project_id</code>, written by one filing door. The Sessions section is the file store filtered by it.</span></div>
+  <div class="note"><b data-n="2">Context is a filter, not a folder</b><span>Notes, observations, expectations and questions already hang off a session id. The project shows the global pools filtered by membership. Nothing moves on disk.</span></div>
+  <div class="note"><b data-n="3">Synthesis is the ledger, then prose on demand</b><span>Next = unblocked plan items. Predicted = expectations. Measured = outcomes and findings. Open = questions. All four exist today. A finding is a Note of kind <code>finding</code>, proposed by the agent, confirmed by a person. Ask renders prose from the notes when asked.</span></div>
+  <div class="note"><b data-n="4">Linkages are one reference shape</b><span><code>{source, key, title, url}</code>, the shape plan items already carry, now also on the root campaign as <code>strains</code> and <code>references</code>. WormBase typed ids, CGC strains and WormAtlas pages all link.</span></div>
+  <div class="note"><b data-n="5">Observability is an aggregation</b><span>Per member session: holdings the Sessions tab computes, how the run ended from <code>timelapse.yaml</code>, errors and warnings from <code>events.jsonl</code>, turns and corrections from the interaction log. Live is the active session being a member.</span></div>
+  <div class="note"><b data-n="6">Where plans live and how one starts</b><span>Plan is a section of the project: the Plans tab canvas as it is today, with Doc, Graph, Board, Decide, Matrix and Timeline. Three ways to start: <code>+ New project</code> with one line of description, <code>+ item</code> by hand or from the Operate pane or a template, and <code>Plan with Gently</code>, which enters plan mode scoped to this project.</span></div>
+  <div class="note"><b data-n="7">Everything edits through one door</b><span>Each entry edits in place and has add and remove. The agent uses the same store methods through its tools, so both announce and both land in the plan history. What the agent adds that would run hardware or claim a result arrives as <code>suggested</code> or <code>proposed</code>, never runnable until a person accepts.</span></div>
+  <div class="note"><b data-n="8">One search, real sources</b><span>The add control is a typeahead over five sources queried in parallel: the lab's own names first and instantly, then genes from the Alliance API, strains from CGC, papers from Europe PMC, and WBls and WBbt terms from the EBI Ontology Lookup Service. Checked today: the Alliance, OLS, Europe PMC and Crossref answer JSON; CGC is HTML and parses; WormBase's own API refuses scripts, so WB ids arrive through the Alliance and OLS and the chip links to wormbase.org for a person. No model is involved: every line is a database record.</span></div>
+</div>
+</div>
+
+<!-- ============================ SESSIONS TAB ============================ -->
+<div class="only-sessions">
+<div class="frame">
+  <div class="rail">
+    <div class="grp"><div class="lbl">Now</div><div class="it">Home</div><div class="it">Operations</div><div class="it">Embryos</div></div>
+    <div class="grp"><div class="lbl">Library</div><div class="it">Projects</div><div class="it on">Sessions</div><div class="it">Notebook</div><div class="it">Gallery</div></div>
+    <div class="grp"><div class="lbl">System</div><div class="it">Devices</div><div class="it">Calibration</div><div class="it">Logs</div><div class="it">Settings</div></div>
+  </div>
+  <div class="page">
+    <div class="sess">
+      <div class="sidebar">
+        <div class="hd"><h3>Sessions</h3><span>+ New</span></div>
+        <div class="filt">
+          <div class="search">Find a session…</div>
+          <div class="fgroup"><span class="k">Holds</span><span class="fchip on">embryos<i>11</i></span><span class="fchip on">brightfield<i>4</i></span><span class="fchip">empty<i>2</i></span></div>
+          <div class="fgroup"><span class="k">Run</span><span class="fchip on">cut short<i>3</i></span><span class="fchip on">complete<i>9</i></span><span class="fchip on">never ran<i>3</i></span></div>
+          <div class="fgroup new"><span class="k">Project<span class="mark">1</span></span><span class="fchip on">Hatching timing<i>7</i></span><span class="fchip on">Lineage reporters<i>3</i></span><span class="fchip on">unfiled<i>5</i></span></div>
+          <div class="fgroup"><span class="k">Has</span><span class="fchip">diagnostics recording<i>2</i></span><span class="fchip">dark/flat refs<i>6</i></span></div>
+        </div>
+        <div class="slist">
+          <div class="sitem active">
+            <div class="nm">six embryos until hatching <span class="chip live">active</span></div>
+            <div class="meta"><span>1 Oct 21:04</span><span class="d"></span><span>6 embryos</span><span class="d"></span><span>143 timepoints</span></div>
+            <div class="proj"><span class="chip proj">Hatching timing</span><span class="muted" style="font-size:11.5px">plan 2.1</span></div>
+          </div>
+          <div class="sitem sel">
+            <div class="nm">quick look at 25 °C</div>
+            <div class="meta"><span>30 Sep 09:02</span><span class="d"></span><span>2 embryos</span><span class="d"></span><span>12 timepoints</span><span class="runb done">complete</span></div>
+            <div class="proj"><span class="chip proj">Hatching timing</span><span class="muted" style="font-size:11.5px">plan 2.2 · manual</span></div>
+          </div>
+          <div class="sitem">
+            <div class="nm">baseline, third night <span class="chip diag">advanced diagnostics</span></div>
+            <div class="meta"><span>29 Sep 21:10</span><span class="d"></span><span>6 embryos</span><span class="d"></span><span>329 timepoints</span><span class="runb cut">cut short after 329 timepoints</span></div>
+            <div class="proj"><span class="chip proj">Hatching timing</span><span class="muted" style="font-size:11.5px">plan 1.1</span></div>
+          </div>
+          <div class="sitem">
+            <div class="nm">lin-12 reporter, pilot</div>
+            <div class="meta"><span>26 Sep 19:40</span><span class="d"></span><span>4 embryos</span><span class="d"></span><span>210 timepoints</span><span class="runb done">complete</span></div>
+            <div class="proj"><span class="chip proj">Lineage reporters</span></div>
+          </div>
+          <div class="sitem">
+            <div class="nm">unnamed · 22 Sep</div>
+            <div class="meta"><span>22 Sep 16:12</span><span class="d"></span><span>3 embryos</span><span class="d"></span><span>48 timepoints</span><span class="runb cut">cut short after 48 timepoints</span></div>
+            <div class="proj"><span class="chip unfiled">unfiled</span><span style="font-size:11.5px;color:var(--accent)">file under…</span><span class="mark">2</span></div>
+            <div class="popover">
+              <div class="ttl">Its project · one</div>
+              <div class="opt"><i class="on"></i><span>Hatching timing under temperature stress</span><small>· 7 sessions</small></div>
+              <div class="opt"><i></i><span>Lineage reporters</span><small>· 3 sessions</small></div>
+              <div class="opt"><i></i><span>New project…</span></div>
+              <div class="also">Also serves a plan item elsewhere? <b>Lineage reporters › 2.3 pilot</b> <span style="color:var(--accent)">change</span></div>
+              <div class="btns"><span class="go">File</span><span>Cancel</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="sdetail">
+        <h2>quick look at 25 °C</h2>
+        <div class="filed">in <b>Hatching timing under temperature stress</b> · plan item <a href="#">2.2 Quick look at 25 °C</a> · <span class="chip">manual</span> <span class="btn">File elsewhere…</span><span class="mark">1</span></div>
+        <div class="filed">also serves <a href="#">Lineage reporters › 2.3 pilot</a> · <span style="color:var(--accent)">+ link to another plan item</span><span class="mark">2</span></div>
+        <div class="stats"><span><b>2</b> embryos</span><span><b>12</b> timepoints</span><span>every <b>30 s</b></span><span><b>488 + 561</b></span><span>ended <b>complete</b> at 09:14</span><span><b>14</b> turns · <b>1</b> correction</span></div>
+        <div class="stage-row">
+          <div class="lab">Stages, both embryos</div>
+          <div class="sbar">
+            <span style="background:#5b8def"></span><span style="background:#5b8def"></span><span style="background:#5b8def"></span><span style="background:#4cc38a"></span><span style="background:#4cc38a"></span><span style="background:#4cc38a"></span><span style="background:#4cc38a"></span><span style="background:#e0b341"></span><span style="background:#e0b341"></span><span style="background:#e0b341"></span><span style="background:#d96a7a"></span><span style="background:#d96a7a"></span>
+          </div>
+          <div class="stage-key">
+            <span><i style="background:#5b8def"></i>bean</span><span><i style="background:#4cc38a"></i>comma</span><span><i style="background:#e0b341"></i>1.5-fold</span><span><i style="background:#d96a7a"></i>2-fold</span>
+            <span class="tip"><b>comma</b><span class="wb">WBls:0000017<small>WormBase life stage</small></span><span class="mark">4</span></span>
+          </div>
+        </div>
+        <div class="stage-row">
+          <div class="lab">Notable events</div>
+          <div class="notable">
+            <div><span class="at">09:02</span><span>Run started · 2 embryos · every 30 s</span></div>
+            <div><span class="at">09:05</span><span class="warn">Warning: 561 nm power 4 % above the plan's 3 %</span></div>
+            <div><span class="at">09:09</span><span>comma detected on e1</span></div>
+            <div><span class="at">09:14</span><span>Run complete · 12 timepoints</span></div>
+            <div><span class="at">09:15</span><span>Agent note: session summary filed to the project <span class="chip ai">observation</span><span class="mark">3</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div class="note"><b data-n="1">Project chip and filter</b><span>Every row shows its project from the session record, and a Project group joins the filter line with counts like the others. An unfiled session says so and offers to be filed.</span></div>
+  <div class="note"><b data-n="2">One home, many items</b><span>A session has one project, written on the session record by whoever files it: the agent when it runs a plan item, Start when the session already has one, the gate's picker, or this popover. A session that also served another project's plan item is linked to that item, which is what the inspector's link-session does today, and says so here.</span></div>
+  <div class="note"><b data-n="3">The session-end note</b><span>One deterministic observation from the holdings and notable events, no model call, so every night leaves a record in the project even when nobody asked.</span></div>
+  <div class="note"><b data-n="4">Stages carry an ontology id</b><span>A small dict in the organism plugin maps each stage to its WormBase life-stage term. The bar, the export and any note can show or link it.</span></div>
+</div>
+</div>
+
+<!-- ============================ HOME ============================ -->
+<div class="only-home">
+<div class="frame">
+  <div class="rail">
+    <div class="grp"><div class="lbl">Now</div><div class="it on">Home</div><div class="it">Operations</div><div class="it">Embryos</div></div>
+    <div class="grp"><div class="lbl">Library</div><div class="it">Projects</div><div class="it">Sessions</div><div class="it">Notebook</div><div class="it">Gallery</div></div>
+    <div class="grp"><div class="lbl">System</div><div class="it">Devices</div><div class="it">Calibration</div><div class="it">Logs</div><div class="it">Settings</div></div>
+  </div>
+  <div class="page">
+    <div class="home">
+      <div class="hero"><div><h2>Gently</h2><div class="st">six embryos until hatching · live since 21:04 · in Hatching timing under temperature stress</div></div></div>
+      <div class="hgrid">
+        <div class="hcard">
+          <div class="hh"><h3>Projects<small>was Recent plans</small><span class="mark">1</span></h3><a href="#">All ›</a></div>
+          <div class="hitem">
+            <div class="mn"><div class="nm">Hatching timing under temperature stress <span class="chip live">live</span></div><div class="mt">3 of 5 items done · last run 1 Oct · 1 proposed finding to confirm</div></div>
+            <div class="pr"><span class="bar"><i style="width:60%"></i></span>3/5</div>
+          </div>
+          <div class="hitem">
+            <div class="mn"><div class="nm">Lineage reporters</div><div class="mt">1 of 4 items done · last run 26 Sep</div></div>
+            <div class="pr"><span class="bar"><i style="width:25%"></i></span>1/4</div>
+          </div>
+          <div class="hitem">
+            <div class="mn"><div class="nm">Unfiled sessions</div><div class="mt">5 sessions without a project</div></div>
+            <div class="pr"><a href="#" style="color:var(--accent);text-decoration:none">file them ›</a></div>
+          </div>
+        </div>
+        <div class="hcard">
+          <div class="hh"><h3>Recent sessions</h3><a href="#">All ›</a></div>
+          <div class="hitem"><div class="mn"><div class="nm">six embryos until hatching <span class="chip live">active</span></div><div class="mt">1 Oct · 6 embryos · 143 timepoints</div></div><span class="chip proj">Hatching timing</span></div>
+          <div class="hitem"><div class="mn"><div class="nm">quick look at 25 °C</div><div class="mt">30 Sep · 2 embryos · 12 timepoints · complete</div></div><span class="chip proj">Hatching timing</span></div>
+          <div class="hitem"><div class="mn"><div class="nm">lin-12 reporter, pilot</div><div class="mt">26 Sep · 4 embryos · 210 timepoints · complete</div></div><span class="chip proj">Lineage reporters</span></div>
+          <div class="hitem"><div class="mn"><div class="nm">unnamed · 22 Sep</div><div class="mt">22 Sep · 3 embryos · cut short</div></div><span class="chip unfiled">unfiled</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div class="note"><b data-n="1">Projects, not recent plans</b><span>Name, done count, last run, a live chip when the active session is a member, and the proposed findings waiting on a person. Unfiled sessions get a row so filing is one click away.</span></div>
+</div>
+</div>
+
+<script>
+  const show = s => {
+    document.body.dataset.screen = s;
+    document.querySelectorAll('.seg button[data-screen]').forEach(b => b.classList.toggle('on', b.dataset.screen === s));
+    history.replaceState(null, '', '#' + s);
+  };
+  document.querySelectorAll('.seg button[data-screen]').forEach(b => b.addEventListener('click', () => show(b.dataset.screen)));
+  const h = location.hash.slice(1);
+  if (['projects', 'sessions', 'home'].includes(h)) show(h);
+  const t = document.getElementById('theme');
+  t.addEventListener('click', () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme !== 'light';
+    root.dataset.theme = dark ? 'light' : 'dark';
+    t.textContent = dark ? 'dark' : 'light';
+  });
+</script>
+</body>
+</html>

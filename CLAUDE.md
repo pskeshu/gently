@@ -94,7 +94,7 @@ D:/Gently3/
   sessions/
     _index.yaml                            # session_id -> folder_name mapping
     {YYYYMMDD}_{HHMM}_{slug}_{id8}/
-      session.yaml                         # metadata, config, organism
+      session.yaml                         # metadata, config, organism, project_id (its home project)
       session.lock                         # PID + hostname (while active)
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state
@@ -103,7 +103,7 @@ D:/Gently3/
       timeline.jsonl                       # session events
       interaction_log.jsonl                # agent conversation records
       conversation.json                    # Claude API messages (resumption)
-      summary.yaml                         # auto-generated stats
+      events.jsonl                         # the event capture: what happened, for replay and the project view
       perception_runs.yaml                 # run metadata
       snapshots/{source}_{stem}.tif
       removed/{embryo_id}__{YYYYMMDD_HHMMSS}/  # an embryo taken off the list: its whole folder, restorable
@@ -123,12 +123,11 @@ D:/Gently3/
         traces/t{NNNN}.json               # complete perception record
   agent/
     state.yaml                             # key-value agent state
-    campaigns/{id}_{slug}/
-      campaign.yaml
+    campaigns/{id}_{slug}/                 # a root campaign is a project; phases are child campaigns
+      campaign.yaml                        # + strains[] and references[] on a root
       plan/current.yaml
       plan/history/{YYYYMMDD_HHMM}.yaml
       templates/{name}.yaml
-    projects/{id}_{slug}.yaml
     session_intents/{session_id}.yaml
     planned_sessions/{id}.yaml
     learnings/{id}_{slug}.yaml

@@ -62,6 +62,42 @@ _NO_API_NOTICE = (
 )
 
 
+def _note_session_end(agent, session_id: str) -> None:
+    """One deterministic observation for the night, filed to the session
+    and its project. Nothing for an empty session, and never twice."""
+    cs = getattr(agent, "context_store", None)
+    store = getattr(agent, "store", None)
+    if cs is None or store is None or not session_id:
+        return
+    try:
+        from gently.core.session_summary import session_end_text, summarize_session
+        from gently.harness.memory.notebook import Author, Note, NoteKind
+
+        text = session_end_text(summarize_session(store, session_id))
+        if not text:
+            return
+        nb = cs.notebook
+        for n in nb.query_notes(kind=NoteKind.OBSERVATION, author=Author.AGENT):
+            if n.title == "Session summary" and session_id in n.sessions:
+                return
+        info = store.get_session(session_id) or {}
+        project = info.get("project_id")
+        nb.write_note(
+            Note(
+                id="",
+                kind=NoteKind.OBSERVATION,
+                body=text,
+                author=Author.AGENT,
+                title="Session summary",
+                sessions=[session_id],
+                projects=[project] if project else [],
+            )
+        )
+        emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="session_end")
+    except Exception:
+        logger.debug("session-end note failed for %s", session_id, exc_info=True)
+
+
 class MicroscopyAgent:
     """
     Conversational AI agent for microscopy experiments
@@ -386,6 +422,18 @@ class MicroscopyAgent:
         self.memory = AgentMemory(context_store, session_id=self.session_id)
         self.prompts.memory = self.memory
 
+    def file_session_under(self, campaign_id: str, plan_item_id: str | None = None) -> dict:
+        """File the live session under a project, through the one door every
+        caller uses (``gently.app.filing``). A session keeps its first home;
+        a plan item from another project is linked, not re-homed."""
+        from gently.app.filing import file_session_under
+
+        if not self.session_id or self.context_store is None:
+            return {"session_id": self.session_id, "project_id": None, "home_set": False}
+        return file_session_under(
+            self.store, self.context_store, self.session_id, campaign_id, plan_item_id
+        )
+
     def enter_plan_mode(self) -> str:
         """Switch to plan mode (experimental design)."""
         if self.mode == "plan":
@@ -468,15 +516,12 @@ class MicroscopyAgent:
                 title = item.title if item else active_id
                 result = f"Back to run mode. Active plan item: {title}"
 
-                # Link session to campaign
+                # File the session under the item's project
                 if item and self.session_id and self.context_store:
                     try:
-                        self.context_store.link_session_campaign(
-                            self.session_id,
-                            item.campaign_id,
-                        )
+                        self.file_session_under(item.campaign_id, item.id)
                     except Exception:
-                        pass
+                        logger.debug("filing after plan mode failed", exc_info=True)
 
                 # Seed the Operation Plan from the plan item's tactics outline
                 # (idempotent: no-op if plan already has active/done tactics).
@@ -588,6 +633,7 @@ class MicroscopyAgent:
         previous = self.sessions.session_id
         if previous:
             self.sessions.save_session(self.experiment, self.conversation.conversation_history, "")
+            _note_session_end(self, previous)
         self.stop_event_capture()
         self.stop_decision_log()
         tm = getattr(self, "timeline_manager", None)

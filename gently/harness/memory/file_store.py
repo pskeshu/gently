@@ -61,7 +61,6 @@ from .model import (
     PlanItemType,
     PlannedSession,
     PlannedSessionStatus,
-    Project,
     Question,
     QuestionStatus,
     SessionIntent,
@@ -126,7 +125,6 @@ class FileContextStore:
         """Create the directory skeleton under agent_dir."""
         for subdir in (
             "campaigns",
-            "projects",
             "session_intents",
             "planned_sessions",
             "learnings",
@@ -315,7 +313,6 @@ class FileContextStore:
     def _load_intentions(self) -> Intentions:
         return Intentions(
             campaigns=self.get_active_campaigns(),
-            projects=self.get_active_projects(),
             planned_sessions=self.get_upcoming_sessions(limit=5),
             current_focus=self.get_state("current_focus"),
             session_intent=self.get_current_session_intent(),
@@ -361,6 +358,8 @@ class FileContextStore:
         target: str | None = None,
         parent_id: str | None = None,
         campaign_id: str | None = None,
+        strains: list[dict] | None = None,
+        references: list[dict] | None = None,
     ) -> str:
         cid = campaign_id or self._gen_id()
         now = self._now()
@@ -383,6 +382,8 @@ class FileContextStore:
             "is_shared": False,
             "participants": [],
             "session_ids": [],
+            "strains": list(strains or []),
+            "references": list(references or []),
             "created_at": now,
             "updated_at": now,
         }
@@ -524,6 +525,9 @@ class FileContextStore:
         summary: str | None = None,
         target: str | None = None,
         parent_id: str | None = None,
+        status: str | None = None,
+        strains: list[dict] | None = None,
+        references: list[dict] | None = None,
     ):
         folder = self._campaign_folder(campaign_id)
         if not folder:
@@ -538,6 +542,9 @@ class FileContextStore:
             ("summary", summary),
             ("target", target),
             ("parent_id", parent_id),
+            ("status", Status(status).value if status else None),
+            ("strains", strains),
+            ("references", references),
         ]:
             if val is not None:
                 data[key] = val
@@ -546,6 +553,76 @@ class FileContextStore:
             return
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
+
+    def root_campaign_id(self, campaign_id: str) -> str | None:
+        """The project a campaign belongs to: itself when it is a root, else the
+        top of its parent chain. None when the id is unknown."""
+        seen: set[str] = set()
+        cid: str | None = campaign_id
+        while cid and cid not in seen:
+            seen.add(cid)
+            c = self.get_campaign(cid)
+            if c is None:
+                return None
+            if not c.parent_id:
+                return c.id
+            cid = c.parent_id
+        return None
+
+    def add_campaign_reference(
+        self, campaign_id: str, ref: dict, *, as_strain: bool = False
+    ) -> dict:
+        """Keep one reference on a project: {source, key, title, url, subtitle}.
+        Strains go in ``strains``, everything else in ``references``. The same
+        (source, key) is kept once; a repeat returns the entry already there."""
+        folder = self._campaign_folder(campaign_id)
+        if not folder:
+            raise KeyError(campaign_id)
+        data = self._read_yaml(folder / "campaign.yaml") or {}
+        field_name = "strains" if as_strain else "references"
+        entries = list(data.get(field_name) or [])
+        key = (str(ref.get("source") or ""), str(ref.get("key") or ""))
+        for e in entries:
+            if (str(e.get("source") or ""), str(e.get("key") or "")) == key:
+                return e
+        entry = {
+            "source": ref.get("source") or "text",
+            "key": ref.get("key") or ref.get("title") or "",
+            "title": ref.get("title"),
+            "url": ref.get("url"),
+            "subtitle": ref.get("subtitle"),
+            "added_by": ref.get("added_by") or "human",
+            "added_at": self._now(),
+        }
+        entries.append(entry)
+        data[field_name] = entries
+        data["updated_at"] = self._now()
+        self._write_yaml(folder / "campaign.yaml", data)
+        self._notify_plan_change(campaign_id)
+        return entry
+
+    def remove_campaign_reference(self, campaign_id: str, source: str, key: str) -> bool:
+        """Drop a reference or strain by (source, key). True if something went."""
+        folder = self._campaign_folder(campaign_id)
+        if not folder:
+            return False
+        data = self._read_yaml(folder / "campaign.yaml") or {}
+        removed = False
+        for field_name in ("strains", "references"):
+            entries = list(data.get(field_name) or [])
+            kept = [
+                e
+                for e in entries
+                if not (str(e.get("source") or "") == source and str(e.get("key") or "") == key)
+            ]
+            if len(kept) != len(entries):
+                data[field_name] = kept
+                removed = True
+        if removed:
+            data["updated_at"] = self._now()
+            self._write_yaml(folder / "campaign.yaml", data)
+            self._notify_plan_change(campaign_id)
+        return removed
 
     def delete_campaign(self, campaign_id: str, cascade: bool = True) -> dict[str, int]:
         counts: dict[str, int] = {"campaigns": 0, "plan_items": 0, "dependencies": 0}
@@ -713,43 +790,6 @@ class FileContextStore:
     # ==================================================================
     # Projects
     # ==================================================================
-
-    def create_project(
-        self,
-        description: str,
-        campaign_id: str | None = None,
-        project_id: str | None = None,
-    ) -> str:
-        pid = project_id or self._gen_id()
-        now = self._now()
-        slug = self._slugify(description)
-        data = {
-            "id": pid,
-            "description": description,
-            "campaign_id": campaign_id,
-            "status": "active",
-            "created_at": now,
-            "updated_at": now,
-        }
-        self._write_yaml(
-            self.agent_dir / "projects" / f"{pid}_{slug}.yaml",
-            data,
-        )
-        logger.info(f"Created project {pid}: {description}")
-        return pid
-
-    def get_active_projects(self) -> list[Project]:
-        projects: list[Project] = []
-        proj_dir = self.agent_dir / "projects"
-        if not proj_dir.exists():
-            return projects
-        for f in proj_dir.iterdir():
-            if f.suffix in (".yaml", ".yml"):
-                data = self._read_yaml(f)
-                if data and data.get("status") == "active":
-                    projects.append(self._dict_to_project(data))
-        projects.sort(key=lambda p: p.created_at, reverse=True)
-        return projects
 
     # ==================================================================
     # Session Intents
@@ -1180,6 +1220,8 @@ class FileContextStore:
         item_id: str | None = None,
         references: list[dict] | None = None,
         estimated_days: int | None = None,
+        status: str = "planned",
+        origin: str = "agent",
     ) -> str:
         pid = item_id or self._gen_id()
         now = self._now()
@@ -1199,7 +1241,8 @@ class FileContextStore:
             "type": type,
             "title": title,
             "description": description,
-            "status": "planned",
+            "status": PlanItemStatus(status).value,
+            "origin": origin,
             "outcome": None,
             "spec": spec,
             "inherit_from": inherit_from,
@@ -1591,6 +1634,7 @@ class FileContextStore:
             "planned": 0,
             "skipped": 0,
             "blocked": 0,
+            "proposed": 0,
             "by_type": {},
             "next_actions": [],
             "pending_decisions": [],
@@ -2188,6 +2232,8 @@ class FileContextStore:
                 "expected_time": exp.expected_time.isoformat(),
                 "uncertainty": exp.uncertainty,
                 "basis": exp.basis,
+                "session_id": exp.session_id,
+                "project_id": exp.project_id,
                 "status": exp.status.value,
                 "created_at": exp.created_at.isoformat(),
                 "resolved_at": None,
@@ -2202,6 +2248,23 @@ class FileContextStore:
         pending = [self._dict_to_expectation(d) for d in items if d.get("status") == "pending"]
         pending.sort(key=lambda e: e.expected_time)
         return pending
+
+    def list_expectations(
+        self, *, project_id: str | None = None, session_ids: set[str] | None = None
+    ) -> list[Expectation]:
+        """Every expectation, any status, oldest first. With ``project_id`` or
+        ``session_ids`` only those made for that project or in those sessions."""
+        path = self.agent_dir / "active" / "expectations.yaml"
+        items = [self._dict_to_expectation(d) for d in (self._read_yaml(path) or [])]
+        if project_id is not None or session_ids is not None:
+            items = [
+                e
+                for e in items
+                if (project_id is not None and e.project_id == project_id)
+                or (session_ids is not None and e.session_id in session_ids)
+            ]
+        items.sort(key=lambda e: e.created_at)
+        return items
 
     def get_expectation_for(self, target: str) -> Expectation | None:
         path = self.agent_dir / "active" / "expectations.yaml"
@@ -2287,6 +2350,8 @@ class FileContextStore:
             {
                 "id": q.id,
                 "content": q.content,
+                "session_id": q.session_id,
+                "project_id": q.project_id,
                 "status": q.status.value,
                 "resolution": None,
                 "created_at": q.created_at.isoformat(),
@@ -2304,6 +2369,22 @@ class FileContextStore:
         ]
         open_qs.sort(key=lambda q: q.created_at)
         return open_qs
+
+    def list_questions(
+        self, *, project_id: str | None = None, session_ids: set[str] | None = None
+    ) -> list[Question]:
+        """Every question, any status, oldest first; scoped like list_expectations."""
+        path = self.agent_dir / "active" / "questions.yaml"
+        items = [self._dict_to_question(d) for d in (self._read_yaml(path) or [])]
+        if project_id is not None or session_ids is not None:
+            items = [
+                q
+                for q in items
+                if (project_id is not None and q.project_id == project_id)
+                or (session_ids is not None and q.session_id in session_ids)
+            ]
+        items.sort(key=lambda q: q.created_at)
+        return items
 
     def resolve_question(self, q_id: str, resolution: str):
         path = self.agent_dir / "active" / "questions.yaml"
@@ -2758,21 +2839,8 @@ class FileContextStore:
             parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
             is_shared=bool(d.get("is_shared", False)),
-            created_at=datetime.fromisoformat(d["created_at"])
-            if isinstance(d["created_at"], str)
-            else d["created_at"],
-            updated_at=datetime.fromisoformat(d["updated_at"])
-            if isinstance(d["updated_at"], str)
-            else d["updated_at"],
-        )
-
-    @staticmethod
-    def _dict_to_project(d: dict) -> Project:
-        return Project(
-            id=d["id"],
-            description=d["description"],
-            campaign_id=d.get("campaign_id"),
-            status=Status(d.get("status", "active")),
+            strains=list(d.get("strains") or []),
+            references=list(d.get("references") or []),
             created_at=datetime.fromisoformat(d["created_at"])
             if isinstance(d["created_at"], str)
             else d["created_at"],
@@ -2869,6 +2937,7 @@ class FileContextStore:
             inherit_from=d.get("inherit_from"),
             estimated_days=d.get("estimated_days"),
             phase_order=d.get("phase_order", 0),
+            origin=d.get("origin") or "agent",
             created_at=datetime.fromisoformat(d["created_at"])
             if isinstance(d.get("created_at"), str)
             else d.get("created_at", datetime.now()),
@@ -2904,6 +2973,8 @@ class FileContextStore:
             else d.get("expected_time", datetime.now()),
             uncertainty=d.get("uncertainty"),
             basis=d.get("basis"),
+            session_id=d.get("session_id"),
+            project_id=d.get("project_id"),
             status=ExpectationStatus(d.get("status", "pending")),
             created_at=datetime.fromisoformat(d["created_at"])
             if isinstance(d.get("created_at"), str)
@@ -2933,6 +3004,8 @@ class FileContextStore:
             content=d["content"],
             status=QuestionStatus(d.get("status", "open")),
             resolution=d.get("resolution"),
+            session_id=d.get("session_id"),
+            project_id=d.get("project_id"),
             created_at=datetime.fromisoformat(d["created_at"])
             if isinstance(d.get("created_at"), str)
             else d.get("created_at", datetime.now()),

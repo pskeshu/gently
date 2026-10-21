@@ -13,6 +13,7 @@ class SessionInfo(TypedDict):
     created_at: str
     last_active: str
     metadata: dict | None
+    project_id: str | None  # the root campaign it is filed under, or None
 
 
 class EmbryoInfo(TypedDict, total=False):

@@ -31,7 +31,6 @@ from .model import (
     PlanItemType,
     PlannedSession,
     PlannedSessionStatus,
-    Project,
     Question,
     QuestionStatus,
     SessionIntent,
@@ -62,7 +61,6 @@ from .startup_wizard import StartupWizard
 __all__ = [
     # Dataclasses
     "Campaign",
-    "Project",
     "SessionIntent",
     "PlannedSession",
     "PlanItem",

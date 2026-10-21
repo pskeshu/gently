@@ -6,9 +6,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from gently.core.session_summary import interaction_stats, signal_counts
+from gently.core.session_summary import notable_events as _notable_events
+from gently.core.session_summary import read_checkpoint as _checkpoint
+from gently.core.session_summary import what_a_session_holds as _what_a_session_holds
 from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
@@ -20,118 +24,6 @@ def _open_in_file_manager(path: Path) -> None:
     from gently.core import reveal
 
     reveal.open_folder(path)
-
-
-_NOTABLE = {
-    "SESSION_RESTORED": lambda d: "Session restored",
-    "ACQUISITION_STARTED": lambda d: (
-        "Acquisition started"
-        + (f" · {len(d['embryo_ids'])} embryos" if isinstance(d.get("embryo_ids"), list) else "")
-    ),
-    "ACQUISITION_COMPLETED": lambda d: "Acquisition completed",
-    "ACQUISITION_STOPPED": lambda d: (
-        "Acquisition stopped" + (f" · {d['reason']}" if d.get("reason") else "")
-    ),
-    "ACQUISITION_FAILED": lambda d: (
-        "Acquisition failed"
-        + (
-            f" · {d.get('error') or d.get('error_message')}"
-            if d.get("error") or d.get("error_message")
-            else ""
-        )
-    ),
-    "TRIGGER_FIRED": lambda d: (
-        f"Rule {d.get('rule') or d.get('name') or '?'} fired"
-        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
-    ),
-    "BURST_START": lambda d: (
-        f"Burst on {d.get('embryo_id', '?')}: {d.get('frames', '?')} frames"
-        + (f" ({d['mode']})" if d.get("mode") else "")
-    ),
-    "BURST_COMPLETE": lambda d: (
-        f"Burst done on {d.get('embryo_id', '?')}"
-        + (f": {d['frames_captured']} frames" if d.get("frames_captured") is not None else "")
-        + (
-            f" at {d['sustained_hz']:.1f} Hz"
-            if isinstance(d.get("sustained_hz"), (int, float))
-            else ""
-        )
-    ),
-    "POWER_RAMP_STEP": lambda d: (
-        f"{d.get('wavelength', '?')} nm power {d.get('old_pct')}% → {d.get('new_pct')}%"
-        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
-    ),
-    "HATCHING_DETECTED": lambda d: f"Hatching detected on {d.get('embryo_id', '?')}",
-    "DETECTION_TRIGGERED": lambda d: (
-        f"{d.get('detector_name') or d.get('detector') or 'Detector'} fired"
-        + (f" on {d['embryo_id']}" if d.get("embryo_id") else "")
-    ),
-    "EMBRYO_TERMINATED": lambda d: (
-        f"{d.get('embryo_id', '?')} terminated" + (f" · {d['reason']}" if d.get("reason") else "")
-    ),
-    "EMBRYO_SKIPPED": lambda d: (
-        f"{d.get('embryo_id', '?')} skipped" + (f" · {d['reason']}" if d.get("reason") else "")
-    ),
-    "OPERATOR_REMOVED_EMBRYO": lambda d: f"Operator removed {d.get('embryo_id', '?')}",
-    "TEMPERATURE_SETPOINT_CHANGED": lambda d: f"Setpoint → {d.get('to')} °C",
-    "TEMP_PROTOCOL_COMPLETED": lambda d: (
-        "Temperature protocol "
-        + ("locked" if d.get("locked") else "cancelled" if d.get("cancelled") else "ended")
-        + (f" · {d['error']}" if d.get("error") else "")
-    ),
-    "ERROR_OCCURRED": lambda d: f"Error: {d.get('message') or d.get('error') or str(d)[:160]}",
-    "WARNING_ISSUED": lambda d: f"Warning: {d.get('message') or str(d)[:160]}",
-}
-
-_LEVEL = {
-    "ACQUISITION_FAILED": "error",
-    "ERROR_OCCURRED": "error",
-    "WARNING_ISSUED": "warn",
-    "EMBRYO_TERMINATED": "warn",
-    "EMBRYO_SKIPPED": "warn",
-    "ACQUISITION_STOPPED": "warn",
-}
-
-
-def _notable_events(path: Path, limit: int = 300) -> list[dict]:
-    """The run's events worth reading back, oldest first, from events.jsonl.
-    Status chatter and per-frame traffic are left out; a truncated line is
-    skipped, not fatal."""
-    if not path.is_file():
-        return []
-    import json
-
-    out: list[dict] = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                kind = rec.get("event_type") or rec.get("type")
-                say = _NOTABLE.get(kind)
-                if say is None:
-                    continue
-                data = rec.get("data") if isinstance(rec.get("data"), dict) else {}
-                try:
-                    text = say(data)
-                except Exception:
-                    text = kind.replace("_", " ").capitalize()
-                out.append(
-                    {
-                        "type": kind,
-                        "at": rec.get("timestamp"),
-                        "text": text,
-                        "level": _LEVEL.get(kind, "info"),
-                    }
-                )
-    except OSError:
-        return []
-    return out[-limit:]
 
 
 def _fmt_interval(sec) -> str:
@@ -302,24 +194,84 @@ def create_router(server) -> APIRouter:
         agent = bridge.agent if bridge is not None else None
         return getattr(agent, "session_id", None) if agent is not None else None
 
+    def _plan_items_by_session(cs) -> dict[str, list[dict]]:
+        """session id -> the plan items that ran it, from one pass over the plans."""
+        out: dict[str, list[dict]] = {}
+        if cs is None:
+            return out
+        try:
+            items = cs.get_plan_items()
+        except Exception:
+            return out
+        roots: dict[str, str | None] = {}
+        for it in items:
+            if it.campaign_id not in roots:
+                try:
+                    roots[it.campaign_id] = cs.root_campaign_id(it.campaign_id)
+                except Exception:
+                    roots[it.campaign_id] = None
+            for sid in it.session_ids or []:
+                out.setdefault(sid, []).append(
+                    {
+                        "id": it.id,
+                        "title": it.title,
+                        "campaign_id": it.campaign_id,
+                        "root_id": roots[it.campaign_id],
+                        "status": it.status.value,
+                        "origin": getattr(it, "origin", "agent"),
+                    }
+                )
+        return out
+
+    def _stage_ontology() -> dict:
+        """Stage name -> WormBase life-stage id, from the organism plugin."""
+        try:
+            from gently.organisms import get_organism
+
+            org = get_organism()
+            mod = getattr(org, "stages", None) or __import__(
+                f"{org.__name__}.stages", fromlist=["WBLS"]
+            )
+            return dict(getattr(mod, "WBLS", {}) or {})
+        except Exception:
+            return {}
+
     @router.get("/api/sessions")
-    async def list_sessions():
-        """List available sessions (from the live FileStore)."""
+    async def list_sessions(project_id: str | None = None, unfiled: bool = False):
+        """List available sessions (from the live FileStore).
+
+        ``project_id`` narrows to one project's sessions and ``unfiled`` to
+        those in none. Either adds what the project view shows: errors and
+        warnings from the event capture, the agent's turns and corrections.
+        Every row carries its project and the plan items it served.
+        """
         store = _file_store()
         if store is None:
             return {"sessions": []}
         active_id = _active_session_id()
+        cs = getattr(server, "context_store", None)
+        detail = project_id is not None or unfiled
 
         def gather() -> list[dict]:
             out = []
-            for s in store.list_sessions():
+            served = _plan_items_by_session(cs)
+            for s in store.list_sessions(project_id=project_id, unfiled=unfiled):
                 sid = s.get("session_id")
                 # Directory names and one checkpoint per session, no image
                 # decoded: what there is before a restore, in the list itself.
                 held = _what_a_session_holds(store, sid) or {}
+                extra: dict = {}
+                if detail:
+                    folder = store._session_dir(sid)
+                    if folder is not None:
+                        extra.update(signal_counts(Path(folder) / "events.jsonl"))
+                        extra.update(interaction_stats(Path(folder) / "interaction_log.jsonl"))
                 out.append(
                     {
                         "session_id": sid,
+                        "project_id": s.get("project_id"),
+                        "plan_items": served.get(sid, []),
+                        **extra,
                         "name": s.get("name") or sid,
                         "created_at": s.get("created_at", ""),
                         "last_active": s.get("last_active", ""),
@@ -366,85 +318,6 @@ def create_router(server) -> APIRouter:
             return len(store.list_snapshots(sid, "bf") or [])
         except Exception:
             return 0
-
-    def _checkpoint(store, sid: str) -> dict:
-        """The session's timelapse.yaml, or {}."""
-        try:
-            folder = store._session_dir(sid)
-            path = Path(folder) / "timelapse.yaml" if folder is not None else None
-            if path is not None and path.is_file():
-                import yaml
-
-                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                return doc if isinstance(doc, dict) else {}
-        except Exception:
-            logger.debug("checkpoint of %s could not be read", sid, exc_info=True)
-        return {}
-
-    def _what_a_session_holds(store, sid: str) -> dict | None:
-        """What there is to carry on with in a session, read from its folder:
-        directory names and one small checkpoint, no image decoded. None for
-        a session with no embryo in it."""
-        try:
-            embryo_ids = store.list_embryo_ids(sid)
-        except Exception:
-            embryo_ids = []
-        if not embryo_ids:
-            return None
-        timepoints = 0
-        last_image: float | None = None
-        for eid in embryo_ids:
-            try:
-                tps = store.list_projection_timepoints(sid, eid) or []
-            except Exception:
-                tps = []
-            if not tps:
-                continue
-            timepoints += len(tps)
-            try:
-                newest = store.get_projection_path(sid, eid, max(tps))
-                if newest is not None:
-                    taken = newest.stat().st_mtime
-                    last_image = taken if last_image is None else max(last_image, taken)
-            except OSError:
-                pass
-
-        # ``run`` is only an interrupted run — the launch gate offers those to
-        # carry on. ``last_run`` is whatever the checkpoint says, for the
-        # Sessions tab to describe a session before it is restored.
-        run = None
-        last_run = None
-        state = _checkpoint(store, sid)
-        if state:
-            rows = state.get("embryos") or {}
-            going = [k for k, v in rows.items() if not (v or {}).get("is_complete")]
-            last_run = {
-                "status": state.get("status"),
-                "embryos_going": len(going),
-                "saved_at": state.get("saved_at"),
-                "started_at": state.get("started_at"),
-                "rounds": state.get("current_round"),
-                "total_timepoints": state.get("total_timepoints"),
-                "interval_seconds": state.get("base_interval_seconds"),
-            }
-            if state.get("status") in ("running", "paused") and going:
-                run = dict(last_run, status="interrupted")
-
-        info = store.get_session(sid) or {}
-        return {
-            "session_id": sid,
-            "name": info.get("name") or sid,
-            "created_at": info.get("created_at", ""),
-            "embryo_count": len(embryo_ids),
-            "timepoints": timepoints,
-            "last_image_at": (
-                datetime.fromtimestamp(last_image).isoformat(timespec="seconds")
-                if last_image is not None
-                else None
-            ),
-            "run": run,
-            "last_run": last_run,
-        }
 
     @router.get("/api/sessions/resumable")
     async def resumable_sessions(limit: int = 3, scan: int = 40):
@@ -697,6 +570,40 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"could not open folder: {exc}") from exc
         return {"opened": True, "session_id": session_id, "path": str(folder)}
 
+    @router.post("/api/sessions/{session_id}/project", dependencies=[Depends(require_control)])
+    async def file_session(session_id: str, request: Request):
+        """File a session under a project (``campaign_id``, a project or one of
+        its phases, optionally with the ``plan_item_id`` it served), move it
+        (``move: true``), or take it out of its project (``campaign_id: null``)."""
+        body = await request.json()
+        store = _file_store()
+        cs = getattr(server, "context_store", None)
+        if store is None or store.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        from gently.app.filing import file_session_under, unfile_session
+
+        campaign_id = body.get("campaign_id")
+        if not campaign_id:
+            return {
+                "ok": True,
+                "unfiled": unfile_session(store, cs, session_id),
+                "project_id": None,
+            }
+        if cs is None:
+            raise HTTPException(status_code=503, detail="Context store not available")
+        try:
+            result = file_session_under(
+                store,
+                cs,
+                session_id,
+                campaign_id,
+                body.get("plan_item_id") or None,
+                move=bool(body.get("move")),
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Campaign not found") from None
+        return {"ok": True, **result}
+
     @router.get("/api/sessions/{session_id}/plans")
     async def get_session_plans(session_id: str):
         """Plan items linked to a session, via the context store."""
@@ -744,6 +651,11 @@ def create_router(server) -> APIRouter:
         events, temperature, removed = await asyncio.to_thread(_what_happened, store, session_id)
         return {
             "session_id": session_id,
+            "project_id": info.get("project_id"),
+            "plan_items": _plan_items_by_session(getattr(server, "context_store", None)).get(
+                session_id, []
+            ),
+            "stage_ontology": _stage_ontology(),
             "name": info.get("name"),
             "suggested_name": derive_session_name(
                 created_at=info.get("created_at"),

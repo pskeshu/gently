@@ -109,7 +109,10 @@ async def create_campaign(
         "Use estimated_days to indicate how many days this task takes "
         "(e.g. 1 for a quick imaging session, 14 for strain expansion). "
         "Use references to cite literature, databases, or other sources "
-        "(each with source, citation, and optional id/note)."
+        "(each with source, citation, and optional id/note). "
+        "Outside plan mode an item you create is a suggestion (status "
+        "'proposed') until the researcher accepts it on the Projects tab; "
+        "pass status='planned' only when they have just asked for exactly it."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -145,18 +148,23 @@ async def create_plan_item(
     phase_order: int = -1,
     references: list[dict] | None = None,
     estimated_days: int | None = None,
+    status: str | None = None,
     context: dict | None = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
 
     If phase_number is given (e.g. 1), the item is added to the Nth
     subcampaign (phase) of campaign_id instead of the root campaign.
+    In plan mode the item is planned, since the plan is being written
+    together; anywhere else it is proposed until a person accepts it.
     """
     agent = context.get("agent") if context else None
     if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
     store = agent.context_store
+    if status not in ("planned", "proposed"):
+        status = "planned" if getattr(agent, "mode", None) == "plan" else "proposed"
     spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
     if isinstance(phase_number, str):
         try:
@@ -191,6 +199,8 @@ async def create_plan_item(
         phase_order=phase_order,
         references=references,
         estimated_days=estimated_days,
+        status=status,
+        origin="agent",
     )
 
     # Include the human-friendly task number in the response
@@ -220,7 +230,8 @@ async def create_plan_item(
                     break
 
     dep_str = f", depends on: {depends_on}" if depends_on else ""
-    return f"Created [{type}] plan item{task_num} '{title}' (id: {item_id}){dep_str}"
+    how = " as a suggestion, for the researcher to accept" if status == "proposed" else ""
+    return f"Created [{type}] plan item{task_num} '{title}' (id: {item_id}){dep_str}{how}"
 
 
 @tool(

@@ -1,10 +1,11 @@
 """Notebook (shared lab notebook) read routes.
 
 Exposes the notebook's Notes for the Notebook tab + Agent's-View live edge.
-Read-only here; authoring/curation come in a later increment.
+Reading for everyone; writing a note or settling a finding is a control
+holder's action, the same store methods the agent's tools use.
 """
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from gently.harness.memory.notebook import (
     Author,
@@ -14,6 +15,7 @@ from gently.harness.memory.notebook import (
     embryo_refs,
     note_to_dict,
 )
+from gently.ui.web.auth import require_control
 
 
 def _for_view(note: Note) -> dict:
@@ -49,6 +51,8 @@ def create_router(server) -> APIRouter:
         strain: str | None = None,
         embryo: str | None = None,
         thread: str | None = None,
+        project: str | None = None,
+        session: str | None = None,
         limit: int | None = None,
     ):
         nb = _nb()
@@ -61,7 +65,10 @@ def create_router(server) -> APIRouter:
             strain=strain,
             embryo=embryo,
             thread=thread,
+            project=project,
         )
+        if session:
+            notes = [n for n in notes if session in n.sessions]
         if limit is not None and limit >= 0:
             notes = notes[:limit]
         return {"available": True, "notes": [_for_view(n) for n in notes]}
@@ -93,6 +100,7 @@ def create_router(server) -> APIRouter:
         question: str = Body(..., embed=True),
         thread: str | None = Body(None, embed=True),
         strain: str | None = Body(None, embed=True),
+        project: str | None = Body(None, embed=True),
     ):
         nb = _nb()
         if nb is None:
@@ -100,7 +108,7 @@ def create_router(server) -> APIRouter:
         from gently.harness.memory.notebook_ask import answer_question, select_notes
         from gently.settings import settings
 
-        notes = select_notes(nb, thread=thread, strain=strain)
+        notes = select_notes(nb, thread=thread, strain=strain, project=project)
         client = getattr(server, "claude_async", None)
         if client is None:
             import anthropic
@@ -110,5 +118,69 @@ def create_router(server) -> APIRouter:
         result["available"] = True
         result["note_ids"] = [n.id for n in notes]
         return result
+
+    @router.post("/api/notebook/notes", dependencies=[Depends(require_control)])
+    async def write_note(request: Request):
+        """A person's note: kind observation, finding or question; facets as
+        lists or comma strings. A finding written here is confirmed, since the
+        person wrote it; the agent's findings arrive proposed through its tool."""
+        body = await request.json()
+        nb = _nb()
+        if nb is None:
+            raise HTTPException(status_code=503, detail="notebook unavailable")
+        text = (body.get("body") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="body required")
+        kind = _coerce(NoteKind, body.get("kind")) or NoteKind.OBSERVATION
+        status = _coerce(NoteStatus, body.get("status")) or (
+            NoteStatus.OPEN if kind == NoteKind.QUESTION else NoteStatus.CONFIRMED
+        )
+        note = Note(
+            id="",
+            kind=kind,
+            body=text,
+            author=Author.HUMAN,
+            title=(body.get("title") or None),
+            status=status,
+            strains=body.get("strains") or [],
+            embryos=body.get("embryos") or [],
+            sessions=body.get("sessions") or [],
+            threads=body.get("threads") or [],
+            projects=body.get("projects") or [],
+            basis=list(body.get("basis") or []),
+        )
+        note_id = nb.write_note(note)
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="notebook.write")
+        except Exception:
+            pass
+        return {"ok": True, "note": _for_view(nb.get_note(note_id))}
+
+    @router.post("/api/notebook/notes/{note_id}/status", dependencies=[Depends(require_control)])
+    async def set_note_status(note_id: str, request: Request):
+        """Settle a note: confirm a proposed finding, answer a question, or set
+        it superseded (dismissed and kept). Superseding with a successor is the
+        store's supersede_note; this is the plain status change."""
+        status = (await request.json()).get("status")
+        nb = _nb()
+        if nb is None:
+            raise HTTPException(status_code=503, detail="notebook unavailable")
+        note = nb.get_note(note_id)
+        if note is None:
+            raise HTTPException(status_code=404, detail="note not found")
+        st = _coerce(NoteStatus, status)
+        if st is None:
+            raise HTTPException(status_code=400, detail=f"unknown status {status!r}")
+        note.status = st
+        nb.write_note(note)
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="notebook.status")
+        except Exception:
+            pass
+        return {"ok": True, "note": _for_view(nb.get_note(note_id))}
 
     return router
