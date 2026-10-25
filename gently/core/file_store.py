@@ -422,13 +422,20 @@ class FileStore:
             return None
         return next((p for p in base.iterdir() if p.is_dir() and p.name == run), None)
 
-    def _volume_dir(self, session_id: str, embryo_id: str) -> Path:
-        d = self._embryo_dir(session_id, embryo_id) / "volumes"
+    # Side A is the canonical view and lives where volumes always have; any
+    # other imaging path is a sibling folder beside it (volumes/B/t0001.tif),
+    # so every reader of a session that knows one view goes on working.
+    @staticmethod
+    def _side_part(side: str | None) -> tuple[str, ...]:
+        return () if not side or str(side).upper() == "A" else (str(side).upper(),)
+
+    def _volume_dir(self, session_id: str, embryo_id: str, side: str = "A") -> Path:
+        d = self._embryo_dir(session_id, embryo_id).joinpath("volumes", *self._side_part(side))
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _projection_dir(self, session_id: str, embryo_id: str) -> Path:
-        d = self._embryo_dir(session_id, embryo_id) / "projections"
+    def _projection_dir(self, session_id: str, embryo_id: str, side: str = "A") -> Path:
+        d = self._embryo_dir(session_id, embryo_id).joinpath("projections", *self._side_part(side))
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -452,11 +459,12 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
+        side: str = "A",
     ) -> Path | None:
         """Generate JPEG projection file from volume data."""
         from .imaging import generate_jpeg_projection
 
-        proj_dir = self._projection_dir(session_id, embryo_id)
+        proj_dir = self._projection_dir(session_id, embryo_id, side)
         proj_path = proj_dir / self._projection_filename(timepoint)
         return generate_jpeg_projection(volume, proj_path)
 
@@ -1051,6 +1059,7 @@ class FileStore:
         timepoint: int,
         volume: np.ndarray,
         metadata: dict | None = None,
+        side: str = "A",
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, write sidecar metadata.
@@ -1071,7 +1080,7 @@ class FileStore:
         """
         import tifffile
 
-        vol_dir = self._volume_dir(session_id, embryo_id)
+        vol_dir = self._volume_dir(session_id, embryo_id, side)
         vol_path = vol_dir / self._volume_filename(timepoint)
 
         tifffile.imwrite(str(vol_path), volume, compression="zlib")
@@ -1081,6 +1090,7 @@ class FileStore:
             "session_id": session_id,
             "embryo_id": embryo_id,
             "timepoint": timepoint,
+            "side": str(side).upper(),
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": _now(),
@@ -1089,7 +1099,7 @@ class FileStore:
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
 
         # Generate projection
-        self._generate_projection(session_id, embryo_id, timepoint, volume)
+        self._generate_projection(session_id, embryo_id, timepoint, volume, side)
 
         logger.debug("put_volume: %s/%s t=%d -> %s", session_id, embryo_id, timepoint, vol_path)
         return vol_path
@@ -1102,6 +1112,7 @@ class FileStore:
         incoming_path: Path,
         metadata: dict | None = None,
         volume_data: np.ndarray | None = None,
+        side: str = "A",
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.
@@ -1123,7 +1134,7 @@ class FileStore:
         if not incoming_path.exists():
             raise FileNotFoundError(f"Incoming file not found: {incoming_path}")
 
-        vol_dir = self._volume_dir(session_id, embryo_id)
+        vol_dir = self._volume_dir(session_id, embryo_id, side)
         canonical = vol_dir / self._volume_filename(timepoint)
 
         # Move (rename if same drive, copy+delete otherwise)
@@ -1148,6 +1159,7 @@ class FileStore:
             "session_id": session_id,
             "embryo_id": embryo_id,
             "timepoint": timepoint,
+            "side": str(side).upper(),
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": _now(),
@@ -1156,7 +1168,7 @@ class FileStore:
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
 
         # Generate projection
-        self._generate_projection(session_id, embryo_id, timepoint, volume)
+        self._generate_projection(session_id, embryo_id, timepoint, volume, side)
 
         logger.debug("register_volume: %s -> %s", incoming_path.name, canonical)
         return canonical

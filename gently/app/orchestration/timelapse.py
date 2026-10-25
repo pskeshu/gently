@@ -195,6 +195,10 @@ class TimelapseOrchestrator:
         # volume and no longer: the run has to carry it. None is the volume
         # plan's own default.
         self._laser_config: str | None = None
+        # The imaging paths a round takes per embryo, in order. B is skipped for an
+        # embryo without a B calibration, said once.
+        self._sides: tuple[str, ...] = ("A",)
+        self._no_b_said: set[str] = set()
 
         # In-flight perception tasks. Acquisition fires perception tasks
         # as create_task() and moves on to the next embryo immediately, so
@@ -266,6 +270,7 @@ class TimelapseOrchestrator:
         stop_conditions: dict[str, Any] | None = None,
         volumes: bool = True,
         laser_config: str | None = None,
+        sides: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         """
         Start timelapse in background
@@ -333,6 +338,8 @@ class TimelapseOrchestrator:
         self._volumes = True
         self._run_stop = None
         self._laser_config = str(laser_config) if laser_config else None
+        self._sides = self._normalise_sides(sides)
+        self._no_b_said = set()
 
         # Get embryo list
         if not embryo_ids:
@@ -467,6 +474,7 @@ class TimelapseOrchestrator:
                 "stop_condition": stop_condition,
                 "interval_seconds": base_interval_seconds,
                 "bf": self._bf.to_dict() if self._bf else None,
+                "sides": list(self._sides),
             },
         )
 
@@ -650,6 +658,29 @@ class TimelapseOrchestrator:
             except Exception:
                 logger.debug("cleanup_incoming failed", exc_info=True)
         return False
+
+    @staticmethod
+    def _normalise_sides(sides: Any) -> tuple[str, ...]:
+        """The run's sides as an ordered tuple of 'A' and 'B'; anything else is a run on A."""
+        if isinstance(sides, str):
+            sides = [sides]
+        out: list[str] = []
+        for s in sides or ():
+            u = str(s).strip().upper()
+            if u in ("A", "B") and u not in out:
+                out.append(u)
+        return tuple(out) or ("A",)
+
+    @staticmethod
+    def _cal_for(embryo: Any, side: str) -> dict | None:
+        """The calibration a side images with. Side A is the embryo's calibration
+        as it has always been; side B is its ``calibration["B"]``, the other
+        scanner and piezo's own numbers, or None when it was never measured."""
+        cal = getattr(embryo, "calibration", None) or {}
+        if side == "B":
+            b = cal.get("B")
+            return b if isinstance(b, dict) and b else None
+        return cal
 
     def _parse_stop_condition(self, condition: str, value: Any = None) -> StopCondition:
         """Parse stop condition string into StopCondition object"""
@@ -1466,44 +1497,57 @@ class TimelapseOrchestrator:
                 # image the same point calibration measured.
                 await spim_alignment.move_to_embryo(self.client, pos)
 
-            # Get calibration parameters
-            cal = embryo.calibration or {}
-            galvo_amplitude = cal.get("galvo_amplitude", 0.5)
-            galvo_center = cal.get("galvo_center", 0.0)
-            piezo_amplitude = cal.get("piezo_amplitude", 25.0)
-            piezo_center = cal.get("piezo_center", 50.0)
-
-            # Acquire based on mode (volume or snap)
+            # The sides this round images for this embryo: the run's, minus a B
+            # the embryo has no calibration for. A snap is one sheet, the A view.
             acquisition_mode = getattr(embryo, "acquisition_mode", "volume")
-
+            sides = [s for s in self._sides if s == "A" or self._cal_for(embryo, s)]
+            if "B" in self._sides and "B" not in sides and embryo_id not in self._no_b_said:
+                self._no_b_said.add(embryo_id)
+                logger.warning("%s has no side-B calibration; imaging side A only", embryo_id)
             if acquisition_mode == "snap":
-                # Single 2D lightsheet image. The embryo's own exposure — the
-                # call used to pass none, so every snap ran at the client's
-                # 10 ms default whatever the panel said, and then recorded the
-                # dose as a hard-coded 50 ms: the phototoxicity ledger was
-                # wrong by 5x on every snap embryo, in a system whose whole
-                # point is not over-exposing the sample.
-                exposure_ms = float(getattr(embryo, "exposure_ms", 10.0) or 10.0)
-                result = await self.client.capture_lightsheet_image(
-                    piezo_position=piezo_center,
-                    galvo_position=galvo_center,
-                    exposure_ms=exposure_ms,
-                )
-                num_frames = 1
-            else:
-                # Full 3D volume (default)
-                result = await self.client.acquire_volume(
-                    num_slices=embryo.num_slices,
-                    exposure_ms=embryo.exposure_ms,
-                    galvo_amplitude=galvo_amplitude,
-                    galvo_center=galvo_center,
-                    piezo_amplitude=piezo_amplitude,
-                    piezo_center=piezo_center,
-                    laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
-                    **self._volume_lasers(embryo),
-                )
-                num_frames = embryo.num_slices
-                exposure_ms = embryo.exposure_ms
+                sides = ["A"]
+
+            results: dict[str, dict] = {}
+            for side in sides:
+                cal = self._cal_for(embryo, side) or {}
+                galvo_amplitude = cal.get("galvo_amplitude", 0.5)
+                galvo_center = cal.get("galvo_center", 0.0)
+                piezo_amplitude = cal.get("piezo_amplitude", 25.0)
+                piezo_center = cal.get("piezo_center", 50.0)
+
+                if acquisition_mode == "snap":
+                    # Single 2D lightsheet image. The embryo's own exposure — the
+                    # call used to pass none, so every snap ran at the client's
+                    # 10 ms default whatever the panel said, and then recorded the
+                    # dose as a hard-coded 50 ms: the phototoxicity ledger was
+                    # wrong by 5x on every snap embryo, in a system whose whole
+                    # point is not over-exposing the sample.
+                    exposure_ms = float(getattr(embryo, "exposure_ms", 10.0) or 10.0)
+                    results[side] = await self.client.capture_lightsheet_image(
+                        piezo_position=piezo_center,
+                        galvo_position=galvo_center,
+                        exposure_ms=exposure_ms,
+                    )
+                    num_frames = 1
+                else:
+                    # Full 3D volume (default)
+                    results[side] = await self.client.acquire_volume(
+                        num_slices=embryo.num_slices,
+                        exposure_ms=embryo.exposure_ms,
+                        galvo_amplitude=galvo_amplitude,
+                        galvo_center=galvo_center,
+                        piezo_amplitude=piezo_amplitude,
+                        piezo_center=piezo_center,
+                        laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+                        side=side,
+                        **self._volume_lasers(embryo),
+                    )
+                    num_frames = embryo.num_slices
+                    exposure_ms = embryo.exposure_ms
+
+            # Side A is the round's verdict: the canonical view, the one every
+            # reader of the session knows. B is kept beside it.
+            result = results.get("A") or next(iter(results.values()))
 
             if result.get("success"):
                 # Update state
@@ -1516,45 +1560,52 @@ class TimelapseOrchestrator:
 
                 # Update embryo state
                 embryo.timepoints_acquired = embryo_state.timepoints_acquired
-                # Record light exposure (includes updating last_imaged)
-                embryo.record_exposure(
-                    exposure_ms=exposure_ms,
-                    num_frames=num_frames,
-                    timestamp=acquisition_timestamp,
-                )
+                # Record light exposure (includes updating last_imaged), once
+                # per sheet that was on.
+                for r in results.values():
+                    if r.get("success"):
+                        embryo.record_exposure(
+                            exposure_ms=exposure_ms,
+                            num_frames=num_frames,
+                            timestamp=acquisition_timestamp,
+                        )
 
                 # Note: VOLUME_ACQUIRED event is emitted by the callback (agent.on_volume_acquired)
                 # to avoid duplicate events and include more metadata
 
-                # Callback for volume/image processing
+                # Callback for volume/image processing, one call per side that
+                # succeeded. Perception reads A's volume only.
                 volume_data = None
                 volume_uids = None  # Track UIDs from storage for perception events
                 if self.on_volume_callback:
-                    # Get data - 'volume' for volume mode, 'image' for snap mode
-                    data = (
-                        result.get("volume")
-                        if acquisition_mode == "volume"
-                        else result.get("image")
-                    )
-                    if data is not None:
+                    for side, r in results.items():
+                        if not r.get("success"):
+                            continue
+                        # Get data - 'volume' for volume mode, 'image' for snap mode
+                        data = r.get("volume") if acquisition_mode == "volume" else r.get("image")
+                        if data is None:
+                            continue
                         # Ensure data is numpy array
                         if not isinstance(data, np.ndarray):
                             data = np.array(data)
                         # For snap mode (2D), add Z dimension so store_volume works
                         if acquisition_mode == "snap" and data.ndim == 2:
                             data = data[np.newaxis, ...]  # Add Z dimension: (Y,X) -> (1,Y,X)
-                        volume_data = data
-                        # Pass volume_path if available (zero-copy from device)
-                        volume_path = result.get("volume_path")
-                        # Callback may return UIDs from storage
+                        # Pass volume_path if available (zero-copy from device).
+                        # The side travels only when it is not A, so a callback
+                        # written for one view keeps working.
+                        extra = {"side": side} if side != "A" else {}
                         callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,
                             data,
-                            volume_path=volume_path,
+                            volume_path=r.get("volume_path"),
+                            **extra,
                         )
-                        if isinstance(callback_result, dict):
-                            volume_uids = callback_result
+                        if side == "A":
+                            volume_data = data
+                            if isinstance(callback_result, dict):
+                                volume_uids = callback_result
 
                 # Fire perception as a background task instead of awaiting
                 # it. This unblocks the next embryo's acquisition so the
@@ -2768,6 +2819,7 @@ class TimelapseOrchestrator:
             "volumes": self._volumes,
             "run_stop": _ser_stop_condition(self._run_stop),
             "laser_config": self._laser_config,
+            "sides": list(self._sides),
         }
 
     def _apply_runtime_state(self, doc: dict[str, Any]) -> None:
@@ -2912,6 +2964,7 @@ class TimelapseOrchestrator:
         self._run_stop = _deser_stop_condition(doc.get("run_stop"))
         preset = doc.get("laser_config")
         self._laser_config = str(preset) if preset else None
+        self._sides = self._normalise_sides(doc.get("sides"))
 
         # Per-embryo state: only restore fields for embryos that already
         # exist in the experiment (embryo.yaml is the durable identity).

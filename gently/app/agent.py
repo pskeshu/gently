@@ -1725,9 +1725,11 @@ class MicroscopyAgent:
         return result
 
     async def on_volume_acquired(
-        self, embryo_id: str, timepoint: int, volume_data, volume_path=None
+        self, embryo_id: str, timepoint: int, volume_data, volume_path=None, side: str = "A"
     ):
-        """Callback when a volume is acquired."""
+        """Callback when a volume is acquired. ``side`` is the imaging path it
+        came from; A is the canonical view and lands where volumes always have,
+        B beside it under ``volumes/B`` with its own projection."""
         embryo = self.experiment.embryos.get(embryo_id)
         if not embryo:
             return
@@ -1759,6 +1761,7 @@ class MicroscopyAgent:
                     "laser_power_637_pct": getattr(embryo, "laser_power_637_pct", None),
                     "role": embryo.role,
                     "calibration": embryo.calibration,
+                    "side": side,
                 }
                 if volume_path is not None:
                     stored_path = self.store.register_volume(
@@ -1768,6 +1771,7 @@ class MicroscopyAgent:
                         incoming_path=Path(volume_path),
                         metadata=acq_metadata,
                         volume_data=volume,
+                        side=side,
                     )
                 else:
                     stored_path = self.store.put_volume(
@@ -1776,6 +1780,7 @@ class MicroscopyAgent:
                         timepoint,
                         volume,
                         metadata=acq_metadata,
+                        side=side,
                     )
             except StorageError:
                 raise
@@ -1783,8 +1788,9 @@ class MicroscopyAgent:
                 logger.error(f"FileStore write failed: {e}")
 
         session_prefix = f"{self.session_id[:8]}_" if self.session_id else ""
-        volume_uid = f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}"
-        projection_uid = f"proj_{session_prefix}{embryo_id}_t{timepoint:04d}"
+        side_suffix = "" if side == "A" else f"_{side}"
+        volume_uid = f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}{side_suffix}"
+        projection_uid = f"proj_{session_prefix}{embryo_id}_t{timepoint:04d}{side_suffix}"
 
         if self.viz_server and volume is not None:
             try:
@@ -1823,6 +1829,7 @@ class MicroscopyAgent:
                         "projection_uid": projection_uid,
                         "volume_uid": volume_uid,
                         "projection_type": "three_view",
+                        "side": side,
                     },
                 )
             except Exception as e:
@@ -1837,6 +1844,7 @@ class MicroscopyAgent:
                 "projection_uid": projection_uid,
                 "volume_path": str(stored_path) if stored_path else None,
                 "shape": list(volume.shape),
+                "side": side,
             },
         )
 

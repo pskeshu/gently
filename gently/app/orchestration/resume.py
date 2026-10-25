@@ -136,6 +136,7 @@ def _plan_from_checkpoint(store: Any, session_id: str) -> dict[str, Any] | None:
         "bf": bf if bf and bf.get("enabled") else None,
         # Absent in a checkpoint from before brightfield-only runs: a volume run.
         "volumes": doc.get("volumes") is not False,
+        "sides": list(doc.get("sides") or ["A"]),
         "stop_conditions": overrides,
         "embryo_ids": list(embryos.keys()),
     }

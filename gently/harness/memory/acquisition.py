@@ -6,6 +6,7 @@ start route keeps with the session as ``acquisition.yaml``, and
 
     cadence_s, interval        seconds between rounds (both, for older readers)
     volumes                    False is a brightfield-only run
+    sides                      the imaging paths a round takes, ["A"] or ["A", "B"]
     num_slices, exposure_ms    the SPIM volume, when volumes run
     laser_config               the preset, named by the lines it routes ("488", "488+561")
     laser_powers               {"488": pct, "561": pct}
@@ -31,6 +32,7 @@ STRUCTURE_KEYS = (
     "cadence_s",
     "interval",
     "volumes",
+    "sides",
     "num_slices",
     "exposure_ms",
     "laser_config",
