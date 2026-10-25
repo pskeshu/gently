@@ -1367,11 +1367,25 @@ class DeviceLayerServer(Service):
                 self._ls_params.get("side") == "Multi" and self._ls_applied.get("side") == "Multi"
             )
             if multi:
-                # One exposure on both cameras; the two channels come back as
-                # A in red and B in green, Micro-Manager's own Multi composite.
+                # One exposure on both cameras, then each channel is matched
+                # to its camera by name, the way the ASIdiSPIM plugin reads
+                # the "Camera" tag off every frame rather than trusting an
+                # order. The adapter numbers channels in "Physical Camera N"
+                # order, so with the rig's config 0 is A and 1 is B; the
+                # fallback keeps that when names are not readable.
                 core.snapImage()
-                a = core.getImage(0)
-                b = core.getImage(1)
+                a_name = getattr(self.devices.get("camera"), "name", None)
+                b_name = getattr(self.devices.get("camera_b"), "name", None)
+                by_name: dict[str, Any] = {}
+                try:
+                    for ch in range(int(core.getNumberOfCameraChannels())):
+                        by_name[str(core.getCameraChannelName(ch))] = core.getImage(ch)
+                except Exception:
+                    by_name = {}
+                if a_name in by_name and b_name in by_name:
+                    a, b = by_name[a_name], by_name[b_name]
+                else:
+                    a, b = core.getImage(0), core.getImage(1)
                 return self._compose_multi(np.asarray(a), np.asarray(b))
             if mode == "snap":
                 core.snapImage()

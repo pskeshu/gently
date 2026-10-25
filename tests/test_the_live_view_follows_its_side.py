@@ -169,3 +169,31 @@ async def test_switching_to_multi_leaves_the_beams_as_they_are():
     await dl.handle_lightsheet_params(req)
     assert dl._ls_params["side"] == "Multi"
     assert state == {"a": True, "b": False}
+
+
+def test_multi_channels_are_matched_to_cameras_by_name_not_order(monkeypatch):
+    """The core may hand the channels back in either order; A is still red."""
+    import numpy as np
+
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    dl.devices["camera_multi"] = type(
+        "C", (), {"name": "Multi Camera", "clear_roi": lambda s: None}
+    )()
+    dl._ls_params["side"] = "Multi"
+    dl._ls_applied["side"] = "Multi"
+    core = dl.system.core
+    a_img = np.zeros((4, 4), np.uint16)
+    a_img[0, 0] = 1000
+    b_img = np.zeros((4, 4), np.uint16)
+    b_img[3, 3] = 1000
+    # Swapped: channel 0 is HamCam2, channel 1 is HamCam1.
+    core.snapImage = lambda: None
+    core.getNumberOfCameraChannels = lambda: 2
+    core.getCameraChannelName = lambda ch: ["HamCam2", "HamCam1"][ch]
+    core.getImage = lambda ch=0: [b_img, a_img][ch]
+    monkeypatch.setattr(dl, "_park_lightsheet_sync", lambda: None)
+    monkeypatch.setattr(dl, "_ensure_lightsheet_sequence_sync", lambda: None)
+
+    bgr = dl._grab_lightsheet_frame_sync()
+    assert bgr[0, 0, 2] == 255 and bgr[0, 0, 1] == 0  # HamCam1 → red
+    assert bgr[3, 3, 1] == 255 and bgr[3, 3, 2] == 0  # HamCam2 → green
