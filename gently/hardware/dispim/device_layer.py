@@ -1201,6 +1201,10 @@ class DeviceLayerServer(Service):
         """
         p = self._ls_params
         side = p.get("side", "A")
+        if side == "Multi":
+            # Both cameras, no side of its own: the sheets stay wherever A and
+            # B were last parked, and the beams wherever the operator left them.
+            return
 
         # Resolve scanner for the requested side (with fallback to A).
         if side == "B":
@@ -1281,10 +1285,13 @@ class DeviceLayerServer(Service):
         # Resolve the camera for the requested side
         if side == "B" and "camera_b" in self.devices:
             cam = self.devices["camera_b"]
+        elif side == "Multi" and "camera_multi" in self.devices:
+            cam = self.devices["camera_multi"]
         else:
-            if side == "B":
+            if side in ("B", "Multi"):
                 logger.warning(
-                    "Side B requested but camera_b not registered; falling back to side A"
+                    "Side %s requested but its camera is not registered; falling back to side A",
+                    side,
                 )
             cam = self.devices.get("camera")
 
@@ -1356,6 +1363,16 @@ class DeviceLayerServer(Service):
                 _safe_obtain = None
             core = self.system.core
             mode = self._ls_params.get("mode", "snap")
+            multi = (
+                self._ls_params.get("side") == "Multi" and self._ls_applied.get("side") == "Multi"
+            )
+            if multi:
+                # One exposure on both cameras; the two channels come back as
+                # A in red and B in green, Micro-Manager's own Multi composite.
+                core.snapImage()
+                a = core.getImage(0)
+                b = core.getImage(1)
+                return self._compose_multi(np.asarray(a), np.asarray(b))
             if mode == "snap":
                 core.snapImage()
                 img = core.getImage()
@@ -1374,6 +1391,33 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.debug("Lightsheet grab failed: %s", exc)
             return None
+
+    @staticmethod
+    def _compose_multi(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Side A in red, side B in green, each auto-contrasted on its own.
+
+        Returned as an 8-bit BGR frame, which is what the JPEG encoder takes
+        as-is. The two sensors are the same model, but a shape mismatch is
+        cropped to the common size rather than failed.
+        """
+
+        def to8(x: np.ndarray) -> np.ndarray:
+            flat = x.ravel()
+            step = max(1, flat.size // 4096)
+            sample = flat[::step]
+            lo = float(np.percentile(sample, 1))
+            hi = float(np.percentile(sample, 99))
+            if hi <= lo:
+                hi = lo + 1.0
+            return np.clip((x.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(
+                np.uint8
+            )
+
+        h = min(a.shape[0], b.shape[0])
+        w = min(a.shape[1], b.shape[1])
+        red = to8(a[:h, :w])
+        green = to8(b[:h, :w])
+        return np.dstack([np.zeros_like(red), green, red])
 
     def _stop_lightsheet_sequence_sync(self) -> None:
         try:
@@ -1496,17 +1540,18 @@ class DeviceLayerServer(Service):
     async def handle_lightsheet_params(self, request):
         """POST /api/lightsheet/live/params — update live galvo/piezo/exposure/side.
 
-        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"} (all optional).
+        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"|"Multi"}
+        (all optional). "Multi" is Micro-Manager's Multi Camera, both sides in one frame.
         Galvo/piezo apply on the next grab; exposure or side change triggers sequence restart.
         """
         body = await request.json()
         for k in ("galvo", "piezo", "exposure"):
             if k in body and body[k] is not None:
                 self._ls_params[k] = float(body[k])
-        if "side" in body and body["side"] in ("A", "B"):
+        if "side" in body and body["side"] in ("A", "B", "Multi"):
             previous = self._ls_params.get("side", "A")
             self._ls_params["side"] = body["side"]
-            if body["side"] != previous:
+            if body["side"] != previous and body["side"] != "Multi":
                 await asyncio.to_thread(self._follow_beam_to_side, body["side"])
         return web.json_response({"params": self._ls_params})
 

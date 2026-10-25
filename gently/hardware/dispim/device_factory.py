@@ -136,6 +136,21 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
     except Exception as e:
         logger.warning("Could not create camera_b: %s", e)
 
+    # Micro-Manager's "Multi Camera" utility device: both SPIM cameras exposed
+    # at once as two channels of one frame. The live view's Multi mode, named
+    # as the ASIdiSPIM plugin names its button, snaps this device.
+    try:
+        from .devices import DiSPIMCamera as _DiSPIMCamera
+
+        multi_name = cfg.get("multi_camera_name", "Multi Camera")
+        if multi_name in list(core.getLoadedDevices()):
+            devices["camera_multi"] = _DiSPIMCamera(device_name=multi_name, core=core)
+            logger.info("Created camera_multi: %s", multi_name)
+        else:
+            logger.warning("camera_multi (%s) not in loaded devices; skipping", multi_name)
+    except Exception as e:
+        logger.warning("Could not create camera_multi: %s", e)
+
     # Defensively register the side-B galvo scanner (Scanner:CD:33).
     # Absent on single-side rigs — skip + log, do not crash.
     try:

@@ -1223,24 +1223,31 @@ const OperateManager = (function () {
     function postLsParams() {
         if (_lsTimer) clearTimeout(_lsTimer);
         _lsTimer = setTimeout(() => {
-            const p = _pose[_side];
-            postJSON('/api/devices/lightsheet/live/params',
-                { galvo: p.galvo, piezo: p.piezo, side: _side }).catch(() => {});
+            // Multi has no sheet of its own: the device layer keeps A and B
+            // where they were, so only the view changes hands.
+            const body = _side === 'Multi'
+                ? { side: _side }
+                : { galvo: _pose[_side].galvo, piezo: _pose[_side].piezo, side: _side };
+            postJSON('/api/devices/lightsheet/live/params', body).catch(() => {});
         }, 120);
     }
     function renderPose() {
-        const p = _pose[_side];
-        const gv = $('op-gv'); if (gv) gv.textContent = p.galvo.toFixed(1);
-        const pz = $('op-pz'); if (pz) pz.textContent = p.piezo.toFixed(0);
+        const multi = _side === 'Multi';
+        const p = _pose[multi ? 'A' : _side];
+        const gv = $('op-gv'); if (gv) gv.textContent = multi ? '—' : p.galvo.toFixed(1);
+        const pz = $('op-pz'); if (pz) pz.textContent = multi ? '—' : p.piezo.toFixed(0);
+        document.querySelectorAll('[data-gv],[data-pz]').forEach(b => { b.disabled = multi; });
+        const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
         document.querySelectorAll('#op-spim-side [data-side]').forEach(b => {
             const on = b.dataset.side === _side;
             b.classList.toggle('is-on', on);
             b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
-        const img = $('op-img-spim'); if (img) img.alt = `Light-sheet view, side ${_side}`;
+        const img = $('op-img-spim');
+        if (img) img.alt = multi ? 'Light-sheet view, both sides: A red, B green' : `Light-sheet view, side ${_side}`;
     }
     function setSpimSide(side) {
-        if (side !== 'A' && side !== 'B') return;
+        if (side !== 'A' && side !== 'B' && side !== 'Multi') return;
         if (side === _side) return;
         _side = side;
         renderPose();
@@ -1249,12 +1256,14 @@ const OperateManager = (function () {
         postLsParams();
     }
     function nudgeGalvo(d) {
+        if (_side === 'Multi') return;
         const p = _pose[_side];
         p.galvo = Math.max(-5, Math.min(5, p.galvo + d));
         renderPose();
         postLsParams();
     }
     function nudgePiezo(d) {
+        if (_side === 'Multi') return;
         const p = _pose[_side];
         p.piezo = Math.max(0, Math.min(200, p.piezo + d));
         renderPose();

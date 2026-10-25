@@ -103,3 +103,69 @@ async def test_each_frame_says_which_side_it_came_from(monkeypatch):
         pass
 
     assert payload["side"] == "B"
+
+
+# ---------------------------------------------------------------------------
+# Multi: Micro-Manager's Multi Camera, both sides in one frame
+# ---------------------------------------------------------------------------
+
+
+def test_multi_selects_the_multi_camera_and_falls_back_to_a_without_it():
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    dl.devices["camera_multi"] = type(
+        "C", (), {"name": "Multi Camera", "clear_roi": lambda s: None}
+    )()
+    dl._ls_params["side"] = "Multi"
+    dl._ensure_lightsheet_sequence_sync()
+    assert dl.system.core.cam == "Multi Camera"
+    assert dl._ls_applied["side"] == "Multi"
+
+    del dl.devices["camera_multi"]
+    dl._ls_applied = {}
+    dl._ensure_lightsheet_sequence_sync()
+    assert dl.system.core.cam == "HamCam1"
+
+
+def test_multi_parks_nothing():
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    dl._ls_params["side"] = "Multi"
+    dl._park_lightsheet_sync()
+    assert dl.devices["scanner"].sa_offset_y.last_pos is None
+    assert dl.devices["scanner_b"].sa_offset_y.last_pos is None
+
+
+def test_the_multi_frame_is_a_red_over_b_green():
+    import numpy as np
+
+    from gently.hardware.dispim.device_layer import DeviceLayerServer
+
+    a = np.zeros((4, 6), np.uint16)
+    a[1, 1] = 4000  # only A lights this pixel
+    b = np.zeros((4, 6), np.uint16)
+    b[2, 3] = 4000  # only B lights this one
+    bgr = DeviceLayerServer._compose_multi(a, b)
+    assert bgr.shape == (4, 6, 3) and bgr.dtype == np.uint8
+    assert bgr[1, 1, 2] == 255 and bgr[1, 1, 1] == 0  # red channel is A
+    assert bgr[2, 3, 1] == 255 and bgr[2, 3, 2] == 0  # green channel is B
+    assert bgr[..., 0].max() == 0  # nothing in blue
+
+
+def test_the_multi_frame_crops_to_the_common_size():
+    import numpy as np
+
+    from gently.hardware.dispim.device_layer import DeviceLayerServer
+
+    bgr = DeviceLayerServer._compose_multi(np.zeros((4, 6), np.uint16), np.zeros((3, 8), np.uint16))
+    assert bgr.shape == (3, 6, 3)
+
+
+@pytest.mark.asyncio
+async def test_switching_to_multi_leaves_the_beams_as_they_are():
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    state = _wire_beam(dl)
+    state["a"] = True
+    req = AsyncMock()
+    req.json = AsyncMock(return_value={"side": "Multi"})
+    await dl.handle_lightsheet_params(req)
+    assert dl._ls_params["side"] == "Multi"
+    assert state == {"a": True, "b": False}
