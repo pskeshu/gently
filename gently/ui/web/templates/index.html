@@ -709,6 +709,15 @@
 
                     <div class="op-block">
                       <div class="op-block-head">Sheet alignment</div>
+                      <!-- One side at a time, on purpose: two sheets on at once light
+                           each camera with the other's sheet edge-on. The armed beam
+                           follows this choice (device layer). Galvo and piezo below are
+                           the chosen side's own; each side keeps its numbers. -->
+                      <div class="op-row"><span class="op-label">Side</span>
+                        <span class="op-micro" id="op-spim-side" role="radiogroup" aria-label="Light-sheet side">
+                          <button class="op-nbtn is-on" data-side="A" type="button" aria-pressed="true" title="Scanner AB · piezo P · camera 1">A</button>
+                          <button class="op-nbtn" data-side="B" type="button" aria-pressed="false" title="Scanner CD · piezo Q · camera 2">B</button>
+                        </span></div>
                       <div class="op-row"><span class="op-label">Galvo</span>
                         <span class="op-micro">
                           <button class="op-nbtn" data-gv="-0.1" type="button">−</button>

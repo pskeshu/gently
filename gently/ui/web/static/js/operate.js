@@ -129,7 +129,10 @@ const OperateManager = (function () {
     }
     // Read back from the Light panel's device read, never remembered here.
     const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
-    let _galvo = 0.0, _piezo = 50.0;
+    // The live sheet's pose, per side: B's scanner and piezo are different
+    // devices with their own numbers, so switching sides must not carry A's.
+    let _side = 'A';
+    const _pose = { A: { galvo: 0.0, piezo: 50.0 }, B: { galvo: 0.0, piezo: 50.0 } };
     let _mode = 'single';
     let _selectedLib = null;
     let _runPaused = false;
@@ -1220,18 +1223,41 @@ const OperateManager = (function () {
     function postLsParams() {
         if (_lsTimer) clearTimeout(_lsTimer);
         _lsTimer = setTimeout(() => {
+            const p = _pose[_side];
             postJSON('/api/devices/lightsheet/live/params',
-                { galvo: _galvo, piezo: _piezo, side: 'A' }).catch(() => {});
+                { galvo: p.galvo, piezo: p.piezo, side: _side }).catch(() => {});
         }, 120);
     }
+    function renderPose() {
+        const p = _pose[_side];
+        const gv = $('op-gv'); if (gv) gv.textContent = p.galvo.toFixed(1);
+        const pz = $('op-pz'); if (pz) pz.textContent = p.piezo.toFixed(0);
+        document.querySelectorAll('#op-spim-side [data-side]').forEach(b => {
+            const on = b.dataset.side === _side;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        const img = $('op-img-spim'); if (img) img.alt = `Light-sheet view, side ${_side}`;
+    }
+    function setSpimSide(side) {
+        if (side !== 'A' && side !== 'B') return;
+        if (side === _side) return;
+        _side = side;
+        renderPose();
+        // The frame on screen is the other side's until the next one lands.
+        if (_spimOn) clearImg('op-img-spim', 'op-ph-spim', `Switching to side ${side}…`);
+        postLsParams();
+    }
     function nudgeGalvo(d) {
-        _galvo = Math.max(-5, Math.min(5, _galvo + d));
-        const el = $('op-gv'); if (el) el.textContent = _galvo.toFixed(1);
+        const p = _pose[_side];
+        p.galvo = Math.max(-5, Math.min(5, p.galvo + d));
+        renderPose();
         postLsParams();
     }
     function nudgePiezo(d) {
-        _piezo = Math.max(0, Math.min(200, _piezo + d));
-        const el = $('op-pz'); if (el) el.textContent = _piezo.toFixed(0);
+        const p = _pose[_side];
+        p.piezo = Math.max(0, Math.min(200, p.piezo + d));
+        renderPose();
         postLsParams();
     }
     // The LED has ONE control, in the Light panel. There used to be a second
@@ -3434,6 +3460,8 @@ const OperateManager = (function () {
     }
     function onSpimFrame(p) {
         if (!_active || _pane !== 'spim' || !p || !p.jpeg_b64) return;
+        // A frame tagged with the other side was grabbed before the switch.
+        if (p.side && p.side !== _side) return;
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
@@ -3543,6 +3571,8 @@ const OperateManager = (function () {
             b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b =>
             b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
+        document.querySelectorAll('#op-spim-side [data-side]').forEach(b =>
+            b.addEventListener('click', () => setSpimSide(b.dataset.side)));
         document.querySelectorAll('[data-backoff]').forEach(b =>
             b.addEventListener('click', backOff));
         const halt = $('op-halt');

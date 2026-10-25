@@ -1239,6 +1239,10 @@ class DeviceLayerServer(Service):
                 except Exception:
                     pass
             self._ls_spim_idle = True
+        # The cache is per side: the same numbers on the other side are a
+        # different scanner and piezo, which have not been parked yet.
+        if self._ls_parked.get("side") != side:
+            self._ls_parked = {"side": side}
         # setPosition only when the value changed from last-applied.
         if scanner is not None:
             want = float(p["galvo"])
@@ -1409,6 +1413,7 @@ class DeviceLayerServer(Service):
                     else None
                 )
                 if payload is not None:
+                    payload["side"] = self._ls_params.get("side", "A")
                     await self._broadcast_lightsheet(payload)
                 elapsed = time.monotonic() - tick
                 # Pace to at least the exposure; peek-rate caps near the camera rate.
@@ -1499,8 +1504,32 @@ class DeviceLayerServer(Service):
             if k in body and body[k] is not None:
                 self._ls_params[k] = float(body[k])
         if "side" in body and body["side"] in ("A", "B"):
+            previous = self._ls_params.get("side", "A")
             self._ls_params["side"] = body["side"]
+            if body["side"] != previous:
+                await asyncio.to_thread(self._follow_beam_to_side, body["side"])
         return web.json_response({"params": self._ls_params})
+
+    def _follow_beam_to_side(self, side: str) -> None:
+        """An armed beam follows the live view to its side.
+
+        Two sheets on at once light each camera with the other side's sheet
+        edge-on, so a view of B with A's beam armed is a view of a stripe. If
+        either side is armed, the chosen side ends armed and the other not;
+        if neither is, nothing is touched. Best effort: the view must not die
+        on a beam write.
+        """
+        try:
+            beam = self._read_beam()
+            if not any(beam.get(k) for k in self._BEAM_SIDES):
+                return
+            for key, dev_name in self._BEAM_SIDES.items():
+                dev = self.devices.get(dev_name)
+                if dev is not None:
+                    dev.enable_beam(key == side.lower())
+            logger.info("[beam] followed the live view to side %s", side)
+        except Exception:
+            logger.warning("[beam] could not follow the live view to side %s", side, exc_info=True)
 
     # =========================================================================
     # MMCore Push Callbacks

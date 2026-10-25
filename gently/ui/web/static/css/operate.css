@@ -599,7 +599,7 @@
 
 .op-seg { display: flex; flex-wrap: wrap; gap: var(--op-1); }
 .op-segbtn { padding: var(--op-2) var(--op-3); font-size: 0.68rem; }
-.op-segbtn.is-on { border-color: var(--accent); color: var(--accent); }
+.op-segbtn.is-on, .op-nbtn.is-on { border-color: var(--accent); color: var(--accent); }
 
 .op-field { display: flex; align-items: center; justify-content: space-between; gap: var(--op-2); }
 .op-num-in, .op-sel {
