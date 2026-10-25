@@ -283,6 +283,34 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
     except Exception as e:
         logger.warning("Could not create bottom camera: %s", e)
 
+    # The same compound devices for side B, when its trio is there. A plan
+    # takes either by name (volume_scanner='volume_scanner_b'); nothing else
+    # about the plan changes, which is the point.
+    try:
+        b_scanner = devices.get("scanner_b")
+        b_camera = devices.get("camera_b")
+        b_piezo = devices.get("piezo_b")
+        if b_scanner and b_camera and b_piezo and laser_control:
+            devices["volume_scanner_b"] = DiSPIMVolumeScanner(
+                scanner=b_scanner,
+                camera=b_camera,
+                piezo=b_piezo,
+                laser_control=laser_control,
+                core=core,
+                name="volume_scanner_b",
+                side="B",
+            )
+            devices["lightsheet_snap_b"] = DiSPIMLightSheetSnap(
+                scanner=b_scanner,
+                camera=b_camera,
+                name="lightsheet_snap_b",
+            )
+            logger.info("Created volume scanner and lightsheet snap for side B")
+        else:
+            logger.info("No side-B volume scanner: scanner_b, camera_b or piezo_b absent")
+    except Exception as e:
+        logger.warning("Could not create side-B compound devices: %s", e)
+
     try:
         if scanner and camera:
             devices["lightsheet_snap"] = DiSPIMLightSheetSnap(

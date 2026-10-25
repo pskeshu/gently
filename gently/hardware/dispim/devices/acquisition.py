@@ -63,15 +63,20 @@ class DiSPIMVolumeScanner:
         laser_control: "DiSPIMLaserControl",
         core: pymmcore.CMMCore,
         name: str = "volume_scanner",
+        side: str = "A",
     ):
         """
         Initialize volume scanner with all required devices.
+
+        ``side`` names the imaging path this trio belongs to, 'A' or 'B'; it
+        is written to the card as SPIMFirstSide when the scan is configured.
 
         Note: laser_control is required because proper SPIM operation always
         requires explicit laser management to avoid photobleaching and ensure
         reproducible illumination.
         """
         self.name = name
+        self.side = side
         self.parent = None  # Required for Bluesky
         self.scanner = scanner
         self.camera = camera
@@ -140,6 +145,7 @@ class DiSPIMVolumeScanner:
             galvo_center=galvo_center,
             num_slices=num_slices,
             timing_params=timing_params,
+            first_side=self.side,
         )
 
         # Configure piezo for volume acquisition

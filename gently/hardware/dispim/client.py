@@ -563,10 +563,15 @@ class DiSPIMMicroscope(Microscope):
         laser_power_561_pct: float | None = None,
         laser_power_405_pct: float | None = None,
         laser_power_637_pct: float | None = None,
+        side: str = "A",
         **kwargs,
     ) -> dict:
         """
         Acquire a 3D volume via synchronized galvo-piezo scan.
+
+        ``side`` picks the imaging path: 'A' runs ``volume_scanner``, 'B' runs
+        ``volume_scanner_b`` (scanner CD, piezo Q, camera 2), which the device
+        layer registers when that trio is present.
 
         Parameters
         ----------
@@ -592,8 +597,9 @@ class DiSPIMMicroscope(Microscope):
         dict
             ``{'volume': np.ndarray, 'shape': tuple, 'success': bool}``
         """
+        scanner_name = "volume_scanner_b" if str(side).upper() == "B" else "volume_scanner"
         plan_kwargs = {
-            "volume_scanner": "volume_scanner",
+            "volume_scanner": scanner_name,
             "num_slices": num_slices,
             "exposure_ms": exposure_ms,
             "galvo_amplitude": galvo_amplitude,
@@ -619,7 +625,7 @@ class DiSPIMMicroscope(Microscope):
         )
 
         extracted = self._extract_image(
-            result, ["volume_scanner", "camera", "camera_image"], multi_event=True
+            result, [scanner_name, "volume_scanner", "camera", "camera_image"], multi_event=True
         )
         if extracted:
             arr, fpath = extracted

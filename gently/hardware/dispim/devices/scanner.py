@@ -368,6 +368,7 @@ class DiSPIMScanner:
         galvo_center: float,
         num_slices: int,
         timing_params: dict | None = None,
+        first_side: str = "A",
     ):
         """
         Configure scanner for hardware-triggered volume acquisition.
@@ -384,6 +385,10 @@ class DiSPIMScanner:
             Number of Z slices
         timing_params : Dict, optional
             Custom timing parameters (uses defaults if None)
+        first_side : str
+            Which side the SPIM state machine images, 'A' or 'B'. Both
+            scanners sit on one micro-mirror card, so this is the card's
+            setting whichever device it is written through.
         """
         # Reset state machine
         self.set_spim_state("Idle")
@@ -401,4 +406,4 @@ class DiSPIMScanner:
             self.configure_spim_timing(**timing_params)
 
         # Configure acquisition parameters
-        self.configure_spim_parameters(num_slices=num_slices)
+        self.configure_spim_parameters(num_slices=num_slices, first_side=first_side)

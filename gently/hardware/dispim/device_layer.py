@@ -4209,7 +4209,9 @@ class DeviceLayerServer(Service):
         return {"success": False, "error": "Could not read position"}
 
     def _extract_volume(self, documents: dict, params: dict) -> dict:
-        val = self._extract_from_events(documents, ["volume_scanner", "camera", "camera_image"])
+        val = self._extract_from_events(
+            documents, ["volume_scanner", "volume_scanner_b", "camera", "camera_image"]
+        )
         if val is not None:
             result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
