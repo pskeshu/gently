@@ -746,9 +746,14 @@ async def calibrate_embryo(
     require_object: bool = True,
     use_v04_plan: bool = False,
     method: str = "legacy",
+    side: str = "A",
     context: dict | None = None,
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection.
+
+    ``side`` is the imaging path, 'A' or 'B'. B is measured by the scan
+    routine only, with the B scanner, piezo and camera, and lands in the
+    embryo's ``calibration["B"]``; the legacy sweep drives A's devices.
 
     ``method`` picks the routine: ``"legacy"`` is the software sweep below;
     ``"scan"`` is ``gently.calibration.scan`` — a few hardware-timed volumes
@@ -812,11 +817,20 @@ async def calibrate_embryo(
 
     if method not in METHODS:
         return f"Error: unknown calibration method {method!r}; one of {', '.join(METHODS)}"
+    side = str(side or "A").upper()
+    if side not in ("A", "B"):
+        return f"Error: side must be A or B, not {side!r}"
+    if side == "B" and method != "scan":
+        return "Error: side B is calibrated with method='scan'; the legacy sweep drives side A."
     if method == "scan":
         from gently.calibration.scan import scan_calibrate
 
         return await scan_calibrate(
-            embryo_id, context, z_buffer_um=z_buffer_um, require_object=require_object
+            embryo_id,
+            context,
+            z_buffer_um=z_buffer_um,
+            require_object=require_object,
+            side=side,
         )
 
     if use_v04_plan:

@@ -164,6 +164,7 @@ async def _volume(
     piezo_amp: float,
     piezo_c: float,
     budget: Budget,
+    side: str = "A",
 ) -> np.ndarray | None:
     budget.spend(n)
     r = await client.acquire_volume(
@@ -173,6 +174,7 @@ async def _volume(
         galvo_center=galvo_c,
         piezo_amplitude=piezo_amp,
         piezo_center=piezo_c,
+        side=side,
     )
     if not r.get("success") or r.get("volume") is None:
         return None
@@ -192,6 +194,7 @@ async def extent(
     embryo_id: str = "",
     show: Show | None = None,
     visible: Visible | None = None,
+    side: str = "A",
 ) -> Report:
     """Slice scan only: the sheet sweeps, the detection plane stays at `piezo`.
 
@@ -209,6 +212,7 @@ async def extent(
         piezo_amp=STILL,
         piezo_c=piezo,
         budget=budget,
+        side=side,
     )
     if vol is None:
         return Report("extent", False, "the slice scan returned no volume", n)
@@ -296,6 +300,7 @@ async def focus_at(
     embryo_id: str = "",
     show: Show | None = None,
     judge: Callable[[list[np.ndarray], list[float]], Awaitable[int | None]] | None = None,
+    side: str = "A",
 ) -> Report:
     """Piezo scan only: the sheet stays at `galvo`, the detection plane steps.
 
@@ -312,6 +317,7 @@ async def focus_at(
         piezo_amp=2 * half_range_um,
         piezo_c=expected_piezo,
         budget=budget,
+        side=side,
     )
     if vol is None:
         return Report("focus_at", False, f"the piezo scan at {galvo:.3f}° returned no volume", n)

@@ -30,7 +30,7 @@ EXPOSURE_CEILING = 600
 MIN_POINT_R2 = 0.5
 
 
-def heuristic(agent, embryo) -> tuple[float, float, str]:
+def heuristic(agent, embryo, side: str = "A") -> tuple[float, float, str]:
     """Slope and offset to start from, and where they came from. Legacy's priority."""
     prior = agent.experiment.calibration_prior
     if prior.num_calibrations > 0 and prior.r_squared_mean >= 0.75:
@@ -40,6 +40,10 @@ def heuristic(agent, embryo) -> tuple[float, float, str]:
             f"session prior from {prior.num_calibrations} embryo(s)",
         )
     cal = embryo.calibration or {}
+    if side == "B":
+        # B is the other arm: its own previous fit or nothing; A's numbers
+        # belong to A's scanner and piezo.
+        cal = cal.get("B") if isinstance(cal.get("B"), dict) else {}
     if cal.get("slope_um_per_deg"):
         return cal["slope_um_per_deg"], cal.get("offset_um", 0.0), "this embryo's previous fit"
     return 100.0, 0.0, "the default heuristic"
@@ -69,8 +73,13 @@ async def scan_calibrate(
     galvo_half_range: float = 0.5,
     require_object: bool = True,
     start: tuple[float, float] | None = None,
+    side: str = "A",
 ) -> str:
     """Calibrate one embryo with the scan atoms. Returns the same prose legacy does.
+
+    ``side`` is the imaging path: A writes ``embryo.calibration`` as ever; B
+    writes ``embryo.calibration["B"]``, measured with the B scanner, piezo and
+    camera, and leaves the session prior and A's focus history alone.
 
     ``start`` is a borrowed (slope, offset). With it, one held point is enough:
     the slope is kept and only the offset is this embryo's own.
@@ -93,7 +102,9 @@ async def scan_calibrate(
     if err:
         return err
 
-    slope0, offset0, origin = (*start, "a borrowed line") if start else heuristic(agent, embryo)
+    slope0, offset0, origin = (
+        (*start, "a borrowed line") if start else heuristic(agent, embryo, side)
+    )
     budget = atoms.Budget(EXPOSURE_CEILING)
     vision = AsyncClaudeClient()
     said: list[str] = [f"starting from {origin}: {slope0:.1f} µm/deg, offset {offset0:.1f} µm"]
@@ -121,6 +132,7 @@ async def scan_calibrate(
             galvo_half_range=galvo_half_range,
             exposure_ms=exposure_ms,
             budget=budget,
+            side=side,
             embryo_id=embryo_id,
             show=show,
             visible=(lambda img: _ask_visible(vision, img)) if require_object else None,
@@ -152,6 +164,7 @@ async def scan_calibrate(
                 step_um=1.0,
                 exposure_ms=exposure_ms,
                 budget=budget,
+                side=side,
                 embryo_id=embryo_id,
                 show=show,
                 judge=judge,
@@ -172,6 +185,7 @@ async def scan_calibrate(
                 expected_piezo=p_ref + slope0 * (float(g) - g_ref),
                 exposure_ms=exposure_ms,
                 budget=budget,
+                side=side,
                 embryo_id=embryo_id,
                 show=show,
                 judge=judge,
@@ -215,7 +229,7 @@ async def scan_calibrate(
         return f"Error calibrating {embryo_id}: {exc}\n  " + "\n  ".join(said)
 
     geo = atoms.geometry(top, bottom, slope, offset, z_buffer_um)
-    embryo.calibration = {
+    fit = {
         "method": "scan",
         "slope_um_per_deg": slope,
         "offset_um": offset,
@@ -233,17 +247,31 @@ async def scan_calibrate(
         "exposures": budget.spent,
         **geo,
     }
+    if side == "B":
+        base = dict(embryo.calibration or {})
+        base["B"] = fit
+        embryo.calibration = base
+    else:
+        embryo.calibration = fit
     try:
         agent.experiment.notify_embryos_changed()
     except Exception:
         logger.debug("notify_embryos_changed failed", exc_info=True)
-    agent.experiment.calibration_prior.update_from_calibration(
-        slope=slope, offset=offset, r_squared=r2, extent_deg=bottom - top
-    )
-    for g, p, q, s in points:
-        embryo.add_focus_datapoint(
-            galvo=g, piezo=p, score=s, r_squared=q, method="calibration", algorithm="fft_bandpass"
+    if side == "A":
+        # The prior and the focus history are A's optics; B gets its own when
+        # there is a second arm's worth of nights to learn from.
+        agent.experiment.calibration_prior.update_from_calibration(
+            slope=slope, offset=offset, r_squared=r2, extent_deg=bottom - top
         )
+        for g, p, q, s in points:
+            embryo.add_focus_datapoint(
+                galvo=g,
+                piezo=p,
+                score=s,
+                r_squared=q,
+                method="calibration",
+                algorithm="fft_bandpass",
+            )
     embryo.record_exposure(exposure_ms=exposure_ms, num_frames=budget.spent)
     try:
         from gently.ui.web.plots import generate_calibration_summary_plot
@@ -253,14 +281,14 @@ async def scan_calibrate(
                 embryo_id=embryo_id,
                 galvo_top=float(g_arr.min()),
                 galvo_bottom=float(g_arr.max()),
-                piezo_top=embryo.calibration["piezo_top_um"],
-                piezo_bottom=embryo.calibration["piezo_bottom_um"],
+                piezo_top=fit["piezo_top_um"],
+                piezo_bottom=fit["piezo_bottom_um"],
                 slope=slope,
                 offset=offset,
-                r_squared_top=embryo.calibration["r_squared_top"],
-                r_squared_bottom=embryo.calibration["r_squared_bottom"],
+                r_squared_top=fit["r_squared_top"],
+                r_squared_bottom=fit["r_squared_bottom"],
             ),
-            uid=f"calibration_summary_{embryo_id}",
+            uid=f"calibration_summary_{embryo_id}" + ("" if side == "A" else f"_{side}"),
             data_type="calibration_summary",
             metadata={
                 "embryo_id": embryo_id,
@@ -268,6 +296,7 @@ async def scan_calibrate(
                 "offset": offset,
                 "r_squared": r2,
                 "method": "scan",
+                "side": side,
                 "said": said,
             },
         )
@@ -275,7 +304,7 @@ async def scan_calibrate(
         logger.warning("summary plot for %s failed: %s", embryo_id, exc)
     agent._mark_significant_action("calibration")
     return (
-        f"✓ Calibrated {embryo_id} (scan, {budget.spent} exposures)\n"
+        f"✓ Calibrated {embryo_id} (scan, side {side}, {budget.spent} exposures)\n"
         f"  Embryo extent: galvo {top:.3f}° to {bottom:.3f}° (~{(bottom - top) * 100:.0f}µm)\n"
         f"  Slope: {slope:.2f} µm/deg\n"
         f"  Offset: {offset:.2f} µm (piezo at galvo=0)\n"

@@ -353,6 +353,8 @@ def create_router(server) -> APIRouter:
         from gently.calibration import METHODS
 
         args: dict = {}
+        if payload.get("side") in ("A", "B"):
+            args["side"] = payload["side"]
         if payload.get("method") is not None:
             if payload["method"] not in METHODS:
                 raise HTTPException(status_code=400, detail=f"method must be one of {METHODS}")
