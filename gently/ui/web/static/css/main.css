@@ -347,6 +347,35 @@ body {
     box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
+/* You, by name, beside your avatar; the click opens the switch. */
+.presence-you {
+    display: inline-flex; align-items: center; gap: 7px;
+    font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
+    background: none; border: 1px solid transparent; border-radius: 999px;
+    padding: 2px 10px 2px 2px; cursor: pointer;
+}
+.presence-you:hover { border-color: var(--border); background: var(--bg-hover); }
+.presence-you .presence-avatar { cursor: pointer; }
+.presence-you-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presence-container { position: relative; }
+.presence-pop {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 220px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 8px; display: grid; gap: 4px;
+}
+.presence-pop-title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); padding: 2px 6px 6px; }
+.presence-pop-list { display: grid; gap: 2px; }
+.presence-pop-item {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; color: var(--text);
+    background: none; border: 0; border-radius: 7px; padding: 6px 8px; cursor: pointer; text-decoration: none;
+}
+.presence-pop-item:hover { background: var(--bg-hover); }
+.presence-pop-item.is-current { font-weight: 600; color: var(--accent); }
+.presence-pop-box {
+    font: inherit; font-size: 13px; padding: 6px 8px; margin-top: 4px; width: 100%; box-sizing: border-box;
+    color: var(--text); background: var(--bg-dark); border: 1px solid var(--border); border-radius: 7px;
+}
+
 .presence-overflow {
     width: 28px;
     height: 28px;

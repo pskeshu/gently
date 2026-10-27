@@ -85,7 +85,15 @@ def create_router(server) -> APIRouter:
         here = {"local": is_local(host), "unnamed": unnamed(host)}
         store = get_account_store()
         if store is None or not store.has_users():
-            return JSONResponse({"accounts": False, "authenticated": False, **here})
+            # No accounts: the person is whoever the landing page's cookie
+            # names, shown by display name.
+            from gently.ui.web.operators import names_of
+
+            pid = current_username(request)
+            operator = {"id": pid, "name": names_of().get(pid, pid)} if pid else None
+            return JSONResponse(
+                {"accounts": False, "authenticated": False, "operator": operator, **here}
+            )
         username = current_username(request)
         if not username:
             return JSONResponse({"accounts": True, "authenticated": False, **here})
