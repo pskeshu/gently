@@ -6,6 +6,8 @@ Each module exposes a ``create_router(server)`` function that returns
 a FastAPI ``APIRouter`` bound to the server instance.
 """
 
+from gently.tools.twitch_hatch import create_router as create_twitch_hatch_router
+
 from .agent_ws import create_router as create_agent_ws_router
 from .auth_routes import create_router as create_auth_router
 from .bf import create_router as create_bf_router
@@ -63,6 +65,7 @@ def register_all_routes(server):
         create_reveal_router,
         create_ui_prefs_router,
         create_search_router,
+        create_twitch_hatch_router,
     ):
         router = factory(server)
         server.app.include_router(router)

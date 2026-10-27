@@ -23,6 +23,7 @@ const ReviewApp = {
     async init() {
         if (this._initialized) return;
         this._initialized = true;
+        fetch('/api/tools').then(r => r.json()).then(d => { window.GentlyToolCatalog = d.tools || []; }).catch(() => {});
         await this.loadSessions();
         this.updateStatusbar();
 
@@ -708,6 +709,10 @@ const ReviewApp = {
                     What happened
                     <span class="tab-count">${(s.events || []).length}</span>
                 </button>
+                <button class="tab ${this.currentTab === 'tools' ? 'active' : ''}" data-tab="tools">
+                    Tools
+                    <span class="tab-count">${(s.tools || []).length}</span>
+                </button>
             </div>
 
             <div class="session-tab-content" id="session-tab-content">
@@ -1189,6 +1194,7 @@ const ReviewApp = {
                 tab.classList.add('active');
                 document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
                 this.wireScrub();
+                this.mountTools();
             });
         });
     },
@@ -1199,9 +1205,60 @@ const ReviewApp = {
             case 'detections': return this.renderDetectionsTab();
             case 'conversation': return this.renderConversationTab();
             case 'events': return this.renderEventsTab();
+            case 'tools': return this.renderToolsTab();
             default: return '';
         }
     },
+
+    // ---- tools: optional panes a session imports at any time ---------------
+    // A tool is off until the session names it; importing is one PUT. Each
+    // imported tool mounts itself into its own box (static/js/tools/*.js).
+    renderToolsTab() {
+        const s = this.currentSession;
+        const on = s.tools || [];
+        const avail = (window.GentlyToolCatalog || []).filter(t => !on.includes(t.name));
+        return `
+            <div class="session-tools-bar">
+                ${avail.length ? `<select id="session-tool-pick">${avail.map(t => `<option value="${t.name}" title="${this.escapeHtml(t.summary)}">${this.escapeHtml(t.title)}</option>`).join('')}</select>
+                <button class="session-edit-btn" onclick="ReviewApp.importTool()">Import</button>` : ''}
+                ${!on.length ? '<span class="hint">No tools imported into this session yet.</span>' : ''}
+            </div>
+            ${on.map(name => {
+                const t = (window.GentlyToolCatalog || []).find(x => x.name === name) || { title: name };
+                return `<div class="session-tool">
+                    <div class="session-bf-head">${this.escapeHtml(t.title)} <button class="session-edit-btn session-tool-drop" onclick="ReviewApp.dropTool('${name}')" title="Take this tool off the session; its file stays">remove</button></div>
+                    <div class="session-tool-body" data-tool="${name}"></div>
+                </div>`;
+            }).join('')}`;
+    },
+
+    mountTools() {
+        const s = this.currentSession;
+        if (!s || this.currentTab !== 'tools') return;
+        document.querySelectorAll('.session-tool-body[data-tool]').forEach(el => {
+            const tool = (window.GentlyTools || {})[el.dataset.tool];
+            if (tool) tool.mount(el, s.session_id);
+            else el.innerHTML = '<div class="empty-tab">This tool has no pane on this page</div>';
+        });
+    },
+
+    async setTools(tools) {
+        const s = this.currentSession;
+        const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/tools`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools }),
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || `HTTP ${r.status}`); return; }
+        s.tools = (await r.json()).tools;
+        document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
+        this.mountTools();
+    },
+
+    importTool() {
+        const pick = document.getElementById('session-tool-pick');
+        if (pick) this.setTools([...(this.currentSession.tools || []), pick.value]);
+    },
+
+    dropTool(name) { this.setTools((this.currentSession.tools || []).filter(t => t !== name)); },
 
     renderBfStrip() {
         const frames = this.currentSession.bf_frames || [];

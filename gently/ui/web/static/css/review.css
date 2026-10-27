@@ -784,3 +784,24 @@
 /* a stage carries its WormBase life-stage id */
 .stage-ontology { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
 .stage-ontology a { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); text-decoration: none; }
+
+/* ---- tools: imported panes --------------------------------------------- */
+.session-tools-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.session-tools-bar select { font: inherit; font-size: 12px; padding: 2px 6px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.session-tool { margin-bottom: 20px; }
+.session-tool-drop { float: right; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.th-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.th-fields { display: flex; gap: 4px; }
+.session-edit-btn.is-on { color: var(--text); border-color: var(--accent); }
+.th-slider { flex: 1; accent-color: var(--accent); }
+.th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
+.th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }
+.th-img { display: block; max-width: 100%; max-height: 70vh; border-radius: 6px; border: 1px solid var(--border); background: var(--img-bg); }
+.th-pin { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
+.th-pin.is-open { background: #f59e0b; }
+.th-table { margin-top: 10px; border-collapse: collapse; font-size: 12px; }
+.th-table th, .th-table td { padding: 4px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.th-table th { font-weight: 600; color: var(--text-muted); }
+.th-table a { color: var(--accent); text-decoration: none; }
+.th-foot { margin-top: 8px; font-size: 12px; }
+.th-foot a { color: var(--text-muted); }
