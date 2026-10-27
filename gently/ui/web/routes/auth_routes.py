@@ -115,15 +115,18 @@ def create_router(server) -> APIRouter:
         else the operators this rig has seen, for choosing on the landing page."""
         from gently.ui.web.operators import list_operators
 
+        colour = getattr(getattr(server, "manager", None), "_generate_color", None)
+        paint = (lambda u: {**u, "color": colour(u["id"])}) if callable(colour) else (lambda u: u)
         store = get_account_store()
         if store is None or not store.has_users():
-            return JSONResponse(
-                {"accounts": False, "users": list_operators(getattr(server, "gently_store", None))}
-            )
+            people = list_operators(getattr(server, "gently_store", None))
+            return JSONResponse({"accounts": False, "users": [paint(u) for u in people]})
         return JSONResponse(
             {
                 "accounts": True,
-                "users": [{"id": u["username"], "name": u["username"]} for u in store.list_users()],
+                "users": [
+                    paint({"id": u["username"], "name": u["username"]}) for u in store.list_users()
+                ],
             }
         )
 

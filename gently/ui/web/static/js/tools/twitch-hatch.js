@@ -53,7 +53,7 @@ const TwitchHatchTool = {
             ${here.map(([r, i]) => `<span class="th-pin ${r.hatch_frame == null ? 'is-open' : ''}" style="left:${r.x * 100}%;top:${r.y * 100}%" title="#${i + 1}">${i + 1}</span>`).join('')}
           </div>
           <table class="th-table">
-            <thead><tr><th>#</th><th>field</th><th>twitch</th><th>hatch</th><th>minutes</th><th>°C</th><th>vs Sulston (${this.data.sulston_min} min)</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>field</th><th>twitch</th><th>hatch</th><th>minutes</th><th>°C</th><th>vs Sulston (${this.data.sulston_min} min)</th><th>by</th><th></th></tr></thead>
             <tbody>${report.map((r, i) => `
               <tr>
                 <td>${i + 1}</td><td>${r.field}</td>
@@ -63,6 +63,7 @@ const TwitchHatchTool = {
                     : `<button class="session-edit-btn" data-hatch="${i}" ${r.field !== this.field ? 'disabled' : ''}>hatch here (f${cur.frame})</button>`}</td>
                 <td>${r.minutes ?? ''}</td><td>${r.temp_c ?? ''}</td>
                 <td>${r.vs_sulston_min == null ? '' : (r.vs_sulston_min > 0 ? '+' : '') + r.vs_sulston_min}</td>
+                <td>${typeof Who !== 'undefined' ? Who.chip(r.by, { when: r.at }) : ''}</td>
                 <td><button class="session-edit-btn" data-del="${i}" title="Remove">×</button></td>
               </tr>`).join('')}
             </tbody>

@@ -214,6 +214,17 @@ class VisualizationServer(Service):
                 response.headers["Cache-Control"] = "no-cache"
             return response
 
+        # Every control request a person makes is one line in the live
+        # session's actions.jsonl: when, who, what. One place, every knob.
+        from gently.ui.web.actions import is_action, record_action
+
+        @self.app.middleware("http")
+        async def _record_actions(request, call_next):
+            response = await call_next(request)
+            if is_action(request.method, request.url.path):
+                record_action(self, request, response.status_code)
+            return response
+
         # Add CORS middleware
         self.app.add_middleware(
             CORSMiddleware,

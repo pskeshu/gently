@@ -349,7 +349,7 @@ const ReviewApp = {
         if (s.bf_frames) parts.push(`${s.bf_frames} brightfield`);
         if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
-        if ((s.operators || []).length) parts.push(s.operators.map(o => this.operatorNames[o] || o).join(', '));
+        if ((s.operators || []).length) parts.push(s.operators.map(o => Who.name(o)).join(', '));
         return parts;
     },
 
@@ -690,6 +690,8 @@ const ReviewApp = {
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
                     ${s.last_active ? `<span>Last active: ${this.formatDateTime(s.last_active)}</span>` : ''}
+                    ${(s.operators || []).length ? `<span>Worked by ${s.operators.map(o => Who.chip(o)).join(' ')}</span>` : ''}
+                    ${s.edited && s.edited.by ? `<span>Last edit ${Who.chip(s.edited.by, { when: s.edited.at })} (${this.escapeHtml(s.edited.what || '')})</span>` : ''}
                     ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
                 </div>
                 ${this.renderRun(this.runOf(s))}
@@ -1112,10 +1114,13 @@ const ReviewApp = {
         const s = this.currentSession;
         const events = s.events || [];
         const temp = s.temperature || [];
+        const actions = (s.actions || []).slice().reverse();
         const spark = this.temperatureSpark(temp);
-        if (!events.length && !spark) return '<div class="empty-tab">Nothing recorded beyond the images</div>';
+        if (!events.length && !spark && !actions.length) return '<div class="empty-tab">Nothing recorded beyond the images</div>';
+        const acts = actions.length ? `<div class="session-bf-head">What people did <span class="session-bf-count">${actions.length}</span></div>
+            <div class="event-list action-list">${actions.map(a => `<time>${this.formatDateTime(a.at)}</time><div>${Who.chip(a.by, { empty: '<span class="pj-muted">someone</span>' })} <code>${this.escapeHtml(a.method)} ${this.escapeHtml(a.path)}${a.query ? '?' + this.escapeHtml(a.query) : ''}</code></div>`).join('')}</div>` : '';
         return `
-            ${spark}
+            ${spark}${acts}
             ${events.length ? `<div class="event-list">
                 ${events.map(ev => `<time>${this.formatDateTime(ev.at)}</time><div class="${ev.level === 'warn' ? 'is-warn' : ev.level === 'error' ? 'is-error' : ''}">${this.escapeHtml(ev.text)}</div>`).join('')}
             </div>` : '<div class="empty-tab">No notable events recorded</div>'}`;
