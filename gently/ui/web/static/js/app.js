@@ -332,6 +332,14 @@ const PresenceManager = {
         );
     },
 
+    /** Who this browser is, for the colour: the person's id, else the account. */
+    personId() {
+        const me = this.me || {};
+        if (me.operator && me.operator.id) return me.operator.id;
+        if (me.authenticated && me.username) return me.username;
+        return null;
+    },
+
     /** What this browser is called: the person, the account, then the place. */
     unnamedName() {
         const me = this.me || {};
@@ -348,7 +356,8 @@ const PresenceManager = {
                 state.ws.send(JSON.stringify({
                     type: 'join',
                     client_id: this.clientId,
-                    name: this.name
+                    name: this.name,
+                    person: this.personId()
                 }));
             }
         };
@@ -445,7 +454,8 @@ const PresenceManager = {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
             state.ws.send(JSON.stringify({
                 type: 'set_name',
-                name: this.name
+                name: this.name,
+                person: this.personId()
             }));
         }
     },
@@ -493,7 +503,7 @@ const PresenceManager = {
             pop.appendChild(list);
             const box = document.createElement('input');
             box.className = 'presence-pop-box';
-            box.placeholder = 'Someone new: a name, then Enter';
+            box.placeholder = 'New name, then Enter';
             box.maxLength = 40;
             box.addEventListener('keydown', e => {
                 if (e.key === 'Escape') { pop.remove(); return; }
