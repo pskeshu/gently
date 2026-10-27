@@ -3,7 +3,7 @@
 A brightfield field holds several embryos and no embryo folders, so a row is
 a click: which field, where in it, the frame it first twitched and the frame
 it hatched. Minutes come from the frames' own ``captured_at`` clocks, so a
-changed interval mid-night costs nothing. Temperature over the interval
+changed interval mid-session costs nothing. Temperature over the interval
 comes from the session's temperature log, since a Sulston comparison without
 it is not one.
 

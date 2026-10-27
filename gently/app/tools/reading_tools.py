@@ -1,4 +1,4 @@
-"""Reading tool: the agent writes the between-nights reading of a project.
+"""Reading tool: the agent writes the between-sessions reading of a project.
 
 The same function the project page's "Read again" calls, so what the agent
 writes from chat and what the operator asks for are one thing.
@@ -14,15 +14,15 @@ from gently.tools.reading import read_project
 @tool(
     name="read_project",
     description=(
-        "Write the project's reading: what its nights say about its question, what "
-        "deviates, what is open, what to run next. Prose over the project's nights, the "
+        "Write the project's reading: what its sessions say about its question, what "
+        "deviates, what is open, what to run next. Prose over the project's sessions, the "
         "pooled measurements and the stream of lines people wrote at the rig. Filed under "
         "the project and shown at the top of its page. Takes a project id or shorthand."
     ),
     category=ToolCategory.ANALYSIS,
     examples=[
         ToolExample(
-            user_query="What do the t2h nights tell us so far?",
+            user_query="What do the t2h sessions tell us so far?",
             tool_input={"project": "t2h"},
         )
     ],
