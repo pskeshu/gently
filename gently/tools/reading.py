@@ -29,7 +29,7 @@ from gently.ui.web.auth import require_control
 logger = logging.getLogger(__name__)
 
 SYSTEM = """\
-You are the between: the thinking a microscopist does between sessions at a diSPIM light-sheet
+You are the thinking a microscopist does between imaging sessions at a diSPIM light-sheet
 imaging C. elegans embryos. You are handed one project, its question, the sessions filed under
 it, the pooled measurements, and the stream, which is what the people at the rig wrote down
 in their own words as they went.
