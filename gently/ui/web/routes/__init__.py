@@ -6,6 +6,7 @@ Each module exposes a ``create_router(server)`` function that returns
 a FastAPI ``APIRouter`` bound to the server instance.
 """
 
+from gently.tools.figure import create_router as create_figure_router
 from gently.tools.select import create_router as create_select_router
 from gently.tools.twitch_hatch import create_router as create_twitch_hatch_router
 
@@ -66,6 +67,7 @@ def register_all_routes(server):
         create_reveal_router,
         create_ui_prefs_router,
         create_search_router,
+        create_figure_router,
         create_select_router,
         create_twitch_hatch_router,
     ):

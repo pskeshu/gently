@@ -2277,7 +2277,10 @@ async function loadSection() {
     try {
         if (state.section === 'ledger') state.ledger = await api('GET', `/api/campaigns/${P}/ledger`);
         else if (state.section === 'sessions') state.projSessions = (await api('GET', `/api/sessions?project_id=${P}`)).sessions || [];
-        else if (state.section === 'findings') state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
+        else if (state.section === 'findings') {
+            state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
+            state.figures = (await api('GET', `/api/campaigns/${P}/figures`).catch(() => ({}))).figures || [];
+        }
         else if (state.section === 'notes') state.notes = (await api('GET', `/api/notebook/notes?project=${P}`)).notes || [];
         else return;
     } catch (err) {
@@ -2556,7 +2559,11 @@ function renderFindingsSection() {
     if (!list) return loadingBox('the findings');
     const live = list.filter(n => n.status !== 'superseded');
     const gone = list.filter(n => n.status === 'superseded');
-    return `<div class="pj-card">
+    const figs = state.figures || [];
+    return `${figs.length ? `<div class="pj-card">
+        <div class="pj-card-head"><h3>Figures</h3><span class="pj-muted">drawn from the pooled sessions; each is a file under the project</span></div>
+        <div class="pj-figures">${figs.map(f => `<a class="pj-figure" href="${f.url}" target="_blank" rel="noopener"><img src="${f.url}" alt="${esc(f.name)}"><span>${esc(f.name)}</span></a>`).join('')}</div>
+    </div>` : ''}<div class="pj-card">
         <div class="pj-card-head"><h3>Findings</h3><span class="pj-muted">claims about this project; the agent’s arrive proposed, a person confirms</span></div>
         <div class="pj-stack">${live.map(findingCard).join('') || '<div class="pj-none">No finding yet.</div>'}${addRow('finding', 'finding', '')}</div>
         ${gone.length ? `<div class="pj-stack dimmed"><h4>Superseded</h4>${gone.map(findingCard).join('')}</div>` : ''}

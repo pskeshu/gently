@@ -462,6 +462,11 @@ class FileContextStore:
             return self.get_campaign(resolved_id)
         return None
 
+    def campaign_dir(self, campaign_id: str) -> Path | None:
+        """The campaign's own folder, where its figures and plans live."""
+        folder = self._campaign_index.get(campaign_id)
+        return Path(folder) if folder is not None else None
+
     def _resolve_campaign_label(self, label: str) -> str | None:
         label_lower = label.lower()
 
