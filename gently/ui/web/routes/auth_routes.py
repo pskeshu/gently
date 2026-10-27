@@ -113,7 +113,10 @@ def create_router(server) -> APIRouter:
                 {"accounts": False, "users": list_operators(getattr(server, "gently_store", None))}
             )
         return JSONResponse(
-            {"accounts": True, "users": [u["username"] for u in store.list_users()]}
+            {
+                "accounts": True,
+                "users": [{"id": u["username"], "name": u["username"]} for u in store.list_users()],
+            }
         )
 
     @router.post("/api/auth/operator")
@@ -121,19 +124,42 @@ def create_router(server) -> APIRouter:
         """Who is here now, on a rig with no accounts: remember the name and
         set the cookie current_username reads."""
         from gently.ui.web.auth import OPERATOR_COOKIE
-        from gently.ui.web.operators import remember_operator
+        from gently.ui.web.operators import remember_operator, touch_operator
 
         store = get_account_store()
         if store is not None and store.has_users():
             return JSONResponse({"error": "accounts are configured; sign in"}, status_code=409)
         body = await request.json()
         try:
-            name = remember_operator(body.get("name") or "")
+            # A pick sends the id; a typed name makes or finds the person.
+            who = (
+                touch_operator(body["id"])
+                if body.get("id")
+                else remember_operator(body.get("name") or "")
+            )
+        except KeyError:
+            return JSONResponse({"error": "no such person"}, status_code=404)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        resp = JSONResponse({"ok": True, "name": name})
-        resp.set_cookie(OPERATOR_COOKIE, name, max_age=365 * 86400, samesite="lax", path="/")
+        resp = JSONResponse({"ok": True, **who})
+        resp.set_cookie(OPERATOR_COOKIE, who["id"], max_age=365 * 86400, samesite="lax", path="/")
         return resp
+
+    @router.post("/api/auth/operator/rename")
+    async def rename_operator_route(request: Request):
+        """A display name changed, a typo or otherwise. The id, and so every
+        record and cookie, stays."""
+        from gently.ui.web.operators import rename_operator
+
+        store = get_account_store()
+        if store is not None and store.has_users():
+            return JSONResponse({"error": "accounts are configured"}, status_code=409)
+        body = await request.json()
+        try:
+            who = rename_operator(body.get("id") or "", body.get("name") or "")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, **who})
 
     @router.post("/api/auth/users")
     async def create_user(request: Request):

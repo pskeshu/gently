@@ -58,6 +58,7 @@
   .who[hidden]{display:none}
   .who-pick{font:inherit;font-size:13px;padding:7px 12px;border-radius:999px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);cursor:pointer}
   .who-pick[aria-checked="true"]{border-color:var(--g-accent);background:color-mix(in srgb, var(--g-accent) 10%, var(--g-card));font-weight:600}
+  .who-edit{font:inherit;font-size:13px;border:0;background:transparent;color:inherit;outline:none;width:9em;padding:0}
   .who-name{font:inherit;font-size:14px;width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);margin-bottom:18px}
   .who-name:focus{outline:none;border-color:var(--g-accent)}
   .pick-proj{color:var(--g-faint)}
@@ -198,6 +199,7 @@ let resumable = [];
 // Where to land after the gate: the dashboard, or a tab somebody chose here.
 let after = "";
 let projectNames = {};
+let operatorNames = {};
 const OPERATOR_COOKIE = "gently_operator";
 const COPY = {
   hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
@@ -257,6 +259,7 @@ function paintWhich() {
   list.innerHTML = pick("", "A new session", "Start with an empty dish.")
     + resumable.map(s => {
       const proj = s.project_id ? ` <span class="pick-proj">· in ${esc(projectNames[s.project_id] || String(s.project_id).slice(0, 8))}</span>` : "";
+      const who = (s.operators || []).length ? ` <span class="pick-proj">· ${esc(s.operators.map(o => operatorNames[o] || o).join(", "))}</span>` : "";
       const named = s.name && s.name !== s.session_id && s.name !== "unnamed";
       const title = (named ? esc(s.name) : "Carry on from " + esc(when(s.created_at) || s.session_id))
         + ` <span class="pick-id">${esc(s.session_id)}</span>`;
@@ -266,7 +269,7 @@ function paintWhich() {
       const run = s.run
         ? `<br><span class="pick-run">A run was interrupted, with ${plural(s.run.embryos_going, "embryo")} still going. It can be resumed from Acquisition.</span>`
         : "";
-      return pick(s.session_id, title, esc(parts.join(" · ")) + proj + run);
+      return pick(s.session_id, title, esc(parts.join(" · ")) + proj + who + run);
     }).join("");
 }
 
@@ -281,13 +284,17 @@ async function loadWho() {
   let me = {}, users = { accounts: false, users: [] };
   try { me = await (await fetch("/api/auth/me")).json(); } catch (e) {}
   try { users = await (await fetch("/api/auth/users")).json(); } catch (e) {}
+  (users.users || []).forEach(u => { operatorNames[u.id] = u.name; });
+  paintWhich();
   const who = document.getElementById("who"), box = document.getElementById("who-name");
-  const current = users.accounts ? (me.username || "") : (cookie(OPERATOR_COOKIE) || "");
+  let current = users.accounts ? (me.username || "") : (cookie(OPERATOR_COOKIE) || "");
   const paintWho = () => {
-    const names = users.users || [];
-    who.hidden = !names.length;
-    who.innerHTML = names.map(u =>
-      `<button type="button" class="who-pick" role="radio" data-user="${esc(u)}" aria-checked="${String(current === u)}">${esc(u)}</button>`).join("");
+    const list = users.users || [];
+    who.hidden = !list.length;
+    who.innerHTML = list.map(u =>
+      `<button type="button" class="who-pick" role="radio" data-user="${esc(u.id)}" aria-checked="${String(current === u.id)}" title="Double-click to edit the name">${esc(u.name)}</button>`).join("");
+    const cur = list.find(u => u.id === current);
+    box.placeholder = cur ? cur.name : "Your name";
   };
   paintWho();
   if (users.accounts) {
@@ -301,24 +308,46 @@ async function loadWho() {
   }
   // No accounts: a known name is one click, a new one is typed. Either is
   // remembered by the rig and becomes the cookie the server reads as who.
-  const choose = async (name) => {
+  const choose = async (who) => {
     try {
-      const r = await fetch("/api/auth/operator", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      const r = await fetch("/api/auth/operator", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(who) });
       if (!r.ok) return;
       const d = await r.json();
-      if (!(users.users || []).includes(d.name)) users.users = [d.name, ...(users.users || [])];
-      box.value = ""; box.placeholder = d.name;
-      Array.from(who.querySelectorAll("[data-user]")).forEach(b => b.setAttribute("aria-checked", String(b.dataset.user === d.name)));
-      if (!who.querySelector(`[data-user="${CSS.escape(d.name)}"]`)) {
-        who.hidden = false;
-        who.insertAdjacentHTML("afterbegin", `<button type="button" class="who-pick" role="radio" data-user="${esc(d.name)}" aria-checked="true">${esc(d.name)}</button>`);
-      }
+      if (!(users.users || []).some(u => u.id === d.id)) users.users = [{ id: d.id, name: d.name }, ...(users.users || [])];
+      operatorNames[d.id] = d.name;
+      current = d.id; box.value = "";
+      paintWho(); paintWhich();
     } catch (e) {}
   };
-  if (current) box.placeholder = current;
-  who.addEventListener("click", e => { const b = e.target.closest("[data-user]"); if (b) choose(b.dataset.user); });
-  box.addEventListener("keydown", e => { if (e.key === "Enter" && box.value.trim()) choose(box.value.trim()); });
-  box.addEventListener("blur", () => { if (box.value.trim()) choose(box.value.trim()); });
+  who.addEventListener("click", e => { const b = e.target.closest("[data-user]"); if (b && !b.querySelector("input")) choose({ id: b.dataset.user }); });
+  // A double-click edits the display name in place: Enter keeps it, Escape
+  // leaves it. The id, and so every record, stays as it was.
+  who.addEventListener("dblclick", e => {
+    const b = e.target.closest("[data-user]");
+    if (!b || b.querySelector("input")) return;
+    const id = b.dataset.user, old = operatorNames[id] || id;
+    b.innerHTML = `<input class="who-edit" value="${esc(old)}" maxlength="40" aria-label="Rename ${esc(old)}">`;
+    const inp = b.querySelector("input");
+    inp.focus(); inp.select();
+    const done = () => { b.textContent = old; };
+    inp.addEventListener("keydown", async ev => {
+      if (ev.key === "Escape") { done(); return; }
+      if (ev.key !== "Enter") return;
+      const name = inp.value.trim();
+      if (!name || name === old) { done(); return; }
+      try {
+        const r = await fetch("/api/auth/operator/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name }) });
+        if (!r.ok) { done(); return; }
+        const d = await r.json();
+        operatorNames[d.id] = d.name;
+        (users.users || []).forEach(u => { if (u.id === d.id) u.name = d.name; });
+        paintWho(); paintWhich();
+      } catch (err) { done(); }
+    });
+    inp.addEventListener("blur", done);
+  });
+  box.addEventListener("keydown", e => { if (e.key === "Enter" && box.value.trim()) choose({ name: box.value.trim() }); });
+  box.addEventListener("blur", () => { if (box.value.trim()) choose({ name: box.value.trim() }); });
 }
 
 // The project names, for the session rows' "in …".

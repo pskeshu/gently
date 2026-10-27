@@ -111,6 +111,19 @@ def create_router(server) -> APIRouter:
         body = await request.json()
         return _save_and_record(request, body if isinstance(body, dict) else {}, "Settings")
 
+    def _stamp_operator(request: Request) -> None:
+        """The session being opened remembers who opened it."""
+        from gently.ui.web.auth import current_username
+
+        try:
+            sid = server._current_session_id()
+            store = getattr(server, "gently_store", None)
+            who = current_username(request)
+            if sid and store is not None and who:
+                store.add_session_operator(sid, who)
+        except Exception:
+            logger.debug("could not stamp the operator on the session", exc_info=True)
+
     @router.post("/api/launch/go", dependencies=[Depends(require_control)])
     async def launch_go(request: Request):
         """Submit the launch gate: persist the toggles, mark the gate passed
@@ -125,6 +138,7 @@ def create_router(server) -> APIRouter:
         body = await _safe_json(request)
         prefs = _save_and_record(request, body if isinstance(body, dict) else {}, "launch gate")
         server.gate_passed = True
+        _stamp_operator(request)
         try:
             from gently.ui.web.routes.replay import apply_diagnostic
 

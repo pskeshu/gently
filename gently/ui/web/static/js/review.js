@@ -15,6 +15,7 @@ function ageDays(iso) {
 
 const ReviewApp = {
     sessions: [],
+    operatorNames: {},          // id -> display name, from /api/auth/users
     currentSession: null,
     currentTab: 'embryos',
 
@@ -24,6 +25,7 @@ const ReviewApp = {
         if (this._initialized) return;
         this._initialized = true;
         fetch('/api/tools').then(r => r.json()).then(d => { window.GentlyToolCatalog = d.tools || []; }).catch(() => {});
+        fetch('/api/auth/users').then(r => r.json()).then(d => { (d.users || []).forEach(u => { this.operatorNames[u.id] = u.name; }); }).catch(() => {});
         await this.loadSessions();
         this.updateStatusbar();
 
@@ -347,6 +349,7 @@ const ReviewApp = {
         if (s.bf_frames) parts.push(`${s.bf_frames} brightfield`);
         if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
+        if ((s.operators || []).length) parts.push(s.operators.map(o => this.operatorNames[o] || o).join(', '));
         return parts;
     },
 
