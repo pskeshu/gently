@@ -156,7 +156,7 @@ const HomeApp = (() => {
     function whoChip(s) {
         const ops = s.operators || [];
         if (!ops.length) return '';
-        return `<span class="home-tag" title="Who worked this session">${escapeHtml(ops.map(o => _operatorNames[o] || o).join(', '))}</span>`;
+        return ops.map(o => (typeof Who !== 'undefined' ? Who.chip(o) : escapeHtml(_operatorNames[o] || o))).join(' ');
     }
 
     function projectChip(s) {

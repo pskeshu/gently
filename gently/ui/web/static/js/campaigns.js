@@ -2322,7 +2322,7 @@ function renderOverview() {
         <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
         <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
             <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
-            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
+            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
             <span class="rd-text">${esc(n.body)}</span>
             ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
         </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
@@ -2386,7 +2386,7 @@ const ReadingTool = {
         const since = r.sessions_since || 0, n = ((r.meta && r.meta.sessions) || []).length;
         const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
         if (this.slots.head) this.slots.head.innerHTML = r.text
-            ? `written ${esc(when)} over ${n} session${n === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}`
+            ? `written ${esc(when)} over ${n} session${n === 1 ? '' : 's'}${r.meta.asked_by ? ` · asked by ${Who.chip(r.meta.asked_by)}` : ''}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}`
             : (r.error ? esc(r.error) : 'nothing read yet');
         if (this.slots.actions) {
             this.slots.actions.innerHTML = `<button class="pj-add" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button>`;
@@ -2429,6 +2429,7 @@ const FiguresTool = {
             ${recipes.map(r => `<div class="lf-card" data-recipe="${esc(r.name)}">
                 <div class="lf-bar">
                     <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
+                    ${r.edited && r.edited.by ? Who.chip(r.edited.by, { when: r.edited.at }) : (r.by ? Who.chip(r.by) : '')}
                     <span class="lf-chip fixed"><span>project</span><b>${esc(projLabel)}</b></span>
                     ${chip(r, 'phase', 'any')}${chip(r, 'tag', 'any')}
                     <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${!['condition', 'role'].includes(r.x) ? ' selected' : ''}>a column per session</option><option value="role"${r.x === 'role' ? ' selected' : ''}>a column per role</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
@@ -2572,7 +2573,7 @@ function findingCard(n) {
     const sup = state.openForm === `supersede:${n.id}`;
     const cites = arr => (arr || []).map(b => `<span class="pj-cite">${esc(String(b).slice(0, 12))}</span>`).join(' ');
     return `<div class="pj-entry find${dim ? ' dim' : ''}">
-        <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+        <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
         <div class="pj-body">${esc(n.body)}</div>
         ${(n.basis || []).length ? `<div class="pj-m">basis ${cites(n.basis)}</div>` : ''}
         ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
@@ -2713,7 +2714,7 @@ function renderNotesSection() {
     return `<div class="pj-card">
         <div class="pj-card-head"><h3>Notes</h3><span class="pj-muted">everything in the notebook filed to this project</span></div>
         <div class="pj-stack">${list.length ? list.map(n => `<div class="pj-entry">
-            <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+            <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
             ${n.title ? `<div class="pj-t"><b>${esc(n.title)}</b></div>` : ''}
             <div class="pj-body">${esc(n.body)}</div>
             ${(n.sessions || []).length ? `<div class="pj-m">sessions ${n.sessions.map(s => `<span class="pj-cite">${esc(String(s).slice(0, 8))}</span>`).join(' ')}</div>` : ''}

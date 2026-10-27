@@ -188,6 +188,14 @@ def folder_bytes(
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
+    def _actions(store, sid: str) -> list[dict]:
+        from gently.ui.web.actions import read_actions
+
+        try:
+            return read_actions(store, sid, limit=200)
+        except Exception:
+            return []
+
     def _session_tools(store, sid: str) -> list[str]:
         from gently.tools import session_tools
 
@@ -749,6 +757,9 @@ def create_router(server) -> APIRouter:
             "embryos": embryos,
             "bf_frames": bf_frames,
             "tools": _session_tools(store, session_id),
+            "actions": _actions(store, session_id),
+            "operators": [str(x) for x in (info.get("operators") or [])],
+            "edited": info.get("edited"),
             "events": events,
             "temperature": temperature,
             "removed_embryos": removed,

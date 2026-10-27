@@ -623,7 +623,7 @@ const SettingsHistory = {
                 rows.map(r => {
                     const when = r.at ? new Date(r.at) : null;
                     const t = when && !isNaN(when) ? when.toLocaleString() : this.say(r.at);
-                    const who = [r.by, r.client].filter(Boolean).join(' · ');
+                    const who = [r.by ? (typeof Who !== 'undefined' ? Who.chip(r.by) : this.esc(r.by)) : '', r.client ? this.esc(r.client) : ''].filter(Boolean).join(' · ');
                     return `<tr title="${this.esc(r.via || '')}"><td>${this.esc(t)}</td>` +
                         `<td>${this.esc(r.label || r.key)}<div class="settings-history-key">${this.esc(r.key)}</div></td>` +
                         `<td>${this.esc(this.say(r.old))}</td><td>${this.esc(this.say(r.new))}</td>` +

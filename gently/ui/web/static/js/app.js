@@ -770,6 +770,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // The people, once: every page shows a record's person by name and colour.
+    if (typeof Who !== 'undefined') Who.load();
     // Initialize presence manager (before WebSocket so ID is ready)
     PresenceManager.init();
     // Diagnostics is chosen at the launch gate and costs disk for as long

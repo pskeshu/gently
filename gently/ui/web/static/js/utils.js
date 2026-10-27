@@ -174,3 +174,31 @@ const toggleDropdown = (() => {
         }
     };
 })();
+
+/**
+ * Who — a person as the pages show them: the display name in the person's
+ * own colour, the same colour the presence indicator uses. Ids come from
+ * records (`by`, `operators`, `asked_by`); names and colours from
+ * /api/auth/users, loaded once. An id nobody knows shows as itself, grey.
+ */
+const Who = {
+    people: {},
+    ready: null,
+    load() {
+        if (!this.ready) {
+            this.ready = fetch('/api/auth/users').then(r => r.json()).then(d => {
+                (d.users || []).forEach(u => { this.people[u.id] = u; });
+            }).catch(() => {});
+        }
+        return this.ready;
+    },
+    name(id) { const u = this.people[id]; return u ? u.name : (id || ''); },
+    color(id) { const u = this.people[id]; return (u && u.color) || '#8b949e'; },
+    chip(id, opts = {}) {
+        if (!id) return opts.empty || '';
+        const name = id === 'agent' ? 'agent' : this.name(id);
+        const when = opts.when ? ` <span class="who-when">${escapeHtml(formatDate(opts.when))}</span>` : '';
+        return `<span class="who-chip" style="--who:${escapeHtml(this.color(id))}" title="${escapeHtml(id)}"><i></i>${escapeHtml(name)}</span>${when}`;
+    },
+};
+
