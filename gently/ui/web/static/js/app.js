@@ -290,11 +290,8 @@ const PresenceManager = {
     clientId: null,
     name: null,
     clients: [],
-    // Whether the name is one somebody chose. One that was not follows
-    // what the server says about this browser.
-    chosen: false,
-    // What this browser is, from the server: signed in or not, and whether
-    // it is the microscope's own computer.
+    // What this browser is, from the server: the person the landing page's
+    // cookie names, or the account signed in, or where the browser is.
     me: null,
     ready: null,
 
@@ -308,24 +305,25 @@ const PresenceManager = {
             this.clientId = this.generateId();
             localStorage.setItem('gently-client-id', this.clientId);
         }
+        // The name is the server's to say: the person, the account, the place.
+        // Nothing is kept in this browser; the landing page's cookie is the one record.
+        localStorage.removeItem('gently-user-name');
+        this.name = this.GUEST;
+        this.ready = this.refresh();
 
-        // A name somebody gave wins. The animal names this used to make up
-        // ("Anonymous Eagle") were never chosen by anybody.
-        const saved = localStorage.getItem('gently-user-name');
-        this.chosen = !!saved && !/^anonymous\b/i.test(saved);
-        this.name = this.chosen ? saved : this.GUEST;
+        // Subscribe to presence updates via event bus
+        ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
+    },
 
-        // Without one: the account's name, or where this browser is.
-        this.ready = fetch('/api/auth/me')
+    /** Ask the server who this browser is, and take that name. */
+    refresh() {
+        return fetch('/api/auth/me')
             .then(r => (r.ok ? r.json() : null))
             .catch(() => null)
             .then(me => {
                 this.me = me || {};
-                if (!this.chosen) this.name = this.unnamedName();
+                this.name = this.unnamedName();
             });
-
-        // Subscribe to presence updates via event bus
-        ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
     },
 
     generateId() {
@@ -334,9 +332,10 @@ const PresenceManager = {
         );
     },
 
-    /** What this browser is called when nobody has named it. */
+    /** What this browser is called: the person, the account, then the place. */
     unnamedName() {
         const me = this.me || {};
+        if (me.operator && me.operator.name) return me.operator.name;
         if (me.authenticated && me.username) return me.username;
         return me.unnamed || (me.local ? this.AT_THE_RIG : this.GUEST);
     },
@@ -390,16 +389,23 @@ const PresenceManager = {
             } else {
                 avatar.textContent = this.getInitials(client.name);
             }
-            avatar.setAttribute('data-tooltip', client.is_you
-                ? `${this.shown(client.name)} (you) · click to give your name`
-                : this.shown(client.name));
 
-            // Click on your own avatar to change name
             if (client.is_you) {
-                avatar.style.cursor = 'pointer';
-                avatar.addEventListener('click', () => this.showNamePrompt());
+                // You, by name, and the switch: who is here is never a guess.
+                const you = document.createElement('button');
+                you.type = 'button';
+                you.className = 'presence-you';
+                you.setAttribute('data-tooltip', 'Click to work as someone else');
+                you.appendChild(avatar);
+                const label = document.createElement('span');
+                label.className = 'presence-you-name';
+                label.textContent = this.shown(client.name);
+                you.appendChild(label);
+                you.addEventListener('click', () => this.openSwitcher(you));
+                container.appendChild(you);
+                return;
             }
-
+            avatar.setAttribute('data-tooltip', this.shown(client.name));
             container.appendChild(avatar);
         });
 
@@ -434,14 +440,6 @@ const PresenceManager = {
         return (words[0][0] + words[1][0]).toUpperCase();
     },
 
-    setName(name) {
-        if (!name || name.trim() === '') return;
-
-        this.name = name.trim();
-        localStorage.setItem('gently-user-name', this.name);
-        this.announce();
-    },
-
     /** Tell the others what this browser is called now. Saves nothing. */
     announce() {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
@@ -452,25 +450,62 @@ const PresenceManager = {
         }
     },
 
-    showNamePrompt() {
-        const unnamed = this.unnamedName();
-        const newName = prompt(
-            `Your name, as the others watching see it.\nLeave it blank to go by "${unnamed}".`,
-            this.chosen ? this.name : ''
-        );
+    /** Become a person the rig knows, or a new one; the same door as the landing page. */
+    async become(payload) {
+        const r = await fetch('/api/auth/operator', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+        await this.refresh();
+        this.announce();
+        this.render();
+    },
 
-        if (newName === null) return; // Cancelled
-
-        if (newName.trim() === '') {
-            // Back to what the server says this browser is.
-            localStorage.removeItem('gently-user-name');
-            this.chosen = false;
-            this.name = unnamed;
-            this.announce();
+    /** The switch: the rig's people, and a box for a new name. With accounts, the login. */
+    async openSwitcher(anchor) {
+        document.querySelectorAll('.presence-pop').forEach(p => p.remove());
+        const pop = document.createElement('div');
+        pop.className = 'presence-pop';
+        const title = document.createElement('div');
+        title.className = 'presence-pop-title';
+        title.textContent = `You are ${this.shown(this.name)}`;
+        pop.appendChild(title);
+        const me = this.me || {};
+        if (me.accounts) {
+            const a = document.createElement('a');
+            a.href = '/login';
+            a.className = 'presence-pop-item';
+            a.textContent = 'Sign in as someone else';
+            pop.appendChild(a);
         } else {
-            this.chosen = true;
-            this.setName(newName);
+            let users = [];
+            try { users = (await (await fetch('/api/auth/users')).json()).users || []; } catch (e) { /* the box still works */ }
+            const list = document.createElement('div');
+            list.className = 'presence-pop-list';
+            users.forEach(u => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'presence-pop-item' + (me.operator && me.operator.id === u.id ? ' is-current' : '');
+                b.textContent = u.name;
+                b.addEventListener('click', () => this.become({ id: u.id }).then(() => pop.remove()).catch(err => { title.textContent = err.message; }));
+                list.appendChild(b);
+            });
+            pop.appendChild(list);
+            const box = document.createElement('input');
+            box.className = 'presence-pop-box';
+            box.placeholder = 'Someone new: a name, then Enter';
+            box.maxLength = 40;
+            box.addEventListener('keydown', e => {
+                if (e.key === 'Escape') { pop.remove(); return; }
+                if (e.key === 'Enter' && box.value.trim()) {
+                    this.become({ name: box.value.trim() }).then(() => pop.remove()).catch(err => { title.textContent = err.message; });
+                }
+            });
+            pop.appendChild(box);
         }
+        anchor.parentElement.appendChild(pop);
+        const away = e => { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { pop.remove(); document.removeEventListener('click', away); } };
+        setTimeout(() => document.addEventListener('click', away), 0);
     }
 };
 

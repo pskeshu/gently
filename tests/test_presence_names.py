@@ -56,6 +56,15 @@ class TestWhatTheServerCallsThem:
         assert me["accounts"] is False
         assert me["local"] is True and me["unnamed"] == "At the microscope"
 
+    def test_and_who_the_cookie_names_without_accounts(self, monkeypatch):
+        from gently.ui.web import operators
+
+        monkeypatch.setattr(operators, "names_of", lambda store=None: {"hari": "Hari Shroff"})
+        me = self._me(monkeypatch, local=True, username="hari")
+        assert me["accounts"] is False
+        assert me["operator"] == {"id": "hari", "name": "Hari Shroff"}
+        assert self._me(monkeypatch, local=True)["operator"] is None
+
     def test_and_for_a_guest(self, monkeypatch):
         me = self._me(monkeypatch, local=False)
         assert me["local"] is False and me["unnamed"] == "Guest"
@@ -80,26 +89,33 @@ class TestThePage:
         for animal in ("Koala", "Eagle", "Meerkat"):
             assert animal not in PRESENCE.replace("Anonymous Eagle", "")
 
-    def test_a_name_somebody_gave_wins(self):
-        init = PRESENCE[PRESENCE.index("    init() {") :][:1400]
-        assert "this.chosen = !!saved && !/^anonymous\\b/i.test(saved);" in init
-        assert "if (!this.chosen) this.name = this.unnamedName();" in init
+    def test_nothing_is_kept_in_the_browser(self):
+        # The landing page's cookie is the one record of who is here; the
+        # name this browser once kept for itself is let go.
+        init = PRESENCE[PRESENCE.index("init() {") : PRESENCE.index("refresh() {")]
+        assert "localStorage.removeItem('gently-user-name');" in init
+        assert "localStorage.setItem('gently-user-name'" not in PRESENCE
+        assert "prompt(" not in PRESENCE
 
-    def test_the_account_then_the_place(self):
-        fn = PRESENCE[PRESENCE.index("    unnamedName() {") :][:400]
-        assert fn.index("me.username") < fn.index("me.unnamed")
+    def test_the_person_then_the_account_then_the_place(self):
+        fn = PRESENCE[PRESENCE.index("unnamedName() {") : PRESENCE.index("sendJoin() {")]
+        assert fn.index("me.operator") < fn.index("me.username") < fn.index("me.unnamed")
 
     def test_nobody_is_announced_before_the_server_has_said_who_they_are(self):
         fn = PRESENCE[PRESENCE.index("    sendJoin() {") :][:700]
         assert "(this.ready || Promise.resolve()).then(join, join);" in fn
 
-    def test_blank_goes_back_to_what_the_server_says(self):
-        fn = PRESENCE[PRESENCE.index("    showNamePrompt() {") :][:1100]
-        assert "localStorage.removeItem('gently-user-name');" in fn
-        assert "this.name = unnamed;" in fn
-        # and the name it goes back to is not saved as if it had been chosen
-        blank = fn[fn.index("if (newName.trim() === '')") : fn.index("} else {")]
-        assert "setName(" not in blank and "this.announce();" in blank
+    def test_switching_person_goes_through_the_same_door_as_the_landing_page(self):
+        fn = PRESENCE[PRESENCE.index("async become(") : PRESENCE.index("async openSwitcher(")]
+        assert "fetch('/api/auth/operator'" in fn
+        steps = ("await this.refresh();", "this.announce();", "this.render();")
+        order = [fn.index(step) for step in steps]
+        assert order == sorted(order)
+
+    def test_you_are_shown_by_name_and_the_avatar_is_the_switch(self):
+        render = PRESENCE[PRESENCE.index("render() {") : PRESENCE.index("RIG_ICON:")]
+        assert "label.textContent = this.shown(client.name);" in render
+        assert "you.addEventListener('click', () => this.openSwitcher(you));" in render
 
     def test_whoever_is_at_the_microscope_is_shown_as_it(self):
         assert "if (client.name === this.AT_THE_RIG) {" in PRESENCE
@@ -116,27 +132,30 @@ class TestThePage:
         assert "if (/^anonymous\\b/i.test(author)) return 'Guest';" in fn
 
     @pytest.mark.parametrize(
-        "me,saved,expected",
+        "me,expected",
         [
-            ({"local": True, "unnamed": "At the microscope"}, None, "At the microscope"),
-            ({"local": False, "unnamed": "Guest"}, None, "Guest"),
-            ({"authenticated": True, "username": "operator", "local": True}, None, "operator"),
-            ({"local": True, "unnamed": "At the microscope"}, "Kesavan", "Kesavan"),
+            ({"local": True, "unnamed": "At the microscope"}, "At the microscope"),
+            ({"local": False, "unnamed": "Guest"}, "Guest"),
+            ({"authenticated": True, "username": "operator", "local": True}, "operator"),
+            # the person the landing page's cookie names, by display name
             (
-                {"local": True, "unnamed": "At the microscope"},
-                "Anonymous Eagle",
-                "At the microscope",
+                {
+                    "local": True,
+                    "unnamed": "At the microscope",
+                    "operator": {"id": "kesavan", "name": "Kesavan"},
+                },
+                "Kesavan",
             ),
-            (None, None, "Guest"),
+            (None, "Guest"),
         ],
     )
-    def test_what_a_browser_is_called(self, me, saved, expected, tmp_path):
+    def test_what_a_browser_is_called(self, me, expected, tmp_path):
         node = shutil.which("node")
         if node is None:
             pytest.skip("node is not installed")
         script = tmp_path / "presence.js"
         script.write_text(
-            "const store = " + json.dumps({"gently-user-name": saved} if saved else {}) + ";\n"
+            "const store = {};\n"
             "const localStorage = { getItem: k => (k in store ? store[k] : null),"
             " setItem: (k, v) => { store[k] = v; }, removeItem: k => { delete store[k]; } };\n"
             "const ClientEventBus = { on() {} };\n"
