@@ -101,6 +101,17 @@ def create_router(server) -> APIRouter:
             }
         )
 
+    @router.get("/api/auth/users")
+    async def list_users():
+        """The account names, for choosing who is at the rig. Names only;
+        empty when there are no accounts, which is the single-operator case."""
+        store = get_account_store()
+        if store is None or not store.has_users():
+            return JSONResponse({"accounts": False, "users": []})
+        return JSONResponse(
+            {"accounts": True, "users": [u["username"] for u in store.list_users()]}
+        )
+
     @router.post("/api/auth/users")
     async def create_user(request: Request):
         """Admin-only: provision a new account."""
