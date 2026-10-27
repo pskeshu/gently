@@ -69,7 +69,7 @@ const state = {
     _sessionPickerOpen: false,  // whether the session link picker is visible
     _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
     // The project layer: a root campaign is a project; its page has sections.
-    section: 'between',         // 'between' | 'plan' | 'sessions' | 'findings' | 'notes'
+    section: 'overview',        // 'overview' | 'plan' | 'sessions' | 'findings' | 'notes'
     ledger: null,               // /api/campaigns/{id}/ledger
     projSessions: null,         // /api/sessions?project_id=
     findings: null,             // finding notes of the project
@@ -300,7 +300,7 @@ async function openCampaign(campaignId) {
     state.viewingSnapshotId = null;
     state.planView = 'doc';
     state.typeFilter = '';
-    state.section = 'between';
+    state.section = 'overview';
     state.ledger = state.projSessions = state.findings = state.notes = null;
     state.sectionError = '';
     state.openForm = null;
@@ -425,7 +425,7 @@ function renderCanvas() {
     if (state.section !== 'plan') {
         $canvasContent.innerHTML = renderProjectHeader() + renderSection();
         ProjectTools.mount();
-        Between.mount();
+        Stream.mount();
         return;
     }
     switch (state.planView) {
@@ -2213,7 +2213,7 @@ function renderProjectHeader() {
     const strains = c.strains || [];
     const refs = c.references || [];
     const tabs = [
-        ['between', 'Between', null],
+        ['overview', 'Overview', null],
         ['plan', 'Plan', st.total || null],
         ['sessions', 'Sessions', summary.sessions || null],
         ['findings', 'Findings', null],
@@ -2263,7 +2263,7 @@ function renderSection() {
         case 'sessions': return renderProjSessions();
         case 'findings': return renderFindingsSection();
         case 'notes': return renderNotesSection();
-        default: return renderBetween();
+        default: return renderOverview();
     }
 }
 
@@ -2273,7 +2273,7 @@ async function loadSection() {
     const P = enc(id);
     state.sectionError = '';
     try {
-        if (state.section === 'between') {
+        if (state.section === 'overview') {
             if (!state.catalogue) state.catalogue = (await api('GET', '/api/tools').catch(() => ({}))).tools || [];
             state.ptools = (await api('GET', `/api/campaigns/${P}/tools`)).tools || [];
             state.stream = (await api('GET', `/api/campaigns/${P}/stream`)).notes || [];
@@ -2298,13 +2298,13 @@ function loadingBox(what) {
     return `<div class="pj-card"><div class="pj-loading">${state.sectionError ? esc(state.sectionError) : `Reading ${what}…`}</div></div>`;
 }
 
-// ── between: the stream, and the project's tools on top ───────────────
+// ── overview: the stream, and the project's tools on top ──────────────
 // The stream is the notebook filed to this project or its sessions: lines in
 // the operator's own words, dated, no kind at write time. Above it sit the
 // project-scoped tools the project imported (figures, reading), each mounted
 // on the project the way a session tool mounts on a session.
 
-function renderBetween() {
+function renderOverview() {
     const lines = state.stream, on = state.ptools;
     if (!lines || !on) return loadingBox('the project');
     const cat = (state.catalogue || []).filter(t => t.scope === 'project');
@@ -2350,7 +2350,7 @@ const ProjectTools = {
     },
 };
 
-const Between = {
+const Stream = {
     mount() {
         const box = document.getElementById('stream-line');
         if (!box) return;
