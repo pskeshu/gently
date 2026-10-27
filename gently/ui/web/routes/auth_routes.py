@@ -103,14 +103,37 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/auth/users")
     async def list_users():
-        """The account names, for choosing who is at the rig. Names only;
-        empty when there are no accounts, which is the single-operator case."""
+        """Who can be at the rig: the account names when there are accounts,
+        else the operators this rig has seen, for choosing on the landing page."""
+        from gently.ui.web.operators import list_operators
+
         store = get_account_store()
         if store is None or not store.has_users():
-            return JSONResponse({"accounts": False, "users": []})
+            return JSONResponse(
+                {"accounts": False, "users": list_operators(getattr(server, "gently_store", None))}
+            )
         return JSONResponse(
             {"accounts": True, "users": [u["username"] for u in store.list_users()]}
         )
+
+    @router.post("/api/auth/operator")
+    async def set_operator(request: Request):
+        """Who is here now, on a rig with no accounts: remember the name and
+        set the cookie current_username reads."""
+        from gently.ui.web.auth import OPERATOR_COOKIE
+        from gently.ui.web.operators import remember_operator
+
+        store = get_account_store()
+        if store is not None and store.has_users():
+            return JSONResponse({"error": "accounts are configured; sign in"}, status_code=409)
+        body = await request.json()
+        try:
+            name = remember_operator(body.get("name") or "")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        resp = JSONResponse({"ok": True, "name": name})
+        resp.set_cookie(OPERATOR_COOKIE, name, max_age=365 * 86400, samesite="lax", path="/")
+        return resp
 
     @router.post("/api/auth/users")
     async def create_user(request: Request):
