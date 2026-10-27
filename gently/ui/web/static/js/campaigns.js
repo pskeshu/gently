@@ -2312,7 +2312,7 @@ const LiveFigures = {
                     <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
                     <span class="lf-chip fixed"><span>project</span><b>${esc(projLabel)}</b></span>
                     ${chip(r, 'phase', 'any')}${chip(r, 'tag', 'any')}
-                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${r.x !== 'condition' ? ' selected' : ''}>a column per night</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
+                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${r.x !== 'condition' ? ' selected' : ''}>a column per session</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
                     <button class="pj-add lf-del" data-lf-del="${esc(r.name)}" title="Remove this figure">×</button>
                 </div>
                 <div class="lf-plot" data-plot="${esc(r.name)}"><div class="pj-loading">Pooling…</div></div>
@@ -2367,7 +2367,7 @@ const LiveFigures = {
         el.innerHTML = d.error ? `<div class="pj-none">${esc(d.error)}</div>` : this.svg(r, d, P);
     },
 
-    // minutes on y, a dot per embryo, a column per night or one column, a
+    // minutes on y, a dot per embryo, a column per session or one column, a
     // median tick per column, the pooled median across, Sulston as reference
     svg(r, d, P) {
         const rows = (d.rows || []).filter(x => x[r.y || 'minutes'] != null);
@@ -2475,18 +2475,18 @@ function addForm(form) {
 // ── between: the stream, and the reading on top ───────────────────────
 // The stream is the notebook filed to this project: lines in the operator's
 // own words, dated, no kind at write time. The reading is the agent's prose
-// over the stream, the nights and the pooled rows, written when asked and
-// marked stale when nights have landed since.
+// over the stream, the sessions and the pooled rows, written when asked and
+// marked stale when sessions have landed since.
 
 function renderBetween() {
     const r = state.reading, lines = state.stream;
     if (!r || !lines) return loadingBox('the project');
-    const since = r.nights_since || 0;
+    const since = r.sessions_since || 0;
     const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
     const head = r.text
-        ? `<span class="pj-muted">written ${esc(when)} over ${(r.meta.nights || []).length} night${(r.meta.nights || []).length === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} night${since === 1 ? '' : 's'} since</b>` : ''}</span>`
+        ? `<span class="pj-muted">written ${esc(when)} over ${(r.meta.sessions || []).length} session${(r.meta.sessions || []).length === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}</span>`
         : `<span class="pj-muted">${r.error ? esc(r.error) : 'nothing read yet'}</span>`;
-    const body = r.text ? readingHtml(r.text) : `<div class="pj-none">Ask for a reading once a night or two is filed and the stream has a line in it.</div>`;
+    const body = r.text ? readingHtml(r.text) : `<div class="pj-none">Ask for a reading once a session or two is filed and the stream has a line in it.</div>`;
     const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     return `<div class="pj-card" id="reading">
         <div class="pj-card-head"><h3>Reading</h3>${head}<button class="pj-add rd-btn" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button></div>

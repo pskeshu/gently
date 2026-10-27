@@ -11,7 +11,7 @@ def _project(tmp_path):
     cs = FileContextStore(tmp_path / "agent")
     proj = cs.create_campaign("Twitch to hatch", shorthand="t2h")
     for sid in ("s1", "s2"):
-        store.create_session(sid, name="night", project_id=proj)
+        store.create_session(sid, name="run", project_id=proj)
         sd = store._session_dir(sid)
         for n in (1, 2):
             meta = {"frame": n, "field": 0, "captured_at": f"2026-10-27T0{n}:00:00"}
@@ -21,7 +21,7 @@ def _project(tmp_path):
     return store, cs, proj
 
 
-async def test_agent_pools_rows_with_unique_night_labels(tmp_path):
+async def test_agent_pools_rows_with_unique_session_labels(tmp_path):
     store, cs, proj = _project(tmp_path)
     ctx = {"agent": SimpleNamespace(store=store, context_store=cs)}
     pooled = json.loads(await pool_rows(project="t2h", context=ctx))

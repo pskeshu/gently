@@ -102,14 +102,14 @@ async def pool_rows(
         "matplotlib axes and figure), plt, np, and ref (the tool's reference values by "
         "name, e.g. {'Sulston': 370.0} for twitch_hatch). Do not call plt.show() or "
         "savefig; the tool saves. Returns the figure's URL; put it in a note to keep "
-        "it. Omit code for the default: a strip plot of minutes per night with "
+        "it. Omit code for the default: a strip plot of minutes per session with "
         "medians and the reference line."
     ),
     category=ToolCategory.ANALYSIS,
     examples=[
         ToolExample(
-            user_query="Plot twitch to hatch across the control nights against Sulston",
-            tool_input={"project": "t2h", "title": "Twitch to hatch, control nights"},
+            user_query="Plot twitch to hatch across the control sessions against Sulston",
+            tool_input={"project": "t2h", "title": "Twitch to hatch, control sessions"},
         ),
         ToolExample(
             user_query="Histogram of twitch-to-hatch minutes for the whole project",

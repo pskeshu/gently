@@ -1,11 +1,11 @@
-"""The reading: what the project's nights say, written between nights.
+"""The reading: what the project's sessions say, written between sessions.
 
 The stream is the notebook filed to the project: lines in the operator's own
 words, dated, no kind at write time. The reading is the agent's prose over
-that stream, the nights and the pooled rows, four short sections, every
-claim pointing at a night or a line. It is stored under the project as
+that stream, the sessions and the pooled rows, four short sections, every
+claim pointing at a session or a line. It is stored under the project as
 ``reading.md`` with a ``reading.yaml`` saying when it was written and over
-what, so the page can tell when nights have landed since.
+what, so the page can tell when sessions have landed since.
 
 ponytail: one model call, no streaming, no images; the pot is text. Frames
 join the pot when a reading needs to look at an embryo.
@@ -29,25 +29,25 @@ from gently.ui.web.auth import require_control
 logger = logging.getLogger(__name__)
 
 SYSTEM = """\
-You are the between: the thinking a microscopist does between nights at a diSPIM light-sheet
-imaging C. elegans embryos. You are handed one project, its question, the nights filed under
+You are the between: the thinking a microscopist does between sessions at a diSPIM light-sheet
+imaging C. elegans embryos. You are handed one project, its question, the sessions filed under
 it, the pooled measurements, and the stream, which is what the people at the rig wrote down
 in their own words as they went.
 
 Write four short sections in plain prose, each a paragraph or a few lines, no bullets, no
-headings other than the four words below. Cite nights by name and stream lines by their
+headings other than the four words below. Cite sessions by name and stream lines by their
 date. A sentence that could have been written without this instrument and these embryos
 does not belong; a textbook fact is a basis to compare against, never a finding.
 
-KNOWN. What these nights say about the question, with the numbers.
-DEVIATES. Where a night or an embryo departs from the others, or from the reference given,
+KNOWN. What these sessions say about the question, with the numbers.
+DEVIATES. Where a session or an embryo departs from the others, or from the reference given,
 with magnitude and direction. If nothing does, say so in one line.
 OPEN. What the question still lacks, concretely: which measurement, how many embryos, which
 window. Lines in the stream that nobody has answered belong here.
-NEXT. Up to three nights to run next, each one sentence in the rig's register, then one
+NEXT. Up to three sessions to run next, each one sentence in the rig's register, then one
 clause on why.
 
-If a night does not bear on the question, say so rather than forcing it. Short is right."""
+If a session does not bear on the question, say so rather than forcing it. Short is right."""
 
 ASK = "What do we now know, and what next?"
 
@@ -63,9 +63,9 @@ def _runs(stages: list[tuple[int, str]]) -> str:
     return ", ".join(f"{s} t{a}" if a == b else f"{s} t{a}-{b}" for s, a, b in out)
 
 
-def _night(store: Any, s: dict) -> str:
+def _session_text(store: Any, s: dict) -> str:
     sid = s["session_id"]
-    head = f"NIGHT {s.get('name') or sid} ({sid[:8]}), {str(s.get('created_at') or '')[:16]}"
+    head = f"SESSION {s.get('name') or sid} ({sid[:8]}), {str(s.get('created_at') or '')[:16]}"
     if s.get("tags"):
         head += ", tags " + ", ".join(s["tags"])
     lines = [head]
@@ -84,7 +84,7 @@ def _night(store: Any, s: dict) -> str:
 
 
 def stream_notes(cs: Any, project_id: str, member_ids: set[str]) -> list:
-    """The project's stream: notes filed to it, or to one of its nights."""
+    """The project's stream: notes filed to it, or to one of its sessions."""
     nb = cs.notebook
     seen: dict[str, Any] = {}
     for n in nb.query_notes(project=project_id):
@@ -107,7 +107,7 @@ def pot(store: Any, cs: Any, project_id: str) -> dict:
         parts.append(f"Target: {c.target}")
     parts.append("")
     for s in sorted(sessions, key=lambda s: s.get("created_at") or ""):
-        parts.append(_night(store, s))
+        parts.append(_session_text(store, s))
     for tool in POOLERS:
         p = pool(store, cs, tool, project=c.id)
         rows = [r for r in p["rows"] if r.get("minutes") is not None]
@@ -130,7 +130,7 @@ def pot(store: Any, cs: Any, project_id: str) -> dict:
             parts.append(f"  {when} ({who}) {n.body}")
     return {
         "text": "\n".join(parts),
-        "nights": sorted(members),
+        "sessions": sorted(members),
         "notes": [n.id for n in notes],
         "project": c.id,
     }
@@ -144,17 +144,17 @@ def _paths(cs: Any, project_id: str) -> tuple[Path, Path]:
 
 
 def load_reading(store: Any, cs: Any, project_id: str) -> dict:
-    """The stored reading and how stale it is: nights filed since it was written."""
+    """The stored reading and how stale it is: sessions filed since it was written."""
     md, meta_path = _paths(cs, project_id)
     if not md.is_file():
-        return {"text": None, "meta": None, "nights_since": 0}
+        return {"text": None, "meta": None, "sessions_since": 0}
     meta = _read_yaml(meta_path) or {}
-    covered = set(meta.get("nights") or [])
+    covered = set(meta.get("sessions") or [])
     now = {s["session_id"] for s in store.list_sessions(project_id=project_id)}
     return {
         "text": md.read_text(encoding="utf-8"),
         "meta": meta,
-        "nights_since": len(now - covered),
+        "sessions_since": len(now - covered),
     }
 
 
@@ -179,12 +179,12 @@ def read_project(store: Any, cs: Any, project_id: str, model: str | None = None)
     meta = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
         "model": model,
-        "nights": p["nights"],
+        "sessions": p["sessions"],
         "notes": p["notes"],
     }
     md.write_text(text, encoding="utf-8")
     _write_yaml(meta_path, meta)
-    return {"text": text, "meta": meta, "nights_since": 0}
+    return {"text": text, "meta": meta, "sessions_since": 0}
 
 
 def create_router(server) -> APIRouter:
@@ -205,7 +205,7 @@ def create_router(server) -> APIRouter:
     @router.get("/api/campaigns/{cid}/stream")
     async def get_stream(cid: str):
         """The project's stream as the reading sees it: lines filed to the
-        project, and lines filed to one of its nights."""
+        project, and lines filed to one of its sessions."""
         from gently.harness.memory.notebook import note_to_dict
 
         store, cs, root = _stores(cid)

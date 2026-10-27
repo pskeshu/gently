@@ -43,22 +43,22 @@ def _project(tmp_path):
     return store, cs, proj
 
 
-def test_the_pot_holds_question_nights_rows_and_stream(tmp_path):
+def test_the_pot_holds_question_sessions_rows_and_stream(tmp_path):
     store, cs, proj = _project(tmp_path)
     p = reading.pot(store, cs, proj)
     text = p["text"]
     assert "Does LED dose change time to hatching?" in text
-    assert "NIGHT monday" in text and "NIGHT tuesday" in text
+    assert "SESSION monday" in text and "SESSION tuesday" in text
     assert "bean t1, comma t2" in text
     assert "POOLED twitch_hatch" in text and "median 60" in text and "Sulston 370" in text
-    assert "embryo 3 late" in text and "dim at dose 2" in text  # by project, and by night
-    assert p["nights"] == ["s1", "s2"] and len(p["notes"]) == 2
+    assert "embryo 3 late" in text and "dim at dose 2" in text  # by project, and by session
+    assert p["sessions"] == ["s1", "s2"] and len(p["notes"]) == 2
     assert reading.load_reading(store, cs, proj)["text"] is None
     bodies = [n.body for n in reading.stream_notes(cs, proj, {"s1", "s2"})]
     assert bodies == ["embryo 3 late", "dim at dose 2"]
 
 
-def test_the_reading_is_filed_and_goes_stale_when_a_night_lands(tmp_path, monkeypatch):
+def test_the_reading_is_filed_and_goes_stale_when_a_session_lands(tmp_path, monkeypatch):
     store, cs, proj = _project(tmp_path)
     sent = {}
 
@@ -69,19 +69,15 @@ def test_the_reading_is_filed_and_goes_stale_when_a_night_lands(tmp_path, monkey
                 sent.update(kw)
                 return SimpleNamespace(
                     stop_reason="end_turn",
-                    content=[
-                        SimpleNamespace(
-                            type="text", text="KNOWN. Both nights hatched 60 min after twitching."
-                        )
-                    ],
+                    content=[SimpleNamespace(type="text", text="KNOWN. Both sessions: 60 min.")],
                 )
 
     monkeypatch.setattr("anthropic.Anthropic", lambda: Client())
     out = reading.read_project(store, cs, proj, model="test-model")
     assert out["text"].startswith("KNOWN.") and sent["model"] == "test-model"
-    assert "NIGHT monday" in sent["messages"][0]["content"]
+    assert "SESSION monday" in sent["messages"][0]["content"]
     assert (cs.campaign_dir(proj) / "reading.md").read_text().startswith("KNOWN.")
     got = reading.load_reading(store, cs, proj)
-    assert got["text"] == out["text"] and got["nights_since"] == 0
+    assert got["text"] == out["text"] and got["sessions_since"] == 0
     store.create_session("s3", name="wednesday", project_id=proj)
-    assert reading.load_reading(store, cs, proj)["nights_since"] == 1
+    assert reading.load_reading(store, cs, proj)["sessions_since"] == 1

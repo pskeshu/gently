@@ -1,7 +1,7 @@
 """The pool: a session tool's rows across the sessions a selector picks.
 
 One function for the browser's figures and the agent's tools alike. Each
-row carries its session, a night label that is unique within the pool, and
+row carries its session, a session label that is unique within the pool, and
 the selector's label as its condition. Which tools can be pooled, and how a
 session answers for each, is the table here.
 """
@@ -30,7 +30,7 @@ def pool(
     if pooler is None:
         raise KeyError(f"no pooler for tool {tool!r}; known: {sorted(POOLERS)}")
     picked = select_sessions(store, cs, project=project, phase=phase, tag=tag)
-    # Nights often share a name; a column must not. Add the id when they do.
+    # Sessions often share a name; a column must not. Add the id when they do.
     names = [s.get("name") or s["session_id"] for s in picked["sessions"]]
     rows: list[dict] = []
     sessions: list[dict] = []
