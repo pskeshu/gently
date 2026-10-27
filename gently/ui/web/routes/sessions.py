@@ -733,6 +733,7 @@ def create_router(server) -> APIRouter:
         return {
             "session_id": session_id,
             "project_id": info.get("project_id"),
+            "projects": store.links_of(info),
             "plan_items": _plan_items_by_session(getattr(server, "context_store", None)).get(
                 session_id, []
             ),

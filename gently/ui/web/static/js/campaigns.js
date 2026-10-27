@@ -2189,6 +2189,15 @@ function allItems() {
     return out;
 }
 // "1", "2.3": the numbers the Doc view gives items.
+// The navigator's list and the header's counts: every root tree, re-read after
+// anything that changes what a project holds.
+async function refreshSummaries() {
+    try {
+        const data = await api('GET', '/api/campaigns');
+        state.allCampaigns = data.campaigns || [];
+    } catch (_) { /* the navigator keeps what it had */ }
+}
+
 function projectSummary() {
     const id = state.activeCampaignId;
     return (state.allCampaigns.find(t => t.campaign?.id === id) || {}).project || {};
