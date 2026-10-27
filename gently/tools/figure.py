@@ -1,19 +1,26 @@
 """Figures: what the agent drew for a project, filed under it.
 
-A figure is a file in the campaign's ``figures/`` folder, PNG or SVG, and a
-URL. How it was drawn is the agent's business (``draw_figure`` in
-``gently/app/tools/figure_tools.py`` runs its matplotlib code over pooled
-rows); this module only files and serves.
+A figure is a file in the campaign's ``figures/`` folder. Two kinds live
+there. A PNG the agent drew (``draw_figure`` in
+``gently/app/tools/figure_tools.py``), served as it is. And a recipe,
+``{name}.yaml``: which tool, which phase or tag within the project, what on
+x and y. A recipe is drawn in the browser from the pooled rows each time it
+is shown, so it is as current as the sessions. This module files and serves
+both; it draws nothing.
 """
 
 import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import Response
 
+from gently.core.file_store import _read_yaml, _write_yaml
+from gently.ui.web.auth import require_control
+
 MEDIA = {".png": "image/png", ".svg": "image/svg+xml"}
+RECIPE_FIELDS = ("title", "tool", "phase", "tag", "x", "y")
 
 
 def slug(text: str) -> str:
@@ -59,6 +66,33 @@ def create_router(server) -> APIRouter:
                 for p in files
             ]
         }
+
+    @router.get("/api/campaigns/{cid}/recipes")
+    async def list_recipes(cid: str):
+        d = _dir(cid)
+        out = []
+        for p in sorted(d.glob("*.yaml")) if d.is_dir() else []:
+            doc = _read_yaml(p) or {}
+            out.append({"name": p.stem, **{k: doc.get(k) for k in RECIPE_FIELDS}})
+        return {"recipes": out}
+
+    @router.put("/api/campaigns/{cid}/recipes/{name}", dependencies=[Depends(require_control)])
+    async def put_recipe(cid: str, name: str, body: dict = Body(default={})):  # noqa: B008
+        d = _dir(cid)
+        d.mkdir(parents=True, exist_ok=True)
+        doc = {k: body.get(k) for k in RECIPE_FIELDS}
+        doc["tool"] = doc["tool"] or "twitch_hatch"
+        doc["x"] = doc["x"] or "session_name"
+        doc["y"] = doc["y"] or "minutes"
+        _write_yaml(d / f"{slug(name)}.yaml", doc)
+        return {"name": slug(name), **doc}
+
+    @router.delete("/api/campaigns/{cid}/recipes/{name}", dependencies=[Depends(require_control)])
+    async def delete_recipe(cid: str, name: str):
+        path = _dir(cid) / f"{slug(name)}.yaml"
+        if path.is_file():
+            path.unlink()
+        return {"ok": True}
 
     @router.get("/api/campaigns/{cid}/figures/{file}")
     async def get_figure(cid: str, file: str):
