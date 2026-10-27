@@ -2494,7 +2494,7 @@ function renderBetween() {
     </div>
     <div class="pj-card" id="stream">
         <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; the reading sorts out what it was</span></div>
-        <div class="rd-add"><input id="stream-line" placeholder="One line. Enter files it to this project." autocomplete="off"><select id="stream-night" title="A night this line is about, if one"><option value="">no night</option>${(state.projSessions || []).map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.session_id)} · ${esc(formatDate(s.created_at))}</option>`).join('')}</select></div>
+        <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
         <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
             <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
             ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
@@ -2518,12 +2518,11 @@ const Between = {
         if (!reading) return;
         reading.querySelector('[data-rd="read"]').onclick = () => this.read();
         const box = stream.querySelector('#stream-line');
-        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim(), stream.querySelector('#stream-night').value); };
-        if (!state.projSessions) api('GET', `/api/sessions?project_id=${enc(state.activeCampaignId)}`).then(d => { state.projSessions = d.sessions || []; renderCanvas(); }).catch(() => {});
+        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim()); };
     },
-    async add(text, sid) {
+    async add(text) {
         try {
-            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId], sessions: sid ? [sid] : [] });
+            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId] });
         } catch (err) { showErr(err.message); return; }
         await loadSection();
     },
