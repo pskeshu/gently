@@ -2093,6 +2093,17 @@ function showErr(el, msg) {
     box.textContent = msg;
 }
 
+function projectNameOf(id) {
+    const t = (state.allCampaigns || []).find(t => (t.campaign || {}).id === id);
+    return t ? (t.campaign.shorthand || t.campaign.description || id) : String(id).slice(0, 8);
+}
+
+function roleOf(s) {
+    const link = (s.projects || []).find(x => x.id === state.activeCampaignId);
+    const r = link && link.role;
+    return r ? `<span class="pj-chip">${esc(r)}</span>` : '<span class="pj-muted">—</span>';
+}
+
 function fields(form) {
     const out = {};
     if (!form) return out;
@@ -2420,7 +2431,7 @@ const FiguresTool = {
                     <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
                     <span class="lf-chip fixed"><span>project</span><b>${esc(projLabel)}</b></span>
                     ${chip(r, 'phase', 'any')}${chip(r, 'tag', 'any')}
-                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${r.x !== 'condition' ? ' selected' : ''}>a column per session</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
+                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${!['condition', 'role'].includes(r.x) ? ' selected' : ''}>a column per session</option><option value="role"${r.x === 'role' ? ' selected' : ''}>a column per role</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
                     <button class="pj-add lf-del" data-lf-del="${esc(r.name)}" title="Remove this figure">×</button>
                 </div>
                 <div class="lf-plot" data-plot="${esc(r.name)}"><div class="pj-loading">Pooling…</div></div>
@@ -2488,7 +2499,7 @@ const FiguresTool = {
     svg(r, d) {
         const rows = (d.rows || []).filter(x => x[r.y || 'minutes'] != null);
         if (!rows.length) return '<div class="pj-none">No rows yet under this selection. Mark embryos in a session\'s Tools tab.</div>';
-        const yk = r.y || 'minutes', xk = r.x === 'condition' ? 'condition' : 'session_name';
+        const yk = r.y || 'minutes', xk = ['condition', 'role'].includes(r.x) ? r.x : 'session_name';
         const cols = [...new Set(rows.map(x => String(x[xk])))];
         const median = a => { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
         const all = rows.map(x => x[yk]), pooled = median(all), ref = d.sulston_min;
@@ -2631,11 +2642,12 @@ function renderProjSessions() {
     const adding = state.openForm === 'add-session';
     const addForm = adding ? `<div class="pj-form" data-form="add-session">
             ${state.unfiled === null ? '<span class="pj-muted">Finding sessions…</span>'
-            : `<select data-field="session_id"><option value="">a session…</option>${state.unfiled.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)} · ${esc(formatDate(s.created_at))}</option>`).join('')}</select>`}
-            <div class="pj-act"><button data-action="session-add-submit">File it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
+            : `<select data-field="session_id"><option value="">a session…</option>${state.unfiled.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)} · ${esc(formatDate(s.created_at))}${s.project_id ? ' · in ' + esc(projectNameOf(s.project_id)) : ''}</option>`).join('')}</select>
+            <select data-field="role"><option value="">— no role —</option>${['control', 'test', 'reference', 'pilot'].map(r => `<option value="${r}">${r}</option>`).join('')}</select>`}
+            <div class="pj-act"><button data-action="session-add-submit">Link it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
     const body = rows.length === 0
         ? '<div class="pj-none">No session is filed under this project yet.</div>'
-        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead><tbody>
+        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Role</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead><tbody>
         ${rows.map(s => {
             const [cls, label] = endedOf(s);
             const run = runOf(s) || {};
@@ -2660,6 +2672,7 @@ function renderProjSessions() {
             return `<tr class="${s.active ? 'live' : ''}" data-action="session-go" data-session-id="${esc(s.session_id)}" title="Open in the Sessions tab">
                 <td class="num">${esc(fmtWhen(s.created_at))}</td>
                 <td><div class="name">${esc(s.name || s.suggested_name || s.session_id)}</div><div class="sub">${plans}${plans && sentence ? ' · ' : ''}${esc(sentence)}</div></td>
+                <td>${roleOf(s)}</td>
                 <td>${holds}</td>
                 <td><span class="ended"><span class="pj-dot ${cls}"></span>${label}</span></td>
                 <td class="sig">${signals}</td>
@@ -3082,16 +3095,19 @@ async function projectAction(action, el, e) {
                 state.openForm = 'add-session';
                 state.unfiled = null;
                 renderCanvas();
-                let list = (await api('GET', '/api/sessions?unfiled=1')).sessions || [];
-                if (!list.length) list = (await api('GET', '/api/sessions')).sessions || [];
-                state.unfiled = list.filter(s => s.project_id !== cid);
+                // Every session not yet linked here, unfiled ones first; a
+                // session informs several projects, so its home is no bar.
+                const list = (await api('GET', '/api/sessions')).sessions || [];
+                state.unfiled = list
+                    .filter(s => !(s.projects || []).some(l => l.id === cid))
+                    .sort((a, b) => (a.project_id ? 1 : 0) - (b.project_id ? 1 : 0));
                 renderCanvas();
                 return;
             }
             case 'session-add-submit': {
                 const d = fields(el.closest('.pj-form'));
                 if (!d.session_id) return;
-                await api('POST', `/api/sessions/${enc(d.session_id)}/project`, { campaign_id: cid });
+                await api('POST', `/api/sessions/${enc(d.session_id)}/project`, { campaign_id: cid, role: d.role || null });
                 state.openForm = null;
                 await reloadProject();
                 return;

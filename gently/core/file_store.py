@@ -521,15 +521,18 @@ class FileStore:
         self, *, project_id: str | None = None, unfiled: bool = False
     ) -> list[SessionInfo]:
         """Return all sessions ordered by last_active descending. With
-        ``project_id`` only that project's; with ``unfiled`` only those in none."""
+        ``project_id`` only those linked to it, in any role; with ``unfiled``
+        only those linked to none. Each carries its links as ``projects``."""
         sessions = []
         for sid in self._index:
             info = self.get_session(sid)
             if info is None:
                 continue
-            if project_id is not None and info.get("project_id") != project_id:
+            links = self.links_of(info)
+            info["projects"] = links
+            if project_id is not None and not any(x.get("id") == project_id for x in links):
                 continue
-            if unfiled and info.get("project_id"):
+            if unfiled and links:
                 continue
             sessions.append(info)
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
@@ -582,9 +585,33 @@ class FileStore:
         _write_yaml(yaml_path, data)
         return data
 
-    def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
-        """File a session under a project (a root campaign id), or under none.
-        The one truth of membership; everything else reads it from here."""
+    # ------------------------------------------------------------------
+    # Membership: the one record of which projects a session informs
+    # ------------------------------------------------------------------
+    # ``projects:`` in session.yaml is a list of links, each {id, phase, role,
+    # by, at}. A session informs several questions and informs them in
+    # different roles, so the record is many-to-many with a role per link.
+    # ``project_id`` is kept beside it as the home, the first link, for the
+    # readers that take one id; it is rewritten from the list by the same
+    # writers and never written on its own. A session.yaml written before the
+    # list existed reads as one link to its project_id.
+
+    @staticmethod
+    def links_of(data: Mapping[str, Any] | None) -> list[dict]:
+        """The links a session.yaml holds, with the old scalar read as one."""
+        if not data:
+            return []
+        if "projects" in data:
+            return [dict(x) for x in (data.get("projects") or []) if isinstance(x, dict)]
+        pid = data.get("project_id")
+        if not pid:
+            return []
+        return [{"id": pid, "phase": None, "role": None, "by": None, "at": data.get("created_at")}]
+
+    def session_links(self, session_id: str) -> list[dict]:
+        return self.links_of(self.get_session(session_id))
+
+    def _write_links(self, session_id: str, links: list[dict]) -> SessionInfo | None:
         sd = self._session_dir(session_id)
         if sd is None or not sd.exists():
             return None
@@ -592,9 +619,63 @@ class FileStore:
         data = _read_yaml(yaml_path)
         if data is None:
             return None
-        data["project_id"] = project_id or None
+        data["projects"] = links
+        data["project_id"] = links[0]["id"] if links else None
         _write_yaml(yaml_path, data)
         return data
+
+    def link_session(
+        self,
+        session_id: str,
+        project_id: str,
+        *,
+        phase: str | None = None,
+        role: str | None = None,
+        by: str | None = None,
+        home: bool = False,
+    ) -> list[dict]:
+        """Link a session to a project, once per project: a second call with
+        the same project updates its phase or role when given and keeps the
+        rest. ``home`` moves the link to the front, which is what the single
+        ``project_id`` reads. Returns the links as written."""
+        links = self.session_links(session_id)
+        found = next((x for x in links if x.get("id") == project_id), None)
+        if found is None:
+            found = {
+                "id": project_id,
+                "phase": phase,
+                "role": role,
+                "by": by,
+                "at": _now(),
+            }
+            links.append(found)
+        else:
+            if phase is not None:
+                found["phase"] = phase
+            if role is not None:
+                found["role"] = role
+        if home:
+            links = [found] + [x for x in links if x is not found]
+        self._write_links(session_id, links)
+        return links
+
+    def unlink_session(self, session_id: str, project_id: str | None = None) -> list[dict]:
+        """Take a session out of one project, or out of all of them. Writes an
+        explicit empty list, which is how a deliberate unfiling differs from a
+        session that was never filed."""
+        links = self.session_links(session_id)
+        links = [] if project_id is None else [x for x in links if x.get("id") != project_id]
+        self._write_links(session_id, links)
+        return links
+
+    def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
+        """The old scalar door, kept for its callers: make ``project_id`` the
+        home, or clear every link when None."""
+        if project_id:
+            self.link_session(session_id, project_id, home=True)
+        else:
+            self.unlink_session(session_id)
+        return self.get_session(session_id)
 
     def set_session_tags(self, session_id: str, tags: list[str]) -> SessionInfo | None:
         """Tag a session: short words in its ``session.yaml`` that a selector

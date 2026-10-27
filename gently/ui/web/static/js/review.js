@@ -164,7 +164,8 @@ const ReviewApp = {
 
     openFiling(sid, where) {
         const s = this.sessions.find(x => x.session_id === sid) || this.currentSession || {};
-        this._filing = { sid, where: where || 'list', choice: s.project_id || '', also: '', newName: '', error: '' };
+        const link = (s.projects || []).find(x => x.id === s.project_id) || {};
+        this._filing = { sid, where: where || 'list', choice: s.project_id || '', also: '', newName: '', role: link.role || '', error: '' };
         this.renderSessionList();
         if (this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
     },
@@ -179,6 +180,7 @@ const ReviewApp = {
     filingChoice(value) { if (this._filing) this._filing.choice = value; },
     filingAlso(value) { if (this._filing) this._filing.also = value; },
     filingNewName(value) { if (this._filing) this._filing.newName = value; },
+    filingRole(value) { if (this._filing) this._filing.role = value; },
 
     renderFilingPopover(s) {
         const f = this._filing;
@@ -201,6 +203,8 @@ const ReviewApp = {
             ${opts || '<div class="session-plan-served">No projects yet.</div>'}
             <label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="__new__" ${newOn ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> New project…</label>
             ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)" autofocus>` : ''}
+            <div class="filing-also"><span>As</span>
+                <select onchange="ReviewApp.filingRole(this.value)">${['', 'control', 'test', 'reference', 'pilot'].map(r => `<option value="${r}" ${f.role === r ? 'selected' : ''}>${r || '— no role —'}</option>`).join('')}</select></div>
             ${alsoOpts ? `<div class="filing-also"><span>Also serves a plan item elsewhere?</span>
                 <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${alsoOpts}</select></div>` : ''}
             ${f.error ? `<div class="filing-err">${esc(f.error)}</div>` : ''}
@@ -231,8 +235,8 @@ const ReviewApp = {
                 const made = await this._post('/api/campaigns', { description: name });
                 campaignId = made.campaign.id;
             }
-            if (campaignId && campaignId !== s.project_id) {
-                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, move: !!s.project_id });
+            if (campaignId) {
+                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, move: !!s.project_id && campaignId !== s.project_id, role: f.role || null });
             }
             if (f.also) {
                 const [, itemCampaign, itemId] = f.also.split('|');

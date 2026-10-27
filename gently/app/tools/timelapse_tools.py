@@ -103,6 +103,7 @@ async def start_adaptive_timelapse(
                         session_id,
                         stop_condition,
                         interval_seconds,
+                        store=getattr(agent, "store", None),
                     )
                     if linked:
                         result += f"\n(Auto-linked to plan item: '{linked}')"

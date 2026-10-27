@@ -52,8 +52,13 @@ def select_sessions(
                 None,
             )
         label.append(c.shorthand or c.description if c is not None else phase)
-        linked = cs.get_sessions_for_campaign(c.id) if c is not None else []
-        narrow({si.session_id for si in linked})
+        found: set[str] = set()
+        if c is not None:
+            for s in store.list_sessions():
+                if any(x.get("phase") == c.id for x in (s.get("projects") or [])):
+                    found.add(s["session_id"])
+            found |= {si.session_id for si in cs.get_sessions_for_campaign(c.id)}
+        narrow(found)
     if tag:
         label.append(tag)
         narrow({s["session_id"] for s in store.list_sessions() if tag in (s.get("tags") or [])})

@@ -753,7 +753,7 @@ def create_router(server) -> APIRouter:
     async def link_session_to_item(campaign_id: str, item_id: str, request: Request):
         """Link a session to a plan item (appends) and record it against the campaign."""
         cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
+        _resolve(cs, campaign_id)
         item = cs.get_plan_item(item_id)
         if not item:
             raise HTTPException(status_code=404, detail="Plan item not found")
@@ -763,8 +763,9 @@ def create_router(server) -> APIRouter:
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
 
-        cs.link_plan_item_session(item_id, session_id)
-        cs.link_session_campaign(session_id, campaign.id)
+        from gently.app.filing import file_session_under
+
+        file_session_under(_gently_store(), cs, session_id, item.campaign_id, item_id)
 
         # Re-fetch item so session_ids reflects the just-added link; then filter
         # exactly as get_item_detail does — POST and GET return the same scope.
