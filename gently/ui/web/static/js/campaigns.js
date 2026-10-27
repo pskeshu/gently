@@ -69,7 +69,7 @@ const state = {
     _sessionPickerOpen: false,  // whether the session link picker is visible
     _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
     // The project layer: a root campaign is a project; its page has sections.
-    section: 'ledger',          // 'ledger' | 'plan' | 'sessions' | 'findings' | 'notes'
+    section: 'between',         // 'between' | 'plan' | 'sessions' | 'findings' | 'notes'
     ledger: null,               // /api/campaigns/{id}/ledger
     projSessions: null,         // /api/sessions?project_id=
     findings: null,             // finding notes of the project
@@ -300,7 +300,7 @@ async function openCampaign(campaignId) {
     state.viewingSnapshotId = null;
     state.planView = 'doc';
     state.typeFilter = '';
-    state.section = 'ledger';
+    state.section = 'between';
     state.ledger = state.projSessions = state.findings = state.notes = null;
     state.sectionError = '';
     state.openForm = null;
@@ -425,6 +425,7 @@ function renderCanvas() {
     if (state.section !== 'plan') {
         $canvasContent.innerHTML = renderProjectHeader() + renderSection();
         LiveFigures.mount();
+        Between.mount();
         return;
     }
     switch (state.planView) {
@@ -2177,21 +2178,6 @@ function allItems() {
     return out;
 }
 // "1", "2.3": the numbers the Doc view gives items.
-function itemNumbers() {
-    const m = {};
-    const t = treeOf();
-    (t.items || []).forEach((it, i) => { m[it.id] = String(i + 1); });
-    (t.children || []).forEach((ch, p) => (ch.items || []).forEach((it, i) => { m[it.id] = `${p + 1}.${i + 1}`; }));
-    return m;
-}
-
-async function refreshSummaries() {
-    try {
-        const data = await api('GET', '/api/campaigns');
-        state.allCampaigns = data.campaigns || [];
-    } catch (_) { /* the navigator keeps what it had */ }
-}
-
 function projectSummary() {
     const id = state.activeCampaignId;
     return (state.allCampaigns.find(t => t.campaign?.id === id) || {}).project || {};
@@ -2216,7 +2202,7 @@ function renderProjectHeader() {
     const strains = c.strains || [];
     const refs = c.references || [];
     const tabs = [
-        ['ledger', 'Ledger', null],
+        ['between', 'Between', null],
         ['plan', 'Plan', st.total || null],
         ['sessions', 'Sessions', summary.sessions || null],
         ['findings', 'Findings', null],
@@ -2266,7 +2252,7 @@ function renderSection() {
         case 'sessions': return renderProjSessions();
         case 'findings': return renderFindingsSection();
         case 'notes': return renderNotesSection();
-        default: return renderLedger();
+        default: return renderBetween();
     }
 }
 
@@ -2276,7 +2262,10 @@ async function loadSection() {
     const P = enc(id);
     state.sectionError = '';
     try {
-        if (state.section === 'ledger') state.ledger = await api('GET', `/api/campaigns/${P}/ledger`);
+        if (state.section === 'between') {
+            state.reading = await api('GET', `/api/campaigns/${P}/reading`).catch(err => ({ error: err.message }));
+            state.stream = (await api('GET', `/api/campaigns/${P}/stream`)).notes || [];
+        }
         else if (state.section === 'sessions') state.projSessions = (await api('GET', `/api/sessions?project_id=${P}`)).sessions || [];
         else if (state.section === 'findings') {
             state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
@@ -2412,31 +2401,6 @@ function dotFor(status) {
     return { completed: 'done', in_progress: 'live', skipped: 'skip', blocked: 'err', proposed: 'plan' }[status] || 'plan';
 }
 
-function itemEntry(it, suggest, blocked) {
-    const nums = state._nums || {};
-    const spec = specSummary(it.imaging_spec);
-    const runs = (it.session_ids || []).length;
-    const menuOpen = state.openForm === `menu:${it.id}`;
-    const byId = Object.fromEntries(allItems().map(x => [x.id, x]));
-    const waits = blocked ? (it.depends_on || []).map(d => `<button class="pj-link" data-action="item-undepend" data-id="${esc(it.id)}" data-dep="${esc(d)}" title="Remove this dependency">${esc((byId[d] && byId[d].title) || d.slice(0, 8))} ×</button>`) : [];
-    const open = state.selectedItemId === it.id;
-    return `<div class="pj-entry pj-clickable${suggest ? ' suggest' : ''}${blocked ? ' dim' : ''}${menuOpen ? ' menu-open' : ''}${open ? ' is-open' : ''}" data-item-id="${esc(it.id)}" data-action="select-item" data-id="${esc(it.id)}" title="${open ? 'Close the details' : 'Open the details'}">
-        ${blocked ? `<div class="pj-m"><span class="pj-chip">waits on</span> ${waits.join(', ') || 'another item'}</div>` : ''}
-        <div class="pj-tools"><button data-action="select-item" data-id="${esc(it.id)}" title="Open in the inspector">✎</button><button data-action="item-menu" data-id="${esc(it.id)}" title="More">…</button></div>
-        ${menuOpen ? itemMenu(it) : ''}
-        ${suggest ? '<div class="pj-t"><span class="pj-chip ai">suggested by the agent</span></div>' : ''}
-        <div class="pj-t">${suggest ? '' : `<span class="pj-dot ${dotFor(it.status)}"></span>`}<span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
-        ${it.description && it.description !== it.title ? `<div class="pj-m pj-sentence">${esc(it.description.slice(0, 200))}</div>` : ''}
-        ${spec ? `<div class="pj-m">${esc(spec)}${specProvenanceNote(it.imaging_spec)}</div>` : ''}
-        ${draftBlock(it)}
-        ${state.transcribeMsg && state.transcribeMsg.id === it.id ? `<div class="pj-m pj-transcribed">${esc(state.transcribeMsg.text)}</div>` : ''}
-        <div class="pj-m"><span class="pj-chip ${it.origin === 'manual' ? '' : 'ai'}">${it.origin === 'manual' ? 'manual' : 'agent'}</span>${runs ? ` ${runs} run${runs !== 1 ? 's' : ''}` : ' not run yet'}${canSetUp(it) ? ` · <button class="pj-link" data-action="item-setup" data-id="${esc(it.id)}" title="Open Devices › Operate with this acquisition filled in; Start files the run under this item">Set up on Devices</button>` : ''}</div>
-        ${suggest ? `<div class="pj-act"><button data-action="item-accept" data-id="${esc(it.id)}">Accept</button><button data-action="select-item" data-id="${esc(it.id)}">Edit</button><button data-action="item-remove" data-id="${esc(it.id)}">Dismiss</button></div>` : ''}
-    </div>`;
-}
-
-// Gently's draft of the spec, as the card tells it: drafting, drafted (accept,
-// edit, ask again), unavailable (no model), accepted.
 function draftBlock(it) {
     const d = it.imaging_spec && it.imaging_spec.draft;
     const tactics = (it.imaging_spec && it.imaging_spec.tactics) || [];
@@ -2476,33 +2440,6 @@ function itemMenu(it) {
     </div>`;
 }
 
-function expEntry(e) {
-    const st = e.status;
-    const cls = st === 'confirmed' ? 'done' : st === 'surprised' ? 'err' : st === 'expired' ? 'skip' : 'live';
-    const mark = st === 'confirmed' ? '<span class="ok">✓ met</span>'
-        : st === 'surprised' ? '<span class="miss">✕ missed</span>'
-        : st === 'expired' ? '<span class="pj-muted">expired</span>' : 'pending';
-    return `<div class="pj-entry">
-        <div class="pj-t"><span class="pj-dot ${cls}"></span><b>${esc(e.target)} ${esc(e.prediction)}</b></div>
-        <div class="pj-v">by ${esc(fmtWhen(e.expected_time))}${e.uncertainty ? ` ${esc(e.uncertainty)}` : ''} · ${mark}</div>
-        ${e.basis ? `<div class="pj-m">basis: ${esc(e.basis)}</div>` : ''}
-        ${st === 'pending' ? `<div class="pj-act"><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="confirmed">✓ met</button><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="surprised">✕ missed</button></div>` : ''}
-    </div>`;
-}
-
-function outcomeEntry(it) {
-    const nums = state._nums || {};
-    const editing = state.openForm === `outcome:${it.id}`;
-    const runs = (it.session_ids || []).length;
-    return `<div class="pj-entry">
-        <div class="pj-t"><span class="pj-dot ${it.status === 'skipped' ? 'skip' : 'done'}"></span><span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
-        ${editing
-        ? `<div class="pj-form"><textarea data-field="outcome" rows="2">${esc(it.outcome || '')}</textarea><div class="pj-act"><button data-action="outcome-save" data-id="${esc(it.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>`
-        : `<div class="pj-v pj-editable" data-action="form-open" data-form="outcome:${esc(it.id)}" title="Edit the outcome">${esc(it.outcome || (it.status === 'skipped' ? 'skipped' : 'done, no outcome written yet'))}</div>`}
-        <div class="pj-m">${esc(it.status)} · ${runs} run${runs !== 1 ? 's' : ''}</div>
-    </div>`;
-}
-
 function findingCard(n) {
     const dim = n.status === 'superseded';
     const sup = state.openForm === `supersede:${n.id}`;
@@ -2514,17 +2451,6 @@ function findingCard(n) {
         ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
         ${dim ? '' : `<div class="pj-act">${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="confirmed">Confirm</button>` : ''}<button data-action="form-open" data-form="supersede:${esc(n.id)}">Supersede</button>${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="superseded">Dismiss</button>` : ''}</div>`}
         ${sup ? `<div class="pj-form"><textarea data-field="body" rows="3" placeholder="The finding that replaces it"></textarea><div class="pj-act"><button data-action="note-supersede" data-id="${esc(n.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
-    </div>`;
-}
-
-function questionEntry(q) {
-    const open = q.status === 'open' || q.status === 'investigating';
-    const answering = state.openForm === `answer:${q.id}`;
-    return `<div class="pj-entry${open ? '' : ' dim'}">
-        <div class="pj-t"><span class="pj-dot ${open ? 'plan' : 'done'}"></span><b>${esc(q.content)}</b></div>
-        <div class="pj-m">${open ? 'open' : 'answered'}${q.resolution ? ` · ${esc(q.resolution)}` : ''}${q.session_id ? ` · from session ${esc(String(q.session_id).slice(0, 8))}` : ''}</div>
-        ${open && !answering ? `<div class="pj-act"><button data-action="form-open" data-form="answer:${esc(q.id)}">Answer</button><button data-action="q-resolve" data-id="${esc(q.id)}" data-resolution="closed">Close</button></div>` : ''}
-        ${answering ? `<div class="pj-form"><input data-field="resolution" placeholder="The answer"><div class="pj-act"><button data-action="q-resolve" data-id="${esc(q.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
     </div>`;
 }
 
@@ -2546,29 +2472,70 @@ function addForm(form) {
     return `<div class="pj-form" data-form="${form}">${body}<div class="pj-act"><button data-action="form-submit" data-form="${form}">Add</button><button data-action="form-close">Cancel</button></div></div>`;
 }
 
-function renderLedger() {
-    const L = state.ledger;
-    if (!L) return loadingBox('the ledger');
-    state._nums = itemNumbers();
-    const col = (title, hint, body, add) =>
-        `<div class="pj-col"><h4>${title} <small>${hint}</small></h4>${body || '<div class="pj-none">nothing yet</div>'}${add}</div>`;
-    const next = (L.in_progress || []).map(i => itemEntry(i, false)).join('')
-        + (L.next || []).map(i => itemEntry(i, false)).join('')
-        + (L.proposed || []).map(i => itemEntry(i, true)).join('')
-        + (L.blocked || []).map(i => itemEntry(i, false, true)).join('');
-    const predicted = (L.predicted || []).slice().reverse().map(expEntry).join('');
-    const measured = (L.measured?.outcomes || []).map(outcomeEntry).join('') + (L.measured?.findings || []).map(findingCard).join('');
-    const open = (L.open || []).map(questionEntry).join('') + (L.answered || []).slice(-3).map(questionEntry).join('');
-    return `<div class="pj-card">
-        <div class="pj-card-head"><h3>Ledger</h3><span class="pj-muted">what is next, what was predicted, what was measured, what is open</span></div>
-        <div class="pj-ledger">
-            ${col('Next', 'unblocked plan items, then what waits', next, addRow('item', 'item', 'by hand; the agent’s own arrive as suggestions'))}
-            ${col('Predicted', 'expectations', predicted, addRow('expectation', 'expectation', 'yours or the agent’s; ✓ ✕ to resolve'))}
-            ${col('Measured', 'outcomes and findings', measured, addRow('finding', 'finding', 'a claim; the agent’s wait for your confirm'))}
-            ${col('Open', 'questions', open, addRow('question', 'question', 'answer or close in place'))}
-        </div>
+// ── between: the stream, and the reading on top ───────────────────────
+// The stream is the notebook filed to this project: lines in the operator's
+// own words, dated, no kind at write time. The reading is the agent's prose
+// over the stream, the nights and the pooled rows, written when asked and
+// marked stale when nights have landed since.
+
+function renderBetween() {
+    const r = state.reading, lines = state.stream;
+    if (!r || !lines) return loadingBox('the project');
+    const since = r.nights_since || 0;
+    const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
+    const head = r.text
+        ? `<span class="pj-muted">written ${esc(when)} over ${(r.meta.nights || []).length} night${(r.meta.nights || []).length === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} night${since === 1 ? '' : 's'} since</b>` : ''}</span>`
+        : `<span class="pj-muted">${r.error ? esc(r.error) : 'nothing read yet'}</span>`;
+    const body = r.text ? readingHtml(r.text) : `<div class="pj-none">Ask for a reading once a night or two is filed and the stream has a line in it.</div>`;
+    const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return `<div class="pj-card" id="reading">
+        <div class="pj-card-head"><h3>Reading</h3>${head}<button class="pj-add rd-btn" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button></div>
+        <div class="rd-body">${body}</div>
+    </div>
+    <div class="pj-card" id="stream">
+        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; the reading sorts out what it was</span></div>
+        <div class="rd-add"><input id="stream-line" placeholder="One line. Enter files it to this project." autocomplete="off"><select id="stream-night" title="A night this line is about, if one"><option value="">no night</option>${(state.projSessions || []).map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.session_id)} · ${esc(formatDate(s.created_at))}</option>`).join('')}</select></div>
+        <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
+            <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
+            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
+            <span class="rd-text">${esc(n.body)}</span>
+            ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
+        </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
     </div>`;
 }
+
+function readingHtml(text) {
+    // Four words open four paragraphs; anything else is a paragraph as written.
+    return text.split(/\n\s*\n/).map(p => {
+        const m = p.match(/^\s*(KNOWN|DEVIATES|OPEN|NEXT)\.?\s*([\s\S]*)$/);
+        return m ? `<p><b class="rd-k">${m[1]}</b> ${esc(m[2]).replace(/\n/g, '<br>')}</p>` : `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+}
+
+const Between = {
+    mount() {
+        const reading = document.getElementById('reading'), stream = document.getElementById('stream');
+        if (!reading) return;
+        reading.querySelector('[data-rd="read"]').onclick = () => this.read();
+        const box = stream.querySelector('#stream-line');
+        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim(), stream.querySelector('#stream-night').value); };
+        if (!state.projSessions) api('GET', `/api/sessions?project_id=${enc(state.activeCampaignId)}`).then(d => { state.projSessions = d.sessions || []; renderCanvas(); }).catch(() => {});
+    },
+    async add(text, sid) {
+        try {
+            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId], sessions: sid ? [sid] : [] });
+        } catch (err) { showErr(err.message); return; }
+        await loadSection();
+    },
+    async read() {
+        const btn = document.querySelector('#reading [data-rd="read"]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+        try {
+            state.reading = await api('POST', `/api/campaigns/${enc(state.activeCampaignId)}/reading`, {});
+        } catch (err) { state.reading = { ...(state.reading || {}), error: err.message }; }
+        renderCanvas();
+    },
+};
 
 // ── the plan bar: today's canvas, plus the ways to add to it ──
 
