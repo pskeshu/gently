@@ -21,6 +21,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from gently.app.brightfield import overview_frames
 from gently.core.file_store import _read_yaml, _write_yaml
 from gently.tools import TOOLS, session_tools, set_session_tools
+from gently.tools.select import select_sessions
 from gently.ui.web.auth import require_control
 
 # Sulston et al. 1983, at 20 °C: twitching ~ 430 min, hatching ~ 800 min
@@ -78,6 +79,18 @@ def report(rows: list[dict], frames: list[dict], temps: list[dict]) -> list[dict
     return out
 
 
+def session_report(store: Any, sid: str) -> list[dict]:
+    """A session's rows with their minutes and temperature; empty when the
+    session has no annotation file."""
+    sd = store._session_dir(sid)
+    if sd is None:
+        return []
+    rows = _read_yaml(Path(sd) / FILE) or []
+    if not rows:
+        return []
+    return report(rows, overview_frames(store, sid), store.read_temperature_log(sid) or [])
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -118,11 +131,50 @@ def create_router(server) -> APIRouter:
         sd = _sd(store, sid)
         rows = _read_yaml(sd / FILE) or []
         frames = overview_frames(store, sid)
-        temps = store.read_temperature_log(sid) or []
         return {
             "frames": frames,
             "rows": rows,
-            "report": report(rows, frames, temps),
+            "report": session_report(store, sid),
+            "sulston_min": SULSTON_TWITCH_TO_HATCH_MIN,
+        }
+
+    @router.get("/api/tools/twitch_hatch/pool")
+    async def pool_twitch_hatch(
+        project: str | None = None, phase: str | None = None, tag: str | None = None
+    ):
+        """Every session the selector picks, its rows pooled, each row carrying
+        the session and the selector's label as its condition."""
+        store = _store()
+        picked = select_sessions(
+            store, getattr(server, "context_store", None), project=project, phase=phase, tag=tag
+        )
+        rows: list[dict] = []
+        sessions: list[dict] = []
+        for s in picked["sessions"]:
+            sid = s["session_id"]
+            rep = session_report(store, sid)
+            sessions.append(
+                {
+                    "session_id": sid,
+                    "name": s.get("name") or sid,
+                    "created_at": s.get("created_at"),
+                    "n": len(rep),
+                }
+            )
+            for i, r in enumerate(rep, 1):
+                rows.append(
+                    {
+                        **r,
+                        "n": i,
+                        "session_id": sid,
+                        "session_name": s.get("name") or sid,
+                        "condition": picked["label"],
+                    }
+                )
+        return {
+            "label": picked["label"],
+            "sessions": sessions,
+            "rows": rows,
             "sulston_min": SULSTON_TWITCH_TO_HATCH_MIN,
         }
 

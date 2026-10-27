@@ -286,6 +286,7 @@ def create_router(server) -> APIRouter:
                     {
                         "session_id": sid,
                         "project_id": s.get("project_id"),
+                        "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
                         **extra,
                         "name": s.get("name") or sid,
