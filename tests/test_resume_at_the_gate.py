@@ -169,10 +169,13 @@ class TestTheGate:
         )
         assert "resume" not in GATE[GATE.index("const state = {") :][:60]
 
-    def test_nothing_to_carry_on_with_nothing_is_shown(self):
-        assert 'id="which" hidden' in GATE
-        assert "if (!resumable.length) { box.hidden = true; return; }" in GATE
-        assert ".which[hidden]{display:none}" in GATE
+    def test_a_new_session_is_always_offered_and_nothing_else_when_nothing_to_carry_on(self):
+        # The session column is never empty: a new session is the first choice,
+        # and the sessions there is something to carry on with follow it.
+        assert 'id="which" hidden' not in GATE
+        painter = GATE[GATE.index("function paintWhich()") : GATE.index("function cookie(")]
+        assert 'pick("", "A new session"' in painter
+        assert "box.hidden" not in painter
 
     def test_the_session_is_resumed_before_the_microscope_starts(self):
         click = GATE[GATE.index('document.getElementById("go").addEventListener("click"') :]

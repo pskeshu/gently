@@ -43,14 +43,35 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
     background:radial-gradient(1000px 520px at 50% -14%, var(--g-spot), transparent 60%), var(--g-bg);
     display:flex;justify-content:center;align-items:center;padding:40px 20px;transition:background .2s,color .2s}
-  .wrap{width:100%;max-width:460px}
+  .wrap{width:100%;max-width:1180px}
   .head{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:8px}
+  /* Three columns: who and what, the sessions, the projects. On a narrow
+     window they stack, in that order. */
+  .cols{display:grid;grid-template-columns:minmax(300px,380px) minmax(320px,1fr) minmax(280px,360px);gap:28px;align-items:start;justify-content:center}
+  @media (max-width:980px){.cols{grid-template-columns:1fr;max-width:460px;margin:0 auto}}
+  .col-cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--g-faint);margin:0 2px 10px}
+  .col-link{font-size:12px;color:var(--g-muted);background:none;border:0;padding:0;cursor:pointer;font:inherit}
+  .col-link:hover{color:var(--g-accent)}
+  .col-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+  /* who's here */
+  .who{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px}
+  .who-pick{font:inherit;font-size:13px;padding:7px 12px;border-radius:999px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);cursor:pointer}
+  .who-pick[aria-checked="true"]{border-color:var(--g-accent);background:color-mix(in srgb, var(--g-accent) 10%, var(--g-card));font-weight:600}
+  .who-name{font:inherit;font-size:14px;width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);margin-bottom:18px}
+  .who-name:focus{outline:none;border-color:var(--g-accent)}
+  /* projects */
+  .proj{display:block;width:100%;text-align:left;font:inherit;color:inherit;padding:11px 13px;border:1px solid var(--g-border);border-radius:11px;background:var(--g-card);margin-bottom:7px;cursor:pointer;transition:.15s}
+  .proj:hover{border-color:var(--g-accent)}
+  .proj-t{display:block;font-size:14px;font-weight:600}
+  .proj-q{display:block;font-size:12.5px;color:var(--g-muted);margin-top:2px;line-height:1.4}
+  .proj-s{display:block;font-size:11.5px;color:var(--g-faint);margin-top:4px}
+  .pick-proj{color:var(--g-faint)}
   .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--g-accent);position:relative;
     background:radial-gradient(circle at 50% 50%, var(--g-spot), transparent 70%)}
   .mark::after{content:"";position:absolute;inset:0;margin:auto;width:9px;height:9px;border-radius:50%;
     background:var(--g-accent);box-shadow:0 0 12px var(--g-accent)}
   .wordmark{font-size:22px;font-weight:700;letter-spacing:-.015em}
-  .cap{text-align:center;color:var(--g-muted);font-size:14px;margin:0 0 30px}
+  .cap{text-align:center;color:var(--g-muted);font-size:14px;margin:0 0 26px}
   .opt{display:flex;align-items:center;gap:15px;padding:18px;border:1px solid var(--g-border);border-radius:13px;
     background:var(--g-card);margin-bottom:13px;transition:.15s;cursor:pointer}
   .opt:hover{border-color:var(--g-faint)}
@@ -95,8 +116,7 @@
      to carry on with. Quieter than the two switches above it: most days the
      answer is a new one, and that is what is chosen until somebody says
      otherwise. */
-  .which{margin-top:20px}
-  .which[hidden]{display:none}
+  .which{margin-top:0}
   .which-cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--g-faint);margin:0 2px 8px}
   .pick{display:flex;align-items:flex-start;gap:11px;width:100%;text-align:left;font:inherit;color:inherit;
     padding:11px 13px;border:1px solid var(--g-border);border-radius:11px;background:var(--g-card);
@@ -122,60 +142,60 @@
     <div class="head"><span class="mark"></span><span class="wordmark">Gently</span></div>
     <p class="cap">What are we doing today?</p>
 
-    <div class="opt" id="opt-hardware" data-key="hardware" role="switch" aria-checked="true" tabindex="0" aria-labelledby="hw-t">
-      <div class="ic" aria-hidden="true">
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M12 13v6M8 21h8M6 9a6 6 0 0 1 8-5.6"/></svg>
-      </div>
-      <div class="txt">
-        <div class="t" id="hw-t">Microscope</div>
-        <div class="s" id="hw-s"></div>
-      </div>
-      <span class="sw" aria-hidden="true"></span>
-    </div>
+    <div class="cols">
+      <div class="col">
+        <div class="col-cap">Who's here</div>
+        <div id="who" class="who" hidden></div>
+        <input class="who-name" id="who-name" hidden placeholder="Your name" autocomplete="name" maxlength="40">
 
-    <div class="opt" id="opt-agent" data-key="agent" role="switch" aria-checked="true" tabindex="0" aria-labelledby="ag-t">
-      <div class="ic" aria-hidden="true">
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>
-      </div>
-      <div class="txt">
-        <div class="t" id="ag-t">Assistant</div>
-        <div class="s" id="ag-s"></div>
-      </div>
-      <span class="sw" aria-hidden="true"></span>
-    </div>
+        <div class="col-cap">Today</div>
+        <div class="opt" id="opt-hardware" data-key="hardware" role="switch" aria-checked="true" tabindex="0" aria-labelledby="hw-t">
+          <div class="ic" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+          </div>
+          <div class="txt"><div class="t" id="hw-t">Microscope</div><div class="s" id="hw-s"></div></div>
+          <span class="sw" aria-hidden="true"></span>
+        </div>
+        <div class="opt" id="opt-agent" data-key="agent" role="switch" aria-checked="true" tabindex="0" aria-labelledby="ag-t">
+          <div class="ic" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2"/><path d="M12 19v2"/><path d="M5 12H3"/><path d="M21 12h-2"/><path d="m12 7 1.5 3.5L17 12l-3.5 1.5L12 17l-1.5-3.5L7 12l3.5-1.5Z"/></svg>
+          </div>
+          <div class="txt"><div class="t" id="ag-t">Assistant</div><div class="s" id="ag-s"></div></div>
+          <span class="sw" aria-hidden="true"></span>
+        </div>
+        <div class="opt opt-quiet" id="opt-diagnostic" data-key="diagnostic" role="switch" aria-checked="false" tabindex="0" aria-labelledby="dg-t">
+          <div class="ic" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </div>
+          <div class="txt"><div class="t" id="dg-t">Advanced diagnostics</div><div class="s" id="dg-s"></div></div>
+          <span class="sw" aria-hidden="true"></span>
+        </div>
 
-    <div class="opt opt-quiet" id="opt-diagnostic" data-key="diagnostic" role="switch" aria-checked="false" tabindex="0" aria-labelledby="dg-t">
-      <div class="ic" aria-hidden="true">
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+        <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
+        <div class="status" id="status"></div>
+        <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
+          <button type="button" class="foot-version" id="foot-version"
+                  title="Copy this build id — paste it into bug reports">v{{ gently_version }}</button></div>
+        {% if gently_build_date %}
+        <div class="foot foot-when">built <time id="foot-when" datetime="{{ gently_build_date }}"
+            title="Date of the commit in the build id above">{{ gently_build_date }}</time></div>
+        {% endif %}
       </div>
-      <div class="txt">
-        <div class="t" id="dg-t">Advanced diagnostics</div>
-        <div class="s" id="dg-s"></div>
+
+      <div class="col">
+        <div class="col-head"><div class="col-cap">Session</div><button type="button" class="col-link" id="all-sessions" title="Open the Sessions tab">all sessions &rsaquo;</button></div>
+        {# Which session: a new one, or one of the last that holds something.
+           Filled from /api/sessions/resumable. #}
+        <div class="which" id="which" role="radiogroup" aria-label="Session">
+          <div id="which-list"></div>
+        </div>
       </div>
-      <span class="sw" aria-hidden="true"></span>
-    </div>
 
-    {# Which session. Filled from /api/sessions/resumable, and hidden when
-       there is nothing to carry on with. #}
-    <div class="which" id="which" hidden role="radiogroup" aria-labelledby="which-cap">
-      <div class="which-cap" id="which-cap">Session</div>
-      <div id="which-list"></div>
+      <div class="col">
+        <div class="col-head"><div class="col-cap">Projects</div><button type="button" class="col-link" id="all-projects" title="Open the Projects tab">all projects &rsaquo;</button></div>
+        <div id="proj-list"><div class="pick-s">Loading…</div></div>
+      </div>
     </div>
-
-    <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
-    <div class="status" id="status"></div>
-    <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
-      <button type="button" class="foot-version" id="foot-version"
-              title="Copy this build id — paste it into bug reports">v{{ gently_version }}</button></div>
-    {% if gently_build_date %}
-    {# How old the tree in the build id is, on its own line. The id says WHICH
-       commit is running; the version literal cannot say how old it is, since
-       "v1.0.0.dev1" is the same string for every commit after the tag. It sits
-       outside the copy button on purpose — that button copies its own
-       textContent, and a bug report wants the id, not the date. #}
-    <div class="foot foot-when">built <time id="foot-when" datetime="{{ gently_build_date }}"
-        title="Date of the commit in the build id above">{{ gently_build_date }}</time></div>
-    {% endif %}
   </div>
 
 <script>
@@ -184,6 +204,10 @@ const state = { hardware: true, agent: true, diagnostic: false };
 // Carrying on is something somebody decides, each time.
 let resume = null;
 let resumable = [];
+// Where to land after the gate: the dashboard, or a tab somebody chose here.
+let after = "";
+let projectNames = {};
+const OPERATOR_COOKIE = "gently_operator";
 const COPY = {
   hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
   agent:    { on: "Help find embryos and watch the timelapse.", off: "Off — manual control only." },
@@ -231,10 +255,7 @@ function when(iso) {
 function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
 
 function paintWhich() {
-  const box = document.getElementById("which");
   const list = document.getElementById("which-list");
-  if (!resumable.length) { box.hidden = true; return; }
-  box.hidden = false;
   const pick = (id, title, sub) =>
     `<button type="button" class="pick" role="radio" data-session="${esc(id)}"
              aria-checked="${String((resume || "") === id)}">
@@ -244,6 +265,7 @@ function paintWhich() {
      </button>`;
   list.innerHTML = pick("", "A new session", "Start with an empty dish.")
     + resumable.map(s => {
+      const proj = s.project_id ? ` <span class="pick-proj">· in ${esc(projectNames[s.project_id] || String(s.project_id).slice(0, 8))}</span>` : "";
       const named = s.name && s.name !== s.session_id && s.name !== "unnamed";
       const title = (named ? esc(s.name) : "Carry on from " + esc(when(s.created_at) || s.session_id))
         + ` <span class="pick-id">${esc(s.session_id)}</span>`;
@@ -253,13 +275,71 @@ function paintWhich() {
       const run = s.run
         ? `<br><span class="pick-run">A run was interrupted, with ${plural(s.run.embryos_going, "embryo")} still going. It can be resumed from Acquisition.</span>`
         : "";
-      return pick(s.session_id, title, esc(parts.join(" · ")) + run);
+      return pick(s.session_id, title, esc(parts.join(" · ")) + proj + run);
     }).join("");
 }
 
+// Who is at the rig. With accounts: the names, and the one signed in is
+// marked; another name goes through the login. Without: a name box, kept
+// in a cookie the server reads as who filed, noted and annotated.
+function cookie(name) {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+async function loadWho() {
+  let me = {}, users = { accounts: false, users: [] };
+  try { me = await (await fetch("/api/auth/me")).json(); } catch (e) {}
+  try { users = await (await fetch("/api/auth/users")).json(); } catch (e) {}
+  const who = document.getElementById("who"), box = document.getElementById("who-name");
+  if (users.accounts) {
+    who.hidden = false;
+    who.innerHTML = users.users.map(u =>
+      `<button type="button" class="who-pick" role="radio" data-user="${esc(u)}" aria-checked="${String(me.username === u)}">${esc(u)}</button>`).join("");
+    who.addEventListener("click", e => {
+      const b = e.target.closest("[data-user]");
+      if (!b || b.getAttribute("aria-checked") === "true") return;
+      window.location.href = "/login";
+    });
+  } else {
+    box.hidden = false;
+    box.value = cookie(OPERATOR_COOKIE) || "";
+    box.addEventListener("input", () => {
+      document.cookie = OPERATOR_COOKIE + "=" + encodeURIComponent(box.value.trim()) + "; path=/; max-age=31536000; SameSite=Lax";
+    });
+  }
+}
+
+// The projects: the question, how many sessions, when it last ran.
+async function loadProjects() {
+  const el = document.getElementById("proj-list");
+  try {
+    const d = await (await fetch("/api/campaigns")).json();
+    const roots = (d.campaigns || []).map(t => ({ ...(t.campaign || {}), summary: t.project || {} }));
+    roots.forEach(c => { projectNames[c.id] = c.shorthand || c.description || c.id; });
+    if (!roots.length) { el.innerHTML = '<div class="pick-s">No project yet. Make one from a session, or on the Projects tab.</div>'; return; }
+    el.innerHTML = roots.map(c => {
+      const n = c.summary.sessions || 0;
+      const last = c.summary.last_run_at ? "last " + ago(c.summary.last_run_at) : "no session yet";
+      return `<button type="button" class="proj" data-project="${esc(c.id)}" title="Open this project">
+        <span class="proj-t">${esc(c.shorthand || c.description || c.id)}</span>
+        ${c.shorthand && c.description ? `<span class="proj-q">${esc(c.description)}</span>` : ""}
+        <span class="proj-s">${esc(plural(n, "session"))} · ${esc(last)}</span></button>`;
+    }).join("");
+    el.addEventListener("click", e => {
+      const b = e.target.closest("[data-project]");
+      if (!b) return;
+      after = "#plans:" + b.dataset.project;
+      document.getElementById("go").click();
+    });
+  } catch (e) { el.innerHTML = '<div class="pick-s">Projects could not be read.</div>'; }
+  paintWhich();
+}
+document.getElementById("all-sessions").addEventListener("click", () => { after = "#sessions"; document.getElementById("go").click(); });
+document.getElementById("all-projects").addEventListener("click", () => { after = "#plans"; document.getElementById("go").click(); });
+
 async function loadResumable() {
   try {
-    const r = await fetch("/api/sessions/resumable?limit=3");
+    const r = await fetch("/api/sessions/resumable?limit=8");
     if (r.ok) {
       const d = await r.json();
       resumable = Array.isArray(d.sessions) ? d.sessions : [];
@@ -291,6 +371,8 @@ async function loadPrefs() {
   } catch (e) { /* keep defaults */ }
   paint();
   loadResumable();
+  loadWho();
+  loadProjects();
 }
 
 function toggle(key) { state[key] = !state[key]; paint(); }
@@ -340,8 +422,9 @@ document.getElementById("go").addEventListener("click", async () => {
     const b = await r.json().catch(() => ({}));
     if (b.error) setStatus("Microscope: " + b.error, "err");
     // Hand off immediately — the dashboard follows the boot from here.
-    // preserve any flag that survived the gate redirect (e.g. ?atrium=1)
-    window.location.href = "/" + location.search;
+    // preserve any flag that survived the gate redirect (e.g. ?atrium=1),
+    // and land where somebody chose here: a tab, a project, or the dashboard.
+    window.location.href = "/" + location.search + after;
   } catch (e) {
     setStatus("Something went wrong: " + e, "err");
     btn.disabled = false; paint();
@@ -413,11 +496,5 @@ document.getElementById("go").addEventListener("click", async () => {
 
 loadPrefs();
 </script>
-{% if replay_enabled %}
-<!-- Session replay: the gate is part of the session too (which toggles the
-     operator chose, hesitation before Start) — record it like every page. -->
-<script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
-<script src="/static/js/replay-recorder.js" defer data-gently-replay-fidelity="{{ replay_fidelity }}"></script>
-{% endif %}
 </body>
 </html>

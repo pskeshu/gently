@@ -392,6 +392,7 @@ def create_router(server) -> APIRouter:
                 if held is None:
                     continue
                 held["active"] = sid == active
+                held["project_id"] = (store.get_session(sid) or {}).get("project_id")
                 out.append(held)
                 if len(out) >= limit:
                     break
