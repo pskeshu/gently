@@ -397,3 +397,28 @@ def _write(folder: Path, doc: dict) -> None:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def overview_frames(store: Any, session_id: str) -> list[dict]:
+    """A session's brightfield overview frames, oldest first: which field,
+    which frame, and the clock it was taken at. One listing for the session
+    detail and for the tools that annotate those frames."""
+    try:
+        recs = store.list_snapshots(session_id, "bf") or []
+    except Exception:
+        recs = []
+    frames: list[dict] = []
+    for rec in recs:
+        fp = rec.get("file_path")
+        if not fp:
+            continue
+        meta = rec.get("metadata") or {}
+        frames.append(
+            {
+                "stem": Path(fp).stem,
+                "frame": meta.get("frame"),
+                "field": meta.get("field"),
+                "captured_at": meta.get("captured_at") or rec.get("captured_at"),
+            }
+        )
+    return frames

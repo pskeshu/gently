@@ -188,6 +188,14 @@ def folder_bytes(
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
+    def _session_tools(store, sid: str) -> list[str]:
+        from gently.tools import session_tools
+
+        try:
+            return session_tools(store, sid)
+        except Exception:
+            return []
+
     def _file_store():
         """The live FileStore (current Gently3 layout), via the agent."""
         bridge = getattr(server, "agent_bridge", None)
@@ -715,6 +723,7 @@ def create_router(server) -> APIRouter:
             "acquisition": acquisition,
             "embryos": embryos,
             "bf_frames": bf_frames,
+            "tools": _session_tools(store, session_id),
             "events": events,
             "temperature": temperature,
             "removed_embryos": removed,
@@ -777,26 +786,12 @@ def create_router(server) -> APIRouter:
                     ],
                 }
             )
-        frames: list[dict] = []
-        try:
-            recs = store.list_snapshots(sid, "bf") or []
-        except Exception:
-            recs = []
-        for rec in recs:
-            fp = rec.get("file_path")
-            if not fp:
-                continue
-            stem = Path(fp).stem
-            meta = rec.get("metadata") or {}
-            frames.append(
-                {
-                    "stem": stem,
-                    "frame": meta.get("frame"),
-                    "captured_at": meta.get("captured_at") or rec.get("captured_at"),
-                    "url": f"/api/sessions/{sid}/snapshot/{stem}.png",
-                }
-            )
-        return embryos, frames
+        from gently.app.brightfield import overview_frames
+
+        return embryos, [
+            {**f, "url": f"/api/sessions/{sid}/snapshot/{f['stem']}.png"}
+            for f in overview_frames(store, sid)
+        ]
 
     def _add_dose(embryos: list[dict], state: dict) -> None:
         """Each embryo's light dose so far against its budget, from the
