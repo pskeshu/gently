@@ -424,7 +424,7 @@ function renderCanvas() {
     $canvasContent.classList.add('pj-with-header');
     if (state.section !== 'plan') {
         $canvasContent.innerHTML = renderProjectHeader() + renderSection();
-        LiveFigures.mount();
+        ProjectTools.mount();
         Between.mount();
         return;
     }
@@ -2263,15 +2263,12 @@ async function loadSection() {
     state.sectionError = '';
     try {
         if (state.section === 'between') {
-            state.reading = await api('GET', `/api/campaigns/${P}/reading`).catch(err => ({ error: err.message }));
+            if (!state.catalogue) state.catalogue = (await api('GET', '/api/tools').catch(() => ({}))).tools || [];
+            state.ptools = (await api('GET', `/api/campaigns/${P}/tools`)).tools || [];
             state.stream = (await api('GET', `/api/campaigns/${P}/stream`)).notes || [];
         }
         else if (state.section === 'sessions') state.projSessions = (await api('GET', `/api/sessions?project_id=${P}`)).sessions || [];
-        else if (state.section === 'findings') {
-            state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
-            state.figures = (await api('GET', `/api/campaigns/${P}/figures`).catch(() => ({}))).figures || [];
-            state.recipes = (await api('GET', `/api/campaigns/${P}/recipes`).catch(() => ({}))).recipes || [];
-        }
+        else if (state.section === 'findings') state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
         else if (state.section === 'notes') state.notes = (await api('GET', `/api/notebook/notes?project=${P}`)).notes || [];
         else return;
     } catch (err) {
@@ -2290,23 +2287,134 @@ function loadingBox(what) {
     return `<div class="pj-card"><div class="pj-loading">${state.sectionError ? esc(state.sectionError) : `Reading ${what}…`}</div></div>`;
 }
 
-// ── live figures: a recipe drawn in the browser from the pooled rows ──────
+// ── between: the stream, and the project's tools on top ───────────────
+// The stream is the notebook filed to this project or its sessions: lines in
+// the operator's own words, dated, no kind at write time. Above it sit the
+// project-scoped tools the project imported (figures, reading), each mounted
+// on the project the way a session tool mounts on a session.
+
+function renderBetween() {
+    const lines = state.stream, on = state.ptools;
+    if (!lines || !on) return loadingBox('the project');
+    const cat = (state.catalogue || []).filter(t => t.scope === 'project');
+    const avail = cat.filter(t => !on.includes(t.name));
+    const title = n => ((cat.find(t => t.name === n) || {}).title || n);
+    const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return `${on.map(n => `<div class="pj-card pj-tool" data-ptool="${esc(n)}">
+        <div class="pj-card-head"><h3>${esc(title(n))}</h3><span class="pj-muted" data-ptool-head></span><span class="pj-tool-actions" data-ptool-actions></span><button class="pj-add pj-tool-drop" data-ptool-drop="${esc(n)}" title="Take this tool off the project; its files stay">remove</button></div>
+        <div class="pj-tool-body" data-ptool-body><div class="pj-loading">Loading…</div></div>
+    </div>`).join('')}
+    <div class="pj-card" id="stream">
+        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; the reading sorts out what it was</span>
+            ${avail.length ? `<span class="pj-tool-actions"><select id="ptool-pick">${avail.map(t => `<option value="${esc(t.name)}" title="${esc(t.summary)}">${esc(t.title)}</option>`).join('')}</select><button class="pj-add" data-ptool-import="1">+ tool</button></span>` : ''}
+        </div>
+        <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
+        <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
+            <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
+            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
+            <span class="rd-text">${esc(n.body)}</span>
+            ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
+        </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
+    </div>`;
+}
+
+const ProjectTools = {
+    mount() {
+        const pid = state.activeCampaignId;
+        document.querySelectorAll('.pj-tool[data-ptool]').forEach(card => {
+            const tool = (window.GentlyTools || {})[card.dataset.ptool];
+            const body = card.querySelector('[data-ptool-body]');
+            card.querySelector('[data-ptool-drop]').onclick = () => this.set((state.ptools || []).filter(n => n !== card.dataset.ptool));
+            if (!tool) { body.innerHTML = '<div class="pj-none">This tool has no pane on this page.</div>'; return; }
+            tool.mount(body, pid, { head: card.querySelector('[data-ptool-head]'), actions: card.querySelector('[data-ptool-actions]') });
+        });
+        const imp = document.querySelector('[data-ptool-import]');
+        if (imp) imp.onclick = () => this.set([...(state.ptools || []), document.getElementById('ptool-pick').value]);
+    },
+    async set(tools) {
+        try {
+            state.ptools = (await api('PUT', `/api/campaigns/${enc(state.activeCampaignId)}/tools`, { tools })).tools;
+        } catch (err) { showErr(err.message); return; }
+        renderCanvas();
+    },
+};
+
+const Between = {
+    mount() {
+        const box = document.getElementById('stream-line');
+        if (!box) return;
+        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim()); };
+    },
+    async add(text) {
+        try {
+            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId] });
+        } catch (err) { showErr(err.message); return; }
+        await loadSection();
+    },
+};
+
+// ── the reading, as a project tool ─────────────────────────────────────
+
+function readingHtml(text) {
+    // Four words open four paragraphs; anything else is a paragraph as written.
+    return text.split(/\n\s*\n/).map(p => {
+        const m = p.match(/^\s*(KNOWN|DEVIATES|OPEN|NEXT)\.?\s*([\s\S]*)$/);
+        return m ? `<p><b class="rd-k">${m[1]}</b> ${esc(m[2]).replace(/\n/g, '<br>')}</p>` : `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+}
+
+const ReadingTool = {
+    el: null, pid: null, slots: {},
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        let r;
+        try { r = await api('GET', `/api/campaigns/${enc(pid)}/reading`); } catch (err) { r = { error: err.message }; }
+        this.render(r);
+    },
+    render(r) {
+        const since = r.sessions_since || 0, n = ((r.meta && r.meta.sessions) || []).length;
+        const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
+        if (this.slots.head) this.slots.head.innerHTML = r.text
+            ? `written ${esc(when)} over ${n} session${n === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}`
+            : (r.error ? esc(r.error) : 'nothing read yet');
+        if (this.slots.actions) {
+            this.slots.actions.innerHTML = `<button class="pj-add" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button>`;
+            this.slots.actions.querySelector('[data-rd]').onclick = () => this.read();
+        }
+        this.el.innerHTML = `<div class="rd-body">${r.text ? readingHtml(r.text) : '<div class="pj-none">Ask for a reading once a session or two is filed and the stream has a line in it.</div>'}</div>`;
+    },
+    async read() {
+        const btn = this.slots.actions && this.slots.actions.querySelector('[data-rd]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+        let r;
+        try { r = await api('POST', `/api/campaigns/${enc(this.pid)}/reading`, {}); } catch (err) { r = { error: err.message }; }
+        this.render(r);
+    },
+};
+
+// ── figures, as a project tool: recipes drawn in the browser ───────────
 // A recipe is which tool, which phase or tag within this project, and what
 // goes on x. The browser asks the pool for the rows each time the card is
 // shown, so the figure is as current as the sessions; editing a chip is a
-// PUT and a redraw. The agent's PNGs sit in the card below, unchanged.
+// PUT and a redraw. The agent's PNGs list underneath, unchanged.
 
-const LiveFigures = {
-    data: {},   // recipe name -> pooled rows response
+const FiguresTool = {
+    recipes: [], pngs: [], el: null, pid: null, slots: {},
+
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        const P = enc(pid);
+        this.recipes = (await api('GET', `/api/campaigns/${P}/recipes`).catch(() => ({}))).recipes || [];
+        this.pngs = (await api('GET', `/api/campaigns/${P}/figures`).catch(() => ({}))).figures || [];
+        this.paint();
+    },
 
     render() {
-        const recipes = state.recipes || [];
-        const P = enc(state.activeCampaignId || '');
-        const projLabel = (treeOf().campaign || {}).shorthand || state.activeCampaignId || '';
+        const recipes = this.recipes || [];
+        const projLabel = (treeOf().campaign || {}).shorthand || this.pid || '';
         const chip = (r, key, ph) => `<label class="lf-chip${r[key] ? ' on' : ''}"><span>${key}</span><input data-lf="${key}" data-name="${esc(r.name)}" value="${esc(r[key] || '')}" placeholder="${ph}" size="${Math.max(4, (r[key] || '').length + 1)}"></label>`;
-        return `<div class="pj-card" id="live-figures">
-            <div class="pj-card-head"><h3>Figures</h3><span class="pj-muted">drawn here from the pooled sessions, every time; edit the chips to re-pool</span><button class="pj-add" data-lf-new="1">+ figure</button></div>
-            ${recipes.length ? '' : '<div class="pj-none">No figure yet. One click draws twitch-to-hatch over this project.</div>'}
+        return `<div id="live-figures">
+            ${recipes.length ? '' : '<div class="pj-none">No figure yet. "+ figure" draws twitch-to-hatch over this project.</div>'}
             ${recipes.map(r => `<div class="lf-card" data-recipe="${esc(r.name)}">
                 <div class="lf-bar">
                     <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
@@ -2317,59 +2425,67 @@ const LiveFigures = {
                 </div>
                 <div class="lf-plot" data-plot="${esc(r.name)}"><div class="pj-loading">Pooling…</div></div>
             </div>`).join('')}
+            ${(this.pngs || []).length ? `<div class="pj-figures">${this.pngs.map(p => `<a class="pj-figure" href="${p.url}" target="_blank" rel="noopener"><img src="${p.url}" alt="${esc(p.name)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}
         </div>`;
     },
 
-    mount() {
-        const host = document.getElementById('live-figures');
+    paint() {
+        if (this.slots.head) this.slots.head.textContent = 'drawn here from the pooled sessions, every time; edit the chips to re-pool';
+        if (this.slots.actions) {
+            this.slots.actions.innerHTML = '<button class="pj-add" data-lf-new="1">+ figure</button>';
+            this.slots.actions.querySelector('[data-lf-new]').onclick = () => this.edit('twitch-to-hatch', 'title', 'Twitch to hatch');
+        }
+        this.el.innerHTML = this.render();
+        this.wire();
+    },
+
+    wire() {
+        const host = this.el.querySelector('#live-figures');
         if (!host) return;
         host.onchange = e => {
             const t = e.target;
             if (t.dataset.lf) this.edit(t.dataset.name, t.dataset.lf, t.value);
         };
         host.onclick = e => {
-            const b = e.target.closest('[data-lf-new], [data-lf-del]');
-            if (!b) return;
-            if (b.dataset.lfNew) this.edit('twitch-to-hatch', 'title', 'Twitch to hatch');
-            else this.remove(b.dataset.lfDel);
+            const b = e.target.closest('[data-lf-del]');
+            if (b) this.remove(b.dataset.lfDel);
         };
-        (state.recipes || []).forEach(r => this.draw(r));
+        (this.recipes || []).forEach(r => this.draw(r));
     },
 
     async edit(name, key, value) {
-        const P = enc(state.activeCampaignId);
-        const cur = (state.recipes || []).find(r => r.name === name) || { name, tool: 'twitch_hatch' };
+        const P = enc(this.pid);
+        const cur = (this.recipes || []).find(r => r.name === name) || { name, tool: 'twitch_hatch' };
         const next = { ...cur, [key]: value || null };
         try {
             const saved = await api('PUT', `/api/campaigns/${P}/recipes/${enc(name)}`, next);
-            state.recipes = [...(state.recipes || []).filter(r => r.name !== saved.name), saved].sort((a, b) => a.name.localeCompare(b.name));
-        } catch (err) { alert(err.message); return; }
-        renderCanvas();
+            this.recipes = [...(this.recipes || []).filter(r => r.name !== saved.name), saved].sort((a, b) => a.name.localeCompare(b.name));
+        } catch (err) { showErr(err.message); return; }
+        this.paint();
     },
 
     async remove(name) {
-        const P = enc(state.activeCampaignId);
-        try { await api('DELETE', `/api/campaigns/${P}/recipes/${enc(name)}`); } catch (err) { alert(err.message); return; }
-        state.recipes = (state.recipes || []).filter(r => r.name !== name);
-        renderCanvas();
+        const P = enc(this.pid);
+        try { await api('DELETE', `/api/campaigns/${P}/recipes/${enc(name)}`); } catch (err) { showErr(err.message); return; }
+        this.recipes = (this.recipes || []).filter(r => r.name !== name);
+        this.paint();
     },
 
     async draw(r) {
-        const P = enc(state.activeCampaignId);
-        const q = new URLSearchParams({ project: state.activeCampaignId });
+        const q = new URLSearchParams({ project: this.pid });
         if (r.phase) q.set('phase', r.phase);
         if (r.tag) q.set('tag', r.tag);
         let d;
         try { d = await api('GET', `/api/tools/${enc(r.tool || 'twitch_hatch')}/pool?${q}`); }
         catch (err) { d = { error: err.message }; }
-        const el = document.querySelector(`#live-figures [data-plot="${CSS.escape(r.name)}"]`);
+        const el = this.el.querySelector(`[data-plot="${CSS.escape(r.name)}"]`);
         if (!el) return;
-        el.innerHTML = d.error ? `<div class="pj-none">${esc(d.error)}</div>` : this.svg(r, d, P);
+        el.innerHTML = d.error ? `<div class="pj-none">${esc(d.error)}</div>` : this.svg(r, d);
     },
 
     // minutes on y, a dot per embryo, a column per session or one column, a
     // median tick per column, the pooled median across, Sulston as reference
-    svg(r, d, P) {
+    svg(r, d) {
         const rows = (d.rows || []).filter(x => x[r.y || 'minutes'] != null);
         if (!rows.length) return '<div class="pj-none">No rows yet under this selection. Mark embryos in a session\'s Tools tab.</div>';
         const yk = r.y || 'minutes', xk = r.x === 'condition' ? 'condition' : 'session_name';
@@ -2472,69 +2588,8 @@ function addForm(form) {
     return `<div class="pj-form" data-form="${form}">${body}<div class="pj-act"><button data-action="form-submit" data-form="${form}">Add</button><button data-action="form-close">Cancel</button></div></div>`;
 }
 
-// ── between: the stream, and the reading on top ───────────────────────
-// The stream is the notebook filed to this project: lines in the operator's
-// own words, dated, no kind at write time. The reading is the agent's prose
-// over the stream, the sessions and the pooled rows, written when asked and
-// marked stale when sessions have landed since.
-
-function renderBetween() {
-    const r = state.reading, lines = state.stream;
-    if (!r || !lines) return loadingBox('the project');
-    const since = r.sessions_since || 0;
-    const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
-    const head = r.text
-        ? `<span class="pj-muted">written ${esc(when)} over ${(r.meta.sessions || []).length} session${(r.meta.sessions || []).length === 1 ? '' : 's'}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}</span>`
-        : `<span class="pj-muted">${r.error ? esc(r.error) : 'nothing read yet'}</span>`;
-    const body = r.text ? readingHtml(r.text) : `<div class="pj-none">Ask for a reading once a session or two is filed and the stream has a line in it.</div>`;
-    const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-    return `<div class="pj-card" id="reading">
-        <div class="pj-card-head"><h3>Reading</h3>${head}<button class="pj-add rd-btn" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button></div>
-        <div class="rd-body">${body}</div>
-    </div>
-    <div class="pj-card" id="stream">
-        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; the reading sorts out what it was</span></div>
-        <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
-        <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
-            <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
-            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
-            <span class="rd-text">${esc(n.body)}</span>
-            ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
-        </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
-    </div>`;
-}
-
-function readingHtml(text) {
-    // Four words open four paragraphs; anything else is a paragraph as written.
-    return text.split(/\n\s*\n/).map(p => {
-        const m = p.match(/^\s*(KNOWN|DEVIATES|OPEN|NEXT)\.?\s*([\s\S]*)$/);
-        return m ? `<p><b class="rd-k">${m[1]}</b> ${esc(m[2]).replace(/\n/g, '<br>')}</p>` : `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
-    }).join('');
-}
-
-const Between = {
-    mount() {
-        const reading = document.getElementById('reading'), stream = document.getElementById('stream');
-        if (!reading) return;
-        reading.querySelector('[data-rd="read"]').onclick = () => this.read();
-        const box = stream.querySelector('#stream-line');
-        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim()); };
-    },
-    async add(text) {
-        try {
-            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId] });
-        } catch (err) { showErr(err.message); return; }
-        await loadSection();
-    },
-    async read() {
-        const btn = document.querySelector('#reading [data-rd="read"]');
-        if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
-        try {
-            state.reading = await api('POST', `/api/campaigns/${enc(state.activeCampaignId)}/reading`, {});
-        } catch (err) { state.reading = { ...(state.reading || {}), error: err.message }; }
-        renderCanvas();
-    },
-};
+// the project tools register beside the session tools, by name
+window.GentlyTools = Object.assign(window.GentlyTools || {}, { figures: FiguresTool, reading: ReadingTool });
 
 // ── the plan bar: today's canvas, plus the ways to add to it ──
 
@@ -2632,11 +2687,7 @@ function renderFindingsSection() {
     if (!list) return loadingBox('the findings');
     const live = list.filter(n => n.status !== 'superseded');
     const gone = list.filter(n => n.status === 'superseded');
-    const figs = state.figures || [];
-    return `${LiveFigures.render()}${figs.length ? `<div class="pj-card">
-        <div class="pj-card-head"><h3>Figures</h3><span class="pj-muted">drawn from the pooled sessions; each is a file under the project</span></div>
-        <div class="pj-figures">${figs.map(f => `<a class="pj-figure" href="${f.url}" target="_blank" rel="noopener"><img src="${f.url}" alt="${esc(f.name)}"><span>${esc(f.name)}</span></a>`).join('')}</div>
-    </div>` : ''}<div class="pj-card">
+    return `<div class="pj-card">
         <div class="pj-card-head"><h3>Findings</h3><span class="pj-muted">claims about this project; the agent’s arrive proposed, a person confirms</span></div>
         <div class="pj-stack">${live.map(findingCard).join('') || '<div class="pj-none">No finding yet.</div>'}${addRow('finding', 'finding', '')}</div>
         ${gone.length ? `<div class="pj-stack dimmed"><h4>Superseded</h4>${gone.map(findingCard).join('')}</div>` : ''}
