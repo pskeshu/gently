@@ -115,6 +115,7 @@ class Note:
     links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
     artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
     superseded_by: str | None = None
+    by: str | None = None  # the person's id when a person wrote it; the agent leaves it None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -133,6 +134,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "kind": n.kind.value,
         "body": n.body,
         "author": n.author.value,
+        "by": n.by,
         "title": n.title,
         "status": n.status.value,
         "confidence": n.confidence.value if n.confidence else None,
@@ -169,6 +171,7 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         links=list(d.get("links") or []),
         artifacts=list(d.get("artifacts") or []),
         superseded_by=d.get("superseded_by"),
+        by=d.get("by"),
         created_at=datetime.fromisoformat(d["created_at"]),
         updated_at=datetime.fromisoformat(d["updated_at"]),
     )

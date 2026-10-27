@@ -871,7 +871,7 @@ def create_router(server) -> APIRouter:
         return events, temperature, removed
 
     @router.patch("/api/sessions/{session_id}", dependencies=[Depends(require_control)])
-    async def rename_session(session_id: str, body: dict):
+    async def rename_session(session_id: str, body: dict, request: Request):
         """Give a session a name and a line about it. Written to its
         session.yaml; the folder keeps its slug."""
         store = _file_store()
@@ -888,6 +888,9 @@ def create_router(server) -> APIRouter:
         if description is not None and len(description) > 600:
             raise HTTPException(status_code=400, detail="description is too long (600 chars)")
         info = store.update_session(session_id, name=name, description=description)
+        from gently.ui.web.auth import current_username
+
+        store.note_session_edit(session_id, current_username(request), "name")
         if info is None:
             raise HTTPException(status_code=404, detail="Session not found")
         return {

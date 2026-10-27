@@ -191,6 +191,9 @@ def create_router(server) -> APIRouter:
         if not (body.get("key") or body.get("title")):
             raise HTTPException(status_code=400, detail="key or title required")
         as_strain = bool(body.get("as_strain")) or body.get("files_as") == "strain"
+        from gently.ui.web.auth import current_username
+
+        body["added_by"] = current_username(request) or body.get("added_by") or "human"
         entry = cs.add_campaign_reference(_root(cs, campaign), body, as_strain=as_strain)
         return {"ok": True, "entry": entry, "as_strain": as_strain}
 
@@ -764,8 +767,11 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=400, detail="session_id required")
 
         from gently.app.filing import file_session_under
+        from gently.ui.web.auth import current_username
 
-        file_session_under(_gently_store(), cs, session_id, item.campaign_id, item_id)
+        file_session_under(
+            _gently_store(), cs, session_id, item.campaign_id, item_id, by=current_username(request)
+        )
 
         # Re-fetch item so session_ids reflects the just-added link; then filter
         # exactly as get_item_detail does — POST and GET return the same scope.

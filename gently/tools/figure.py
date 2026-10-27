@@ -10,18 +10,20 @@ both; it draws nothing.
 """
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import Response
 
 from gently.core.file_store import _read_yaml, _write_yaml
 from gently.tools import project_tools, set_project_tools
-from gently.ui.web.auth import require_control
+from gently.ui.web.auth import current_username, require_control
 
 MEDIA = {".png": "image/png", ".svg": "image/svg+xml"}
 RECIPE_FIELDS = ("title", "tool", "phase", "tag", "x", "y")
+RECIPE_META = ("by", "edited")
 
 
 def slug(text: str) -> str:
@@ -92,18 +94,24 @@ def create_router(server) -> APIRouter:
         out = []
         for p in sorted(d.glob("*.yaml")) if d.is_dir() else []:
             doc = _read_yaml(p) or {}
-            out.append({"name": p.stem, **{k: doc.get(k) for k in RECIPE_FIELDS}})
+            out.append({"name": p.stem, **{k: doc.get(k) for k in RECIPE_FIELDS + RECIPE_META}})
         return {"recipes": out}
 
     @router.put("/api/campaigns/{cid}/recipes/{name}", dependencies=[Depends(require_control)])
-    async def put_recipe(cid: str, name: str, body: dict = Body(default={})):  # noqa: B008
+    async def put_recipe(cid: str, name: str, request: Request, body: dict = Body(default={})):  # noqa: B008
         d = _dir(cid)
         d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{slug(name)}.yaml"
+        was = _read_yaml(path) or {}
         doc = {k: body.get(k) for k in RECIPE_FIELDS}
         doc["tool"] = doc["tool"] or "twitch_hatch"
         doc["x"] = doc["x"] or "session_name"
         doc["y"] = doc["y"] or "minutes"
-        _write_yaml(d / f"{slug(name)}.yaml", doc)
+        # Who made it, kept; who last changed it, now.
+        who = current_username(request)
+        doc["by"] = was.get("by") or who
+        doc["edited"] = {"by": who, "at": datetime.now().isoformat(timespec="seconds")}
+        _write_yaml(path, doc)
         return {"name": slug(name), **doc}
 
     @router.delete("/api/campaigns/{cid}/recipes/{name}", dependencies=[Depends(require_control)])
