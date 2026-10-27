@@ -15,7 +15,7 @@ from gently.harness.memory.notebook import (
     embryo_refs,
     note_to_dict,
 )
-from gently.ui.web.auth import require_control
+from gently.ui.web.auth import current_username, require_control
 
 
 def _for_view(note: Note) -> dict:
@@ -148,6 +148,7 @@ def create_router(server) -> APIRouter:
             threads=body.get("threads") or [],
             projects=body.get("projects") or [],
             basis=list(body.get("basis") or []),
+            by=current_username(request),
         )
         note_id = nb.write_note(note)
         try:

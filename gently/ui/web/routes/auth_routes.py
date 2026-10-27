@@ -151,6 +151,14 @@ def create_router(server) -> APIRouter:
             return JSONResponse({"error": str(e)}, status_code=400)
         resp = JSONResponse({"ok": True, **who})
         resp.set_cookie(OPERATOR_COOKIE, who["id"], max_age=365 * 86400, samesite="lax", path="/")
+        # Becoming someone mid-session: the live session remembers them too.
+        try:
+            sid = server._current_session_id()
+            gstore = getattr(server, "gently_store", None)
+            if sid and gstore is not None:
+                gstore.add_session_operator(sid, who["id"])
+        except Exception:
+            pass
         return resp
 
     @router.post("/api/auth/operator/rename")

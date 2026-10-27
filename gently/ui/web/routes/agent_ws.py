@@ -345,11 +345,11 @@ def create_router(server) -> APIRouter:
         # "At the microscope" or "Guest". The UI renders "You" for the
         # viewer's own messages by matching client_id, so unnamed
         # participants don't need disambiguating numbers.
-        from gently.ui.web.auth import unnamed
+        from gently.ui.web.auth import chat_label
 
         _client_counter["n"] += 1
         client_id = f"agent_client_{_client_counter['n']}"
-        client_label = username or unnamed(websocket.client.host if websocket.client else None)
+        client_label = chat_label(username, websocket)
 
         # Send connection metadata (version, tokens, embryo count, commands).
         # you_id lets the client label its own messages "You".

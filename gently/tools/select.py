@@ -8,9 +8,9 @@ Fields combine by intersection, and the label joins the parts.
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
-from gently.ui.web.auth import require_control
+from gently.ui.web.auth import current_username, require_control
 
 
 def select_sessions(
@@ -100,7 +100,7 @@ def create_router(server) -> APIRouter:
         return out
 
     @router.put("/api/sessions/{sid}/tags", dependencies=[Depends(require_control)])
-    async def put_tags(sid: str, body: dict = Body(default={})):  # noqa: B008
+    async def put_tags(sid: str, request: Request, body: dict = Body(default={})):  # noqa: B008
         store = _store()
         tags = body.get("tags")
         if not isinstance(tags, list):
@@ -108,6 +108,7 @@ def create_router(server) -> APIRouter:
         info = store.set_session_tags(sid, [str(t) for t in tags])
         if info is None:
             raise HTTPException(status_code=404, detail="Session not found")
+        store.note_session_edit(sid, current_username(request), "tags")
         return {"tags": info.get("tags") or []}
 
     return router

@@ -701,6 +701,19 @@ class FileStore:
             self.unlink_session(session_id)
         return self.get_session(session_id)
 
+    def note_session_edit(self, session_id: str, by: str | None, what: str) -> None:
+        """A person changed the session's own record: name, description,
+        tags or tools. ``edited: {by, at, what}`` says who did it last."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return
+        data["edited"] = {"by": by, "at": _now(), "what": what}
+        _write_yaml(yaml_path, data)
+
     def set_session_tags(self, session_id: str, tags: list[str]) -> SessionInfo | None:
         """Tag a session: short words in its ``session.yaml`` that a selector
         can pool by (``control``, ``25C``). Replaces the whole list."""

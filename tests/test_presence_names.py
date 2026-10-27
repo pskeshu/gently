@@ -78,7 +78,7 @@ class TestWhatTheServerCallsThem:
 
     def test_the_chat_and_the_connection_use_the_same_names(self):
         ws = (WEB / "routes" / "agent_ws.py").read_text(encoding="utf-8")
-        assert "client_label = username or unnamed(" in ws
+        assert "client_label = chat_label(username, websocket)" in ws
         cm = (WEB / "connection_manager.py").read_text(encoding="utf-8")
         assert "name = unnamed(" in cm and "Anonymous" not in cm
 

@@ -19,12 +19,12 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from gently.core.file_store import _read_yaml, _write_yaml
 from gently.settings import settings
 from gently.tools.pool import POOLERS, REFERENCES, pool
-from gently.ui.web.auth import require_control
+from gently.ui.web.auth import current_username, require_control
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,9 @@ def load_reading(store: Any, cs: Any, project_id: str) -> dict:
     }
 
 
-def read_project(store: Any, cs: Any, project_id: str, model: str | None = None) -> dict:
+def read_project(
+    store: Any, cs: Any, project_id: str, model: str | None = None, asked_by: str | None = None
+) -> dict:
     """Write the reading: one model call over the pot, filed under the project."""
     import anthropic
 
@@ -179,6 +181,7 @@ def read_project(store: Any, cs: Any, project_id: str, model: str | None = None)
     meta = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
         "model": model,
+        "asked_by": asked_by,
         "sessions": p["sessions"],
         "notes": p["notes"],
     }
@@ -218,10 +221,12 @@ def create_router(server) -> APIRouter:
         return load_reading(store, cs, root)
 
     @router.post("/api/campaigns/{cid}/reading", dependencies=[Depends(require_control)])
-    async def write_reading(cid: str, body: dict = Body(default={})):  # noqa: B008
+    async def write_reading(cid: str, request: Request, body: dict = Body(default={})):  # noqa: B008
         store, cs, root = _stores(cid)
         try:
-            return read_project(store, cs, root, model=body.get("model"))
+            return read_project(
+                store, cs, root, model=body.get("model"), asked_by=current_username(request)
+            )
         except Exception as e:  # the model, the key, the network: say which
             logger.warning("reading failed for %s: %s", root, e)
             raise HTTPException(status_code=502, detail=f"No reading: {e}") from e

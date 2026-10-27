@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
+from typing import Any
 
 from fastapi import HTTPException, Request
 
@@ -63,6 +64,19 @@ def unnamed(host: str | None) -> str:
 
 
 OPERATOR_COOKIE = "gently_operator"
+
+
+def chat_label(username: str | None, websocket: Any) -> str:
+    """What a chat message is signed with: the account, else the person the
+    landing page's cookie names (by display name), else where the browser is."""
+    if username:
+        return username
+    pid = (websocket.cookies.get(OPERATOR_COOKIE) or "").strip()[:40]
+    if pid:
+        from gently.ui.web.operators import names_of
+
+        return names_of().get(pid, pid)
+    return unnamed(websocket.client.host if websocket.client else None)
 
 
 def current_username(request: Request) -> str | None:

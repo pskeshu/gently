@@ -16,18 +16,28 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from gently.app.brightfield import overview_frames
 from gently.core.file_store import _read_yaml, _write_yaml
 from gently.tools import TOOLS, session_tools, set_session_tools
-from gently.ui.web.auth import require_control
+from gently.ui.web.auth import current_username, require_control
 
 # Sulston et al. 1983, at 20 °C: twitching ~ 430 min, hatching ~ 800 min
 # after first cleavage.
 SULSTON_TWITCH_TO_HATCH_MIN = 370.0
 
 FILE = Path("annotations") / "twitch_hatch.yaml"
+
+
+def _key(r: dict) -> tuple:
+    """What makes a row the same row: where it was clicked, and the twitch frame."""
+    return (
+        r.get("field"),
+        round(float(r.get("x", 0)), 4),
+        round(float(r.get("y", 0)), 4),
+        r.get("twitch_frame"),
+    )
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -119,10 +129,12 @@ def create_router(server) -> APIRouter:
         return {"tools": session_tools(store, sid)}
 
     @router.put("/api/sessions/{sid}/tools", dependencies=[Depends(require_control)])
-    async def put_session_tools(sid: str, body: dict = Body(default={})):  # noqa: B008
+    async def put_session_tools(sid: str, request: Request, body: dict = Body(default={})):  # noqa: B008
         store = _store()
         _sd(store, sid)
-        return {"tools": set_session_tools(store, sid, list(body.get("tools") or []))}
+        tools = set_session_tools(store, sid, list(body.get("tools") or []))
+        store.note_session_edit(sid, current_username(request), "tools")
+        return {"tools": tools}
 
     @router.get("/api/sessions/{sid}/tools/twitch_hatch")
     async def get_twitch_hatch(sid: str):
@@ -138,13 +150,18 @@ def create_router(server) -> APIRouter:
         }
 
     @router.put("/api/sessions/{sid}/tools/twitch_hatch", dependencies=[Depends(require_control)])
-    async def put_twitch_hatch(sid: str, body: dict = Body(default={})):  # noqa: B008
+    async def put_twitch_hatch(sid: str, request: Request, body: dict = Body(default={})):  # noqa: B008
+        """The rows as the pane holds them. A row that is unchanged keeps who
+        marked it and when; a new or changed one is stamped with this
+        person, so two people marking one session keep each other's work."""
         store = _store()
         sd = _sd(store, sid)
+        who = current_username(request)
+        before = {_key(r): r for r in (_read_yaml(sd / FILE) or [])}
         rows = []
         for r in body.get("rows") or []:
             try:
-                row = {
+                row: dict[str, Any] = {
                     "field": int(r["field"]),
                     "x": float(r["x"]),
                     "y": float(r["y"]),
@@ -152,10 +169,14 @@ def create_router(server) -> APIRouter:
                     "hatch_frame": int(r["hatch_frame"])
                     if r.get("hatch_frame") is not None
                     else None,
-                    "annotator": str(r.get("annotator") or "") or None,
                 }
             except (KeyError, TypeError, ValueError) as e:
                 raise HTTPException(status_code=422, detail=f"bad row {r!r}: {e}") from e
+            kept = before.get(_key(row))
+            if kept is not None and kept.get("hatch_frame") == row["hatch_frame"]:
+                row["by"], row["at"] = kept.get("by"), kept.get("at")
+            else:
+                row["by"], row["at"] = who, datetime.now().isoformat(timespec="seconds")
             rows.append(row)
         _write_yaml(sd / FILE, rows)
         return {"rows": rows}
