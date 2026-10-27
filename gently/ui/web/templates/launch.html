@@ -47,24 +47,19 @@
   .head{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:8px}
   /* Three columns: who and what, the sessions, the projects. On a narrow
      window they stack, in that order. */
-  .cols{display:grid;grid-template-columns:minmax(300px,380px) minmax(320px,1fr) minmax(280px,360px);gap:28px;align-items:start;justify-content:center}
+  .cols{display:grid;grid-template-columns:minmax(300px,400px) minmax(320px,520px);gap:32px;align-items:start;justify-content:center}
   @media (max-width:980px){.cols{grid-template-columns:1fr;max-width:460px;margin:0 auto}}
   .col-cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--g-faint);margin:0 2px 10px}
   .col-link{font-size:12px;color:var(--g-muted);background:none;border:0;padding:0;cursor:pointer;font:inherit}
   .col-link:hover{color:var(--g-accent)}
   .col-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
   /* who's here */
-  .who{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px}
+  .who{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
+  .who[hidden]{display:none}
   .who-pick{font:inherit;font-size:13px;padding:7px 12px;border-radius:999px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);cursor:pointer}
   .who-pick[aria-checked="true"]{border-color:var(--g-accent);background:color-mix(in srgb, var(--g-accent) 10%, var(--g-card));font-weight:600}
   .who-name{font:inherit;font-size:14px;width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--g-border);background:var(--g-card);color:var(--g-text);margin-bottom:18px}
   .who-name:focus{outline:none;border-color:var(--g-accent)}
-  /* projects */
-  .proj{display:block;width:100%;text-align:left;font:inherit;color:inherit;padding:11px 13px;border:1px solid var(--g-border);border-radius:11px;background:var(--g-card);margin-bottom:7px;cursor:pointer;transition:.15s}
-  .proj:hover{border-color:var(--g-accent)}
-  .proj-t{display:block;font-size:14px;font-weight:600}
-  .proj-q{display:block;font-size:12.5px;color:var(--g-muted);margin-top:2px;line-height:1.4}
-  .proj-s{display:block;font-size:11.5px;color:var(--g-faint);margin-top:4px}
   .pick-proj{color:var(--g-faint)}
   .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--g-accent);position:relative;
     background:radial-gradient(circle at 50% 50%, var(--g-spot), transparent 70%)}
@@ -146,7 +141,7 @@
       <div class="col">
         <div class="col-cap">Who's here</div>
         <div id="who" class="who" hidden></div>
-        <input class="who-name" id="who-name" hidden placeholder="Your name" autocomplete="name" maxlength="40">
+        <input class="who-name" id="who-name" placeholder="Your name" autocomplete="name" maxlength="40">
 
         <div class="col-cap">Today</div>
         <div class="opt" id="opt-hardware" data-key="hardware" role="switch" aria-checked="true" tabindex="0" aria-labelledby="hw-t">
@@ -191,10 +186,6 @@
         </div>
       </div>
 
-      <div class="col">
-        <div class="col-head"><div class="col-cap">Projects</div><button type="button" class="col-link" id="all-projects" title="Open the Projects tab">all projects &rsaquo;</button></div>
-        <div id="proj-list"><div class="pick-s">Loading…</div></div>
-      </div>
     </div>
   </div>
 
@@ -291,51 +282,54 @@ async function loadWho() {
   try { me = await (await fetch("/api/auth/me")).json(); } catch (e) {}
   try { users = await (await fetch("/api/auth/users")).json(); } catch (e) {}
   const who = document.getElementById("who"), box = document.getElementById("who-name");
+  const current = users.accounts ? (me.username || "") : (cookie(OPERATOR_COOKIE) || "");
+  const paintWho = () => {
+    const names = users.users || [];
+    who.hidden = !names.length;
+    who.innerHTML = names.map(u =>
+      `<button type="button" class="who-pick" role="radio" data-user="${esc(u)}" aria-checked="${String(current === u)}">${esc(u)}</button>`).join("");
+  };
+  paintWho();
   if (users.accounts) {
-    who.hidden = false;
-    who.innerHTML = users.users.map(u =>
-      `<button type="button" class="who-pick" role="radio" data-user="${esc(u)}" aria-checked="${String(me.username === u)}">${esc(u)}</button>`).join("");
+    // Another account goes through the login; the box is not for accounts.
+    box.hidden = true;
     who.addEventListener("click", e => {
       const b = e.target.closest("[data-user]");
-      if (!b || b.getAttribute("aria-checked") === "true") return;
-      window.location.href = "/login";
+      if (b && b.getAttribute("aria-checked") !== "true") window.location.href = "/login";
     });
-  } else {
-    box.hidden = false;
-    box.value = cookie(OPERATOR_COOKIE) || "";
-    box.addEventListener("input", () => {
-      document.cookie = OPERATOR_COOKIE + "=" + encodeURIComponent(box.value.trim()) + "; path=/; max-age=31536000; SameSite=Lax";
-    });
+    return;
   }
+  // No accounts: a known name is one click, a new one is typed. Either is
+  // remembered by the rig and becomes the cookie the server reads as who.
+  const choose = async (name) => {
+    try {
+      const r = await fetch("/api/auth/operator", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!(users.users || []).includes(d.name)) users.users = [d.name, ...(users.users || [])];
+      box.value = ""; box.placeholder = d.name;
+      Array.from(who.querySelectorAll("[data-user]")).forEach(b => b.setAttribute("aria-checked", String(b.dataset.user === d.name)));
+      if (!who.querySelector(`[data-user="${CSS.escape(d.name)}"]`)) {
+        who.hidden = false;
+        who.insertAdjacentHTML("afterbegin", `<button type="button" class="who-pick" role="radio" data-user="${esc(d.name)}" aria-checked="true">${esc(d.name)}</button>`);
+      }
+    } catch (e) {}
+  };
+  if (current) box.placeholder = current;
+  who.addEventListener("click", e => { const b = e.target.closest("[data-user]"); if (b) choose(b.dataset.user); });
+  box.addEventListener("keydown", e => { if (e.key === "Enter" && box.value.trim()) choose(box.value.trim()); });
+  box.addEventListener("blur", () => { if (box.value.trim()) choose(box.value.trim()); });
 }
 
-// The projects: the question, how many sessions, when it last ran.
-async function loadProjects() {
-  const el = document.getElementById("proj-list");
+// The project names, for the session rows' "in …".
+async function loadProjectNames() {
   try {
     const d = await (await fetch("/api/campaigns")).json();
-    const roots = (d.campaigns || []).map(t => ({ ...(t.campaign || {}), summary: t.project || {} }));
-    roots.forEach(c => { projectNames[c.id] = c.shorthand || c.description || c.id; });
-    if (!roots.length) { el.innerHTML = '<div class="pick-s">No project yet. Make one from a session, or on the Projects tab.</div>'; return; }
-    el.innerHTML = roots.map(c => {
-      const n = c.summary.sessions || 0;
-      const last = c.summary.last_run_at ? "last " + ago(c.summary.last_run_at) : "no session yet";
-      return `<button type="button" class="proj" data-project="${esc(c.id)}" title="Open this project">
-        <span class="proj-t">${esc(c.shorthand || c.description || c.id)}</span>
-        ${c.shorthand && c.description ? `<span class="proj-q">${esc(c.description)}</span>` : ""}
-        <span class="proj-s">${esc(plural(n, "session"))} · ${esc(last)}</span></button>`;
-    }).join("");
-    el.addEventListener("click", e => {
-      const b = e.target.closest("[data-project]");
-      if (!b) return;
-      after = "#plans:" + b.dataset.project;
-      document.getElementById("go").click();
-    });
-  } catch (e) { el.innerHTML = '<div class="pick-s">Projects could not be read.</div>'; }
+    (d.campaigns || []).forEach(t => { const c = t.campaign || {}; if (c.id) projectNames[c.id] = c.shorthand || c.description || c.id; });
+  } catch (e) {}
   paintWhich();
 }
 document.getElementById("all-sessions").addEventListener("click", () => { after = "#sessions"; document.getElementById("go").click(); });
-document.getElementById("all-projects").addEventListener("click", () => { after = "#plans"; document.getElementById("go").click(); });
 
 async function loadResumable() {
   try {
@@ -372,7 +366,7 @@ async function loadPrefs() {
   paint();
   loadResumable();
   loadWho();
-  loadProjects();
+  loadProjectNames();
 }
 
 function toggle(key) { state[key] = !state[key]; paint(); }
