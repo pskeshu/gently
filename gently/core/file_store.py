@@ -596,6 +596,20 @@ class FileStore:
         _write_yaml(yaml_path, data)
         return data
 
+    def set_session_tags(self, session_id: str, tags: list[str]) -> SessionInfo | None:
+        """Tag a session: short words in its ``session.yaml`` that a selector
+        can pool by (``control``, ``25C``). Replaces the whole list."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return None
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return None
+        data["tags"] = sorted({str(t).strip() for t in tags if str(t).strip()})
+        _write_yaml(yaml_path, data)
+        return data
+
     def mark_advanced_diagnostics(self, session_id: str, since: str) -> bool:
         """Record on the session that it was recorded with Advanced diagnostics
         on, from ``since``. Set once, never cleared. Returns True if written.
