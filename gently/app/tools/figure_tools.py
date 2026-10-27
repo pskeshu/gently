@@ -17,14 +17,10 @@ import numpy as np
 from gently.harness.tools.helpers import require_agent
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 from gently.tools.figure import figure_path, figure_url, slug
-from gently.tools.select import select_sessions
-from gently.tools.twitch_hatch import SULSTON_TWITCH_TO_HATCH_MIN, session_report
+from gently.tools.pool import REFERENCES, pool
 
 logger = logging.getLogger(__name__)
 
-# Which tools can be pooled, and how a session answers for each.
-POOLERS = {"twitch_hatch": session_report}
-REFERENCES = {"twitch_hatch": {"Sulston": SULSTON_TWITCH_TO_HATCH_MIN}}
 
 STRIP_PLOT = """\\
 # rows: list of dicts; ax: the axes; ref: reference values by name
@@ -45,33 +41,14 @@ ax.set_ylabel('minutes')
 
 
 def _pool(agent, tool_name: str, project, phase, tag) -> tuple[dict, str | None]:
-    pooler = POOLERS.get(tool_name)
-    if pooler is None:
-        return {}, f"Error: no pooler for tool {tool_name!r}; known: {sorted(POOLERS)}"
     store = getattr(agent, "store", None)
     cs = getattr(agent, "context_store", None)
     if store is None or cs is None:
         return {}, "Error: store or context store unavailable"
-    picked = select_sessions(store, cs, project=project, phase=phase, tag=tag)
-    # Nights often share a name; a column must not. Add the date when they do.
-    names = [s.get("name") or s["session_id"] for s in picked["sessions"]]
-    rows = []
-    for s in picked["sessions"]:
-        sid = s["session_id"]
-        name = s.get("name") or sid
-        if names.count(name) > 1:
-            name = f"{name} {sid[:4]}"
-        for i, r in enumerate(pooler(store, sid), 1):
-            rows.append(
-                {
-                    **r,
-                    "n": i,
-                    "session_id": sid,
-                    "session_name": name,
-                    "condition": picked["label"],
-                }
-            )
-    return {"label": picked["label"], "sessions": picked["sessions"], "rows": rows}, None
+    try:
+        return pool(store, cs, tool_name, project=project, phase=phase, tag=tag), None
+    except KeyError as e:
+        return {}, f"Error: {e}"
 
 
 @tool(

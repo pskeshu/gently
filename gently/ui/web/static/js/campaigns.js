@@ -424,6 +424,7 @@ function renderCanvas() {
     $canvasContent.classList.add('pj-with-header');
     if (state.section !== 'plan') {
         $canvasContent.innerHTML = renderProjectHeader() + renderSection();
+        LiveFigures.mount();
         return;
     }
     switch (state.planView) {
@@ -2280,6 +2281,7 @@ async function loadSection() {
         else if (state.section === 'findings') {
             state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
             state.figures = (await api('GET', `/api/campaigns/${P}/figures`).catch(() => ({}))).figures || [];
+            state.recipes = (await api('GET', `/api/campaigns/${P}/recipes`).catch(() => ({}))).recipes || [];
         }
         else if (state.section === 'notes') state.notes = (await api('GET', `/api/notebook/notes?project=${P}`)).notes || [];
         else return;
@@ -2298,6 +2300,111 @@ async function reloadProject() {
 function loadingBox(what) {
     return `<div class="pj-card"><div class="pj-loading">${state.sectionError ? esc(state.sectionError) : `Reading ${what}…`}</div></div>`;
 }
+
+// ── live figures: a recipe drawn in the browser from the pooled rows ──────
+// A recipe is which tool, which phase or tag within this project, and what
+// goes on x. The browser asks the pool for the rows each time the card is
+// shown, so the figure is as current as the sessions; editing a chip is a
+// PUT and a redraw. The agent's PNGs sit in the card below, unchanged.
+
+const LiveFigures = {
+    data: {},   // recipe name -> pooled rows response
+
+    render() {
+        const recipes = state.recipes || [];
+        const P = enc(state.activeCampaignId || '');
+        const projLabel = (treeOf().campaign || {}).shorthand || state.activeCampaignId || '';
+        const chip = (r, key, ph) => `<label class="lf-chip${r[key] ? ' on' : ''}"><span>${key}</span><input data-lf="${key}" data-name="${esc(r.name)}" value="${esc(r[key] || '')}" placeholder="${ph}" size="${Math.max(4, (r[key] || '').length + 1)}"></label>`;
+        return `<div class="pj-card" id="live-figures">
+            <div class="pj-card-head"><h3>Figures</h3><span class="pj-muted">drawn here from the pooled sessions, every time; edit the chips to re-pool</span><button class="pj-add" data-lf-new="1">+ figure</button></div>
+            ${recipes.length ? '' : '<div class="pj-none">No figure yet. One click draws twitch-to-hatch over this project.</div>'}
+            ${recipes.map(r => `<div class="lf-card" data-recipe="${esc(r.name)}">
+                <div class="lf-bar">
+                    <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
+                    <span class="lf-chip fixed"><span>project</span><b>${esc(projLabel)}</b></span>
+                    ${chip(r, 'phase', 'any')}${chip(r, 'tag', 'any')}
+                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${r.x !== 'condition' ? ' selected' : ''}>a column per night</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
+                    <button class="pj-add lf-del" data-lf-del="${esc(r.name)}" title="Remove this figure">×</button>
+                </div>
+                <div class="lf-plot" data-plot="${esc(r.name)}"><div class="pj-loading">Pooling…</div></div>
+            </div>`).join('')}
+        </div>`;
+    },
+
+    mount() {
+        const host = document.getElementById('live-figures');
+        if (!host) return;
+        host.onchange = e => {
+            const t = e.target;
+            if (t.dataset.lf) this.edit(t.dataset.name, t.dataset.lf, t.value);
+        };
+        host.onclick = e => {
+            const b = e.target.closest('[data-lf-new], [data-lf-del]');
+            if (!b) return;
+            if (b.dataset.lfNew) this.edit('twitch-to-hatch', 'title', 'Twitch to hatch');
+            else this.remove(b.dataset.lfDel);
+        };
+        (state.recipes || []).forEach(r => this.draw(r));
+    },
+
+    async edit(name, key, value) {
+        const P = enc(state.activeCampaignId);
+        const cur = (state.recipes || []).find(r => r.name === name) || { name, tool: 'twitch_hatch' };
+        const next = { ...cur, [key]: value || null };
+        try {
+            const saved = await api('PUT', `/api/campaigns/${P}/recipes/${enc(name)}`, next);
+            state.recipes = [...(state.recipes || []).filter(r => r.name !== saved.name), saved].sort((a, b) => a.name.localeCompare(b.name));
+        } catch (err) { alert(err.message); return; }
+        renderCanvas();
+    },
+
+    async remove(name) {
+        const P = enc(state.activeCampaignId);
+        try { await api('DELETE', `/api/campaigns/${P}/recipes/${enc(name)}`); } catch (err) { alert(err.message); return; }
+        state.recipes = (state.recipes || []).filter(r => r.name !== name);
+        renderCanvas();
+    },
+
+    async draw(r) {
+        const P = enc(state.activeCampaignId);
+        const q = new URLSearchParams({ project: state.activeCampaignId });
+        if (r.phase) q.set('phase', r.phase);
+        if (r.tag) q.set('tag', r.tag);
+        let d;
+        try { d = await api('GET', `/api/tools/${enc(r.tool || 'twitch_hatch')}/pool?${q}`); }
+        catch (err) { d = { error: err.message }; }
+        const el = document.querySelector(`#live-figures [data-plot="${CSS.escape(r.name)}"]`);
+        if (!el) return;
+        el.innerHTML = d.error ? `<div class="pj-none">${esc(d.error)}</div>` : this.svg(r, d, P);
+    },
+
+    // minutes on y, a dot per embryo, a column per night or one column, a
+    // median tick per column, the pooled median across, Sulston as reference
+    svg(r, d, P) {
+        const rows = (d.rows || []).filter(x => x[r.y || 'minutes'] != null);
+        if (!rows.length) return '<div class="pj-none">No rows yet under this selection. Mark embryos in a session\'s Tools tab.</div>';
+        const yk = r.y || 'minutes', xk = r.x === 'condition' ? 'condition' : 'session_name';
+        const cols = [...new Set(rows.map(x => String(x[xk])))];
+        const median = a => { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+        const all = rows.map(x => x[yk]), pooled = median(all), ref = d.sulston_min;
+        const W = Math.max(440, 110 + cols.length * 150), H = 310, L = 54, Rm = 96, T = 16, B = 56;
+        const lo = Math.min(...all, ref ?? Infinity) - 20, hi = Math.max(...all, ref ?? -Infinity) + 20;
+        const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+        const x = i => L + (i + 0.5) * (W - L - Rm) / cols.length;
+        const step = (hi - lo) > 300 ? 100 : (hi - lo) > 120 ? 50 : 20;
+        const ticks = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+        const dots = rows.map((row, i) => `<circle class="lf-dot" cx="${(x(cols.indexOf(String(row[xk]))) + ((i % 5) - 2) * 7).toFixed(1)}" cy="${y(row[yk]).toFixed(1)}" r="4"><title>${esc(row.session_name)} · embryo ${row.n} · ${row[yk]} min${row.temp_c != null ? ` · ${row.temp_c} °C` : ''}</title></circle>`).join('');
+        const meds = cols.map((c, i) => { const m = median(rows.filter(row => String(row[xk]) === c).map(row => row[yk])); return `<line class="lf-med" x1="${x(i) - 22}" x2="${x(i) + 22}" y1="${y(m)}" y2="${y(m)}"/>`; }).join('');
+        return `<svg class="lf-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(r.title || r.name)}">
+            ${ticks.map(v => `<line class="lf-grid" x1="${L}" x2="${W - Rm}" y1="${y(v)}" y2="${y(v)}"/><text class="lf-tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('')}
+            ${ref != null ? `<line class="lf-ref" x1="${L}" x2="${W - Rm}" y1="${y(ref)}" y2="${y(ref)}"/><text class="lf-lab" x="${W - Rm + 6}" y="${y(ref) + 4}">Sulston ${ref}</text>` : ''}
+            <line class="lf-pooled" x1="${L}" x2="${W - Rm}" y1="${y(pooled)}" y2="${y(pooled)}"/><text class="lf-lab" x="${W - Rm + 6}" y="${y(pooled) + 4}">median ${pooled}</text>
+            ${meds}${dots}
+            ${cols.map((c, i) => `<text class="lf-tick" x="${x(i)}" y="${H - B + 16}" text-anchor="end" transform="rotate(-15 ${x(i)} ${H - B + 16})">${esc(c.length > 22 ? c.slice(0, 21) + '…' : c)}</text>`).join('')}
+            <text class="lf-tick" x="${L - 8}" y="${T - 4}" text-anchor="end">min</text>
+        </svg><div class="lf-foot">${rows.length} embryo${rows.length === 1 ? '' : 's'} · ${cols.length} column${cols.length === 1 ? '' : 's'} · median <b>${pooled} min</b> · ${esc(d.label)}</div>`;
+    },
+};
 
 // ── the ledger ───────────────────────────────────────────
 
@@ -2560,7 +2667,7 @@ function renderFindingsSection() {
     const live = list.filter(n => n.status !== 'superseded');
     const gone = list.filter(n => n.status === 'superseded');
     const figs = state.figures || [];
-    return `${figs.length ? `<div class="pj-card">
+    return `${LiveFigures.render()}${figs.length ? `<div class="pj-card">
         <div class="pj-card-head"><h3>Figures</h3><span class="pj-muted">drawn from the pooled sessions; each is a file under the project</span></div>
         <div class="pj-figures">${figs.map(f => `<a class="pj-figure" href="${f.url}" target="_blank" rel="noopener"><img src="${f.url}" alt="${esc(f.name)}"><span>${esc(f.name)}</span></a>`).join('')}</div>
     </div>` : ''}<div class="pj-card">

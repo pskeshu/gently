@@ -21,7 +21,6 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from gently.app.brightfield import overview_frames
 from gently.core.file_store import _read_yaml, _write_yaml
 from gently.tools import TOOLS, session_tools, set_session_tools
-from gently.tools.select import select_sessions
 from gently.ui.web.auth import require_control
 
 # Sulston et al. 1983, at 20 °C: twitching ~ 430 min, hatching ~ 800 min
@@ -135,46 +134,6 @@ def create_router(server) -> APIRouter:
             "frames": frames,
             "rows": rows,
             "report": session_report(store, sid),
-            "sulston_min": SULSTON_TWITCH_TO_HATCH_MIN,
-        }
-
-    @router.get("/api/tools/twitch_hatch/pool")
-    async def pool_twitch_hatch(
-        project: str | None = None, phase: str | None = None, tag: str | None = None
-    ):
-        """Every session the selector picks, its rows pooled, each row carrying
-        the session and the selector's label as its condition."""
-        store = _store()
-        picked = select_sessions(
-            store, getattr(server, "context_store", None), project=project, phase=phase, tag=tag
-        )
-        rows: list[dict] = []
-        sessions: list[dict] = []
-        for s in picked["sessions"]:
-            sid = s["session_id"]
-            rep = session_report(store, sid)
-            sessions.append(
-                {
-                    "session_id": sid,
-                    "name": s.get("name") or sid,
-                    "created_at": s.get("created_at"),
-                    "n": len(rep),
-                }
-            )
-            for i, r in enumerate(rep, 1):
-                rows.append(
-                    {
-                        **r,
-                        "n": i,
-                        "session_id": sid,
-                        "session_name": s.get("name") or sid,
-                        "condition": picked["label"],
-                    }
-                )
-        return {
-            "label": picked["label"],
-            "sessions": sessions,
-            "rows": rows,
             "sulston_min": SULSTON_TWITCH_TO_HATCH_MIN,
         }
 

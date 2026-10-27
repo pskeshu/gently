@@ -1895,3 +1895,26 @@
 .pj-figures { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 14px; }
 .pj-figure { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: var(--text-muted); font-size: 12px; }
 .pj-figure img { display: block; max-width: 560px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fcfcfb; }
+
+/* ---- live figures: recipes drawn in the browser ---- */
+#live-figures .pj-card-head .pj-add { margin-left: auto; }
+.lf-card { padding: 10px 14px; border-top: 1px solid var(--border); }
+.lf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.lf-title { font: inherit; font-weight: 600; font-size: 0.9rem; color: var(--text); background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; min-width: 180px; }
+.lf-title:hover, .lf-title:focus { border-color: var(--border); background: var(--bg-card); outline: none; }
+.lf-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; border: 1px dashed var(--border); border-radius: 999px; padding: 1px 8px; color: var(--text-muted); }
+.lf-chip.on, .lf-chip.fixed { border-style: solid; color: var(--text); }
+.lf-chip span { text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
+.lf-chip input { font: inherit; font-size: 11px; border: 0; background: none; color: var(--text); outline: none; width: auto; }
+.lf-bar select { font: inherit; font-size: 11px; padding: 1px 6px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.lf-del { margin-left: auto; }
+.lf-plot { overflow-x: auto; }
+.lf-svg { display: block; max-width: 100%; height: auto; }
+.lf-grid { stroke: var(--border); }
+.lf-tick, .lf-lab { font-size: 11px; fill: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lf-ref { stroke: var(--text-muted); stroke-dasharray: 2 4; }
+.lf-pooled { stroke: var(--text); stroke-dasharray: 6 4; }
+.lf-med { stroke: var(--accent); stroke-width: 2; }
+.lf-dot { fill: var(--accent); stroke: var(--bg-card); stroke-width: 2; }
+.lf-dot:hover { r: 6; }
+.lf-foot { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
