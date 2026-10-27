@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import Response
 
 from gently.core.file_store import _read_yaml, _write_yaml
+from gently.tools import project_tools, set_project_tools
 from gently.ui.web.auth import require_control
 
 MEDIA = {".png": "image/png", ".svg": "image/svg+xml"}
@@ -50,6 +51,24 @@ def create_router(server) -> APIRouter:
         if folder is None:
             raise HTTPException(status_code=404, detail="Campaign not found")
         return Path(folder) / "figures"
+
+    def _root(cid: str) -> str:
+        cs = getattr(server, "context_store", None)
+        c = cs.resolve_campaign(cid) if cs is not None else None
+        if cs is None or c is None:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return cs.root_campaign_id(c.id) or c.id
+
+    @router.get("/api/campaigns/{cid}/tools")
+    async def get_project_tools(cid: str):
+        return {"tools": project_tools(server.context_store, _root(cid))}
+
+    @router.put("/api/campaigns/{cid}/tools", dependencies=[Depends(require_control)])
+    async def put_project_tools(cid: str, body: dict = Body(default={})):  # noqa: B008
+        root = _root(cid)
+        return {
+            "tools": set_project_tools(server.context_store, root, list(body.get("tools") or []))
+        }
 
     @router.get("/api/campaigns/{cid}/figures")
     async def list_figures(cid: str):

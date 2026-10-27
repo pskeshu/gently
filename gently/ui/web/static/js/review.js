@@ -1216,7 +1216,7 @@ const ReviewApp = {
     renderToolsTab() {
         const s = this.currentSession;
         const on = s.tools || [];
-        const avail = (window.GentlyToolCatalog || []).filter(t => !on.includes(t.name));
+        const avail = (window.GentlyToolCatalog || []).filter(t => (t.scope || 'session') === 'session' && !on.includes(t.name));
         return `
             <div class="session-tools-bar">
                 ${avail.length ? `<select id="session-tool-pick">${avail.map(t => `<option value="${t.name}" title="${this.escapeHtml(t.summary)}">${this.escapeHtml(t.title)}</option>`).join('')}</select>
