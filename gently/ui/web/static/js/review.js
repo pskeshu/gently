@@ -135,15 +135,27 @@ const ReviewApp = {
         return out;
     },
 
+    // The links a session carries, the home first. The list's row has them;
+    // a session.yaml from before the list reads as one link to its project_id.
+    linksOf(s) {
+        if (!s) return [];
+        const src = Array.isArray(s.projects) ? s : (this.sessions.find(x => x.session_id === s.session_id) || s);
+        const links = (src.projects || []).filter(x => x && x.id);
+        if (links.length) return links;
+        return src.project_id ? [{ id: src.project_id, phase: null, role: null, by: null, at: null }] : [];
+    },
+
     projectChip(s) {
-        if (!s.project_id) {
+        const links = this.linksOf(s);
+        if (!links.length) {
             return `<span class="chip chip-unfiled">unfiled</span> <a href="#" class="session-file-link" onclick="event.preventDefault(); event.stopPropagation(); ReviewApp.openFiling('${this.escapeHtml(s.session_id)}')">file under…</a>`;
         }
-        const items = (s.plan_items || []).filter(it => this.rootOf(it.campaign_id) === s.project_id);
+        const chips = links.map((l, i) => `<span class="chip chip-proj" title="${i === 0 ? 'Its home project' : 'Also in this project'}${l.role ? ' · ' + this.escapeHtml(l.role) : ''}">${this.escapeHtml(this.projectName(l.id))}${l.role ? `<small>${this.escapeHtml(l.role)}</small>` : ''}</span>`).join(' ');
+        const items = (s.plan_items || []).filter(it => this.rootOf(it.campaign_id) === links[0].id);
         const served = items.length
             ? `<span class="session-plan-served">plan: ${items.map(it => this.escapeHtml(it.title) + (it.origin === 'manual' ? ' · manual' : '')).join(', ')}</span>`
             : '';
-        return `<span class="chip chip-proj" title="Filed under this project">${this.escapeHtml(this.projectName(s.project_id))}</span>${served}`;
+        return `${chips}${served}`;
     },
 
     // Filing done elsewhere (the agent, the Projects tab) shows up here.
@@ -160,16 +172,15 @@ const ReviewApp = {
         ClientEventBus.on('CONTEXT_UPDATED', bump);
     },
 
-    // ---- filing: one home, chosen here; a second project reached through its item ----
+    // ---- filing: a session informs several projects, in a role per link; the
+    // first link is its home. Adding one is here, so is taking one out, and so
+    // is making another the home. ----
 
-    _filing: null,   // {sid, where: 'list'|'detail', choice, also, newName, error}
+    _filing: null,   // {sid, where: 'list'|'detail', choice, role, also, newName, error}
 
     openFiling(sid, where) {
-        const s = this.sessions.find(x => x.session_id === sid) || this.currentSession || {};
-        const link = (s.projects || []).find(x => x.id === s.project_id) || {};
-        this._filing = { sid, where: where || 'list', choice: s.project_id || '', also: '', newName: '', role: link.role || '', error: '' };
-        this.renderSessionList();
-        if (this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+        this._filing = { sid, where: where || 'list', choice: '', role: '', also: '', newName: '', error: '' };
+        this._paintFiling();
     },
 
     closeFiling() {
@@ -179,40 +190,50 @@ const ReviewApp = {
         if (sid && this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
     },
 
-    filingChoice(value) { if (this._filing) this._filing.choice = value; },
+    // Redraw where the popover lives, and keep the cursor in its text box.
+    _paintFiling() {
+        const f = this._filing;
+        this.renderSessionList();
+        if (f && this.currentSession && this.currentSession.session_id === f.sid) this.renderSessionContent();
+        const box = document.querySelector('.filing-pop input[type="text"]');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    },
+
+    filingChoice(value) { if (this._filing) { this._filing.choice = value; this._paintFiling(); } },
+    filingRole(value) { if (this._filing) this._filing.role = value; },
     filingAlso(value) { if (this._filing) this._filing.also = value; },
     filingNewName(value) { if (this._filing) this._filing.newName = value; },
-    filingRole(value) { if (this._filing) this._filing.role = value; },
 
     renderFilingPopover(s) {
         const f = this._filing;
         if (!f) return '';
         const esc = v => this.escapeHtml(v);
-        const home = s.project_id || '';
-        const opts = this.projects.map(t => {
-            const c = t.campaign || {};
-            const p = t.project || {};
-            const on = f.choice === c.id;
-            return `<label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="${esc(c.id)}" ${on ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> ${esc(c.shorthand || c.description || c.id)} <small>· ${p.sessions || 0} session${p.sessions === 1 ? '' : 's'}${c.id === home ? ' · its home now' : ''}</small></label>`;
+        const links = this.linksOf(s);
+        const home = links.length ? links[0].id : '';
+        const already = new Set(links.map(l => l.id));
+        const opts = this.projects.filter(t => (t.campaign || {}).id && !already.has(t.campaign.id)).map(t => {
+            const c = t.campaign, p = t.project || {};
+            return `<option value="${esc(c.id)}" ${f.choice === c.id ? 'selected' : ''}>${esc(c.shorthand || c.description || c.id)} · ${p.sessions || 0} session${p.sessions === 1 ? '' : 's'}</option>`;
         }).join('');
         const newOn = f.choice === '__new__';
-        const items = this.allPlanItems().filter(it => it.root !== (f.choice && f.choice !== '__new__' ? f.choice : home));
-        const already = new Set((s.plan_items || []).map(it => it.id));
-        const alsoOpts = items.filter(it => !already.has(it.id)).map(it =>
+        const servedAlready = new Set((s.plan_items || []).map(it => it.id));
+        const itemOpts = this.allPlanItems().filter(it => !servedAlready.has(it.id)).map(it =>
             `<option value="${esc(it.root)}|${esc(it.campaign_id)}|${esc(it.id)}" ${f.also === `${it.root}|${it.campaign_id}|${it.id}` ? 'selected' : ''}>${esc(this.projectName(it.root))} › ${esc(it.title)}</option>`).join('');
         return `<div class="filing-pop" onclick="event.stopPropagation()">
-            <div class="filing-title">Its project · one</div>
-            ${opts || '<div class="session-plan-served">No projects yet.</div>'}
-            <label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="__new__" ${newOn ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> New project…</label>
-            ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)" autofocus>` : ''}
+            <div class="filing-title">${home ? 'Add to a project' : 'File under a project'}</div>
+            <select onchange="ReviewApp.filingChoice(this.value)">
+                <option value="">a project…</option>${opts}
+                <option value="__new__" ${newOn ? 'selected' : ''}>New project…</option>
+            </select>
+            ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)">` : ''}
             <div class="filing-also"><span>As</span>
                 <select onchange="ReviewApp.filingRole(this.value)">${['', 'control', 'test', 'reference', 'pilot'].map(r => `<option value="${r}" ${f.role === r ? 'selected' : ''}>${r || '— no role —'}</option>`).join('')}</select></div>
-            ${alsoOpts ? `<div class="filing-also"><span>Also serves a plan item elsewhere?</span>
-                <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${alsoOpts}</select></div>` : ''}
+            ${itemOpts ? `<div class="filing-also"><span>Serves a plan item?</span>
+                <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${itemOpts}</select></div>` : ''}
+            ${home ? `<div class="filing-note">Its home stays <b>${esc(this.projectName(home))}</b>.</div>` : ''}
             ${f.error ? `<div class="filing-err">${esc(f.error)}</div>` : ''}
             <div class="filing-btns">
-                <button type="button" class="go" onclick="ReviewApp.submitFiling()">File</button>
-                ${home ? `<button type="button" class="danger" onclick="ReviewApp.unfileSession('${esc(s.session_id)}')">Unfile</button>` : ''}
+                <button type="button" class="go" onclick="ReviewApp.submitFiling()">${home ? 'Add' : 'File'}</button>
                 <button type="button" onclick="ReviewApp.closeFiling()">Cancel</button>
             </div>
         </div>`;
@@ -228,65 +249,91 @@ const ReviewApp = {
     async submitFiling() {
         const f = this._filing;
         if (!f) return;
-        const s = this.sessions.find(x => x.session_id === f.sid) || this.currentSession || {};
         try {
             let campaignId = f.choice;
             if (campaignId === '__new__') {
                 const name = (f.newName || '').trim();
-                if (!name) { f.error = 'Give the new project a line of description.'; this.renderSessionList(); return; }
+                if (!name) { f.error = 'Give the new project a line of description.'; this._paintFiling(); return; }
                 const made = await this._post('/api/campaigns', { description: name });
                 campaignId = made.campaign.id;
             }
+            if (!campaignId && !f.also) { f.error = 'Pick a project.'; this._paintFiling(); return; }
             if (campaignId) {
-                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, move: !!s.project_id && campaignId !== s.project_id, role: f.role || null });
+                // No move: the first link is the home, a later one is added beside it.
+                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, role: f.role || null });
             }
             if (f.also) {
                 const [, itemCampaign, itemId] = f.also.split('|');
                 await this._post(`/api/campaigns/${encodeURIComponent(itemCampaign)}/items/${encodeURIComponent(itemId)}/sessions`, { session_id: f.sid });
             }
             this._filing = null;
-            await this.loadSessions();
-            if (this.currentSession && this.currentSession.session_id === f.sid) await this.loadSession(f.sid);
+            await this._refiled(f.sid);
         } catch (e) {
             f.error = `Could not file: ${e.message || e}`;
-            this.renderSessionList();
-            if (this.currentSession && this.currentSession.session_id === f.sid) this.renderSessionContent();
+            this._paintFiling();
         }
     },
 
-    async unfileSession(sid) {
+    // After a link changes: the list again, and the open session again.
+    async _refiled(sid) {
+        await this.loadSessions();
+        if (this.currentSession && this.currentSession.session_id === sid) await this.loadSession(sid);
+    },
+
+    // Take the session out of one project. Its other links stay, and if that
+    // one was the home the next link is.
+    async unlinkProject(sid, pid) {
         try {
-            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null });
-            this._filing = null;
-            await this.loadSessions();
-            if (this.currentSession && this.currentSession.session_id === sid) await this.loadSession(sid);
+            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null, from: pid });
+            await this._refiled(sid);
         } catch (e) {
-            if (this._filing) { this._filing.error = `Could not unfile: ${e.message || e}`; this.renderSessionList(); }
+            alert(`Could not take it out of the project: ${e.message || e}`);
         }
     },
 
-    // The detail header's two lines: where the session lives, and what else it served.
+    // Make one of its projects the home: what a reader that takes one id sees.
+    async makeHome(sid, pid) {
+        try {
+            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: pid, move: true });
+            await this._refiled(sid);
+        } catch (e) {
+            alert(`Could not make it the home: ${e.message || e}`);
+        }
+    },
+
+    // The detail header: its home and each project it also informs, each with
+    // its role and who linked it; then any plan item served somewhere else.
     renderFiled(s) {
         const esc = v => this.escapeHtml(v);
-        const home = s.project_id;
+        const links = this.linksOf(s);
+        const home = links.length ? links[0].id : null;
         const items = s.plan_items || [];
         const own = items.filter(it => this.rootOf(it.campaign_id) === home);
-        const elsewhere = items.filter(it => this.rootOf(it.campaign_id) !== home);
-        const openBtn = (label) => `<button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">${label}</button>`;
-        let first;
+        const elsewhere = items.filter(it => !links.some(l => l.id === this.rootOf(it.campaign_id)));
+        const sid = esc(s.session_id);
+        const openBtn = (label) => `<button class="session-edit-btn" onclick="ReviewApp.openFiling('${sid}', 'detail')">${label}</button>`;
+        const name = (pid) => `<b><a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(pid)}')">${esc(this.projectName(pid))}</a></b>`;
+        const tail = (l, isHome) => [
+            l.role ? `<span class="chip" title="Its role in this project">${esc(l.role)}</span>` : '',
+            l.by ? `<span class="session-filed-by">by ${Who.chip(l.by, { when: l.at })}</span>` : '',
+            isHome ? '' : `<button class="session-edit-btn" onclick="ReviewApp.makeHome('${sid}', '${esc(l.id)}')" title="Make this the session's home project">make home</button>`,
+            `<button class="session-edit-btn" onclick="ReviewApp.unlinkProject('${sid}', '${esc(l.id)}')" title="Take the session out of this project${links.length > 1 ? '; its other links stay' : ''}">${links.length > 1 ? 'remove' : 'unfile'}</button>`,
+        ].filter(Boolean).join(' ');
+        const rows = [];
         if (home) {
             const ownText = own.length
                 ? ` · plan item ${own.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(home)}')">${esc(it.title)}</a>${it.origin === 'manual' ? ' <span class="chip">manual</span>' : ''}`).join(', ')}`
                 : '';
-            first = `<div class="session-filed">in <b>${esc(this.projectName(home))}</b>${ownText} ${openBtn('File elsewhere…')}</div>`;
+            rows.push(`<div class="session-filed">in ${name(home)}${ownText} ${tail(links[0], true)} ${openBtn('Add to a project…')}</div>`);
+            links.slice(1).forEach(l => rows.push(`<div class="session-filed">also in ${name(l.id)} ${tail(l, false)}</div>`));
         } else {
-            first = `<div class="session-filed"><span class="chip chip-unfiled">unfiled</span> in no project yet ${openBtn('File under…')}</div>`;
+            rows.push(`<div class="session-filed"><span class="chip chip-unfiled">unfiled</span> in no project yet ${openBtn('File under…')}</div>`);
         }
-        const also = elsewhere.length
-            ? `<div class="session-filed">also serves ${elsewhere.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(this.rootOf(it.campaign_id))}')">${esc(this.projectName(this.rootOf(it.campaign_id)))} › ${esc(it.title)}</a>`).join(', ')} <button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">+ link to another plan item</button></div>`
-            : '';
+        if (elsewhere.length) {
+            rows.push(`<div class="session-filed">also serves ${elsewhere.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(this.rootOf(it.campaign_id))}')">${esc(this.projectName(this.rootOf(it.campaign_id)))} › ${esc(it.title)}</a>`).join(', ')}</div>`);
+        }
         const pop = this._filing && this._filing.sid === s.session_id && this._filing.where === 'detail' ? this.renderFilingPopover(s) : '';
-        return first + also + pop;
+        return rows.join('') + pop;
     },
 
     goToProject(id) {
@@ -446,11 +493,11 @@ const ReviewApp = {
     projectChips() {
         const chips = {};
         const seen = new Set();
-        this.sessions.forEach(s => { if (s.project_id) seen.add(s.project_id); });
+        this.sessions.forEach(s => this.linksOf(s).forEach(l => seen.add(l.id)));
         [...seen].sort((a, b) => this.projectName(a).localeCompare(this.projectName(b))).forEach(pid => {
-            chips[pid] = { label: this.projectName(pid), test: s => s.project_id === pid };
+            chips[pid] = { label: this.projectName(pid), test: s => this.linksOf(s).some(l => l.id === pid) };
         });
-        chips.unfiled = { label: 'unfiled', test: s => !s.project_id };
+        chips.unfiled = { label: 'unfiled', test: s => this.linksOf(s).length === 0 };
         return chips;
     },
 

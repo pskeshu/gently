@@ -402,3 +402,46 @@ class TestTheListIsQuick:
         assert "fetch(`/api/sessions/sizes?ids=" in fill
         assert "s.bytes == null" in fill, "only the sizes the list did not carry are asked for"
         assert "this.repaintHoldings(filled)" in fill, "a batch repaints its rows, not the list"
+
+
+class TestASessionInformsSeveralProjects:
+    """The tab adds a session to a project too.
+
+    "it should be possible to add a session to project from the sessions tab
+    also." The tab's popover chose a session's one project and moved it
+    there; membership is many-to-many with a role per link, and the Projects
+    page adds a link beside the home. Now the tab does the same, shows every
+    link, takes one out, and can make another the home."""
+
+    def test_the_detail_carries_every_link_with_the_home_first(self, store):
+        store.create_session("s1")
+        store.link_session("s1", "p-dose", role="control", by="ryan", home=True)
+        store.link_session("s1", "p-timing", role="reference", by="ryan")
+        got = _client(store).get("/api/sessions/s1").json()
+        assert got["project_id"] == "p-dose"
+        assert [(x["id"], x["role"], x["by"]) for x in got["projects"]] == [
+            ("p-dose", "control", "ryan"),
+            ("p-timing", "reference", "ryan"),
+        ]
+
+    def test_the_detail_reads_the_old_scalar_as_one_link(self, store):
+        store.create_session("old", project_id="p-dose")
+        got = _client(store).get("/api/sessions/old").json()
+        assert [x["id"] for x in got["projects"]] == ["p-dose"]
+
+    def test_the_tab_adds_a_project_beside_the_home_and_takes_one_out(self):
+        # adding never moves: the first link stays the home
+        assert "{ campaign_id: campaignId, role: f.role || null }" in REVIEW_JS
+        assert "Its project · one" not in REVIEW_JS
+        # one link comes out, not all of them; and any link can become the home
+        assert "{ campaign_id: null, from: pid }" in REVIEW_JS
+        assert "{ campaign_id: pid, move: true }" in REVIEW_JS
+        for needle in (
+            "also in ${name(l.id)}",
+            "ReviewApp.makeHome(",
+            "ReviewApp.unlinkProject(",
+            "Add to a project…",
+        ):
+            assert needle in REVIEW_JS, needle
+        # the project filter keeps a session linked there in any role
+        assert "test: s => this.linksOf(s).some(l => l.id === pid)" in REVIEW_JS
