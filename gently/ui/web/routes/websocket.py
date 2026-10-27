@@ -151,6 +151,8 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
             # Client joining with identity info
             client_id = data.get("client_id")
             name = data.get("name")
+            # The person this browser is, if one: the colour is theirs.
+            person = str(data.get("person") or "")[:80] or None
             if client_id:
                 # Sanitize name: strip HTML tags, limit length
                 if name:
@@ -164,7 +166,7 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                         server.manager.active_connections[websocket] = ClientInfo(
                             client_id=client_id,
                             name=name or old_info.name,
-                            color=server.manager._generate_color(client_id),
+                            color=server.manager._generate_color(person or client_id),
                             connected_at=old_info.connected_at,
                         )
                 await server.manager.broadcast_presence()
@@ -177,7 +179,8 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                 import re
 
                 name = re.sub(r"<[^>]+>", "", name)[:50]
-                await server.manager.update_client_name(websocket, name)
+                person = str(data.get("person") or "")[:80] or None
+                await server.manager.update_client_name(websocket, name, person)
 
         elif msg_type == "get_presence":
             # Client requesting current presence list

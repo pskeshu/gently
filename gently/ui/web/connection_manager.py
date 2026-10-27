@@ -49,10 +49,15 @@ class ConnectionManager:
         self.active_connections: dict[WebSocket, ClientInfo] = {}
         self._lock = asyncio.Lock()
 
-    def _generate_color(self, client_id: str) -> str:
-        """Generate consistent color from client_id"""
-        hash_val = sum(ord(c) for c in client_id)
-        return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
+    def _generate_color(self, seed: str) -> str:
+        """One colour per person: the same seed, the person's id, gives the
+        same colour on every browser and every day. A browser with no person
+        is coloured by its own id. Hashed, so that names a letter apart do
+        not share a colour."""
+        import hashlib
+
+        digest = hashlib.md5(seed.encode("utf-8")).digest()
+        return self.AVATAR_COLORS[digest[0] % len(self.AVATAR_COLORS)]
 
     async def connect(
         self, websocket: WebSocket, client_id: str | None = None, name: str | None = None
@@ -98,15 +103,15 @@ class ConnectionManager:
         # Broadcast updated presence to remaining clients
         await self.broadcast_presence()
 
-    async def update_client_name(self, websocket: WebSocket, name: str):
-        """Update a client's display name"""
+    async def update_client_name(self, websocket: WebSocket, name: str, person: str | None = None):
+        """Update a client's display name, and its colour when the person changed."""
         async with self._lock:
             if websocket in self.active_connections:
                 old_info = self.active_connections[websocket]
                 self.active_connections[websocket] = ClientInfo(
                     client_id=old_info.client_id,
                     name=name,
-                    color=old_info.color,
+                    color=self._generate_color(person) if person else old_info.color,
                     connected_at=old_info.connected_at,
                 )
         await self.broadcast_presence()

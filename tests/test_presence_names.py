@@ -105,6 +105,19 @@ class TestThePage:
         fn = PRESENCE[PRESENCE.index("    sendJoin() {") :][:700]
         assert "(this.ready || Promise.resolve()).then(join, join);" in fn
 
+    def test_the_colour_is_the_persons_on_every_browser(self):
+        from gently.ui.web.connection_manager import ConnectionManager
+
+        m = ConnectionManager()
+        assert m._generate_color("hari") == m._generate_color("hari")
+        assert len({m._generate_color(n) for n in ("hari", "hary", "pskeshu", "ryan")}) >= 3
+        j, k = PRESENCE.index("    sendJoin() {"), PRESENCE.index("    handlePresenceUpdate(")
+        join = PRESENCE[j:k]
+        assert "person: this.personId()" in join
+        a, b = PRESENCE.index("    announce() {"), PRESENCE.index("    async become(")
+        announce = PRESENCE[a:b]
+        assert "person: this.personId()" in announce
+
     def test_switching_person_goes_through_the_same_door_as_the_landing_page(self):
         fn = PRESENCE[PRESENCE.index("async become(") : PRESENCE.index("async openSwitcher(")]
         assert "fetch('/api/auth/operator'" in fn
