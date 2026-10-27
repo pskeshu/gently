@@ -30,6 +30,10 @@ def pool(
     if pooler is None:
         raise KeyError(f"no pooler for tool {tool!r}; known: {sorted(POOLERS)}")
     picked = select_sessions(store, cs, project=project, phase=phase, tag=tag)
+    root = None
+    if project and cs is not None:
+        c = cs.resolve_campaign(project)
+        root = cs.root_campaign_id(c.id) if c is not None else None
     # Sessions often share a name; a column must not. Add the id when they do.
     names = [s.get("name") or s["session_id"] for s in picked["sessions"]]
     rows: list[dict] = []
@@ -40,12 +44,31 @@ def pool(
         if names.count(name) > 1:
             name = f"{name} {sid[:4]}"
         rep = pooler(store, sid)
+        link = (
+            next((x for x in (s.get("projects") or []) if x.get("id") == root), None)
+            if root
+            else None
+        )
+        role = (link or {}).get("role") or "unassigned"
         sessions.append(
-            {"session_id": sid, "name": name, "created_at": s.get("created_at"), "n": len(rep)}
+            {
+                "session_id": sid,
+                "name": name,
+                "created_at": s.get("created_at"),
+                "n": len(rep),
+                "role": role,
+            }
         )
         for i, r in enumerate(rep, 1):
             rows.append(
-                {**r, "n": i, "session_id": sid, "session_name": name, "condition": picked["label"]}
+                {
+                    **r,
+                    "n": i,
+                    "session_id": sid,
+                    "session_name": name,
+                    "role": role,
+                    "condition": picked["label"],
+                }
             )
     return {
         "label": picked["label"],

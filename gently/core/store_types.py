@@ -5,6 +5,8 @@ Use these for type annotations on store methods and their callers.
 
 from typing import TypedDict
 
+from typing_extensions import NotRequired
+
 
 class SessionInfo(TypedDict):
     session_id: str
@@ -13,7 +15,9 @@ class SessionInfo(TypedDict):
     created_at: str
     last_active: str
     metadata: dict | None
-    project_id: str | None  # the root campaign it is filed under, or None
+    project_id: str | None  # the home project: the first link below, or None
+    projects: NotRequired[list[dict]]  # the links: {id, phase, role, by, at}
+    tags: NotRequired[list[str]]
 
 
 class EmbryoInfo(TypedDict, total=False):

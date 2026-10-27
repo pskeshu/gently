@@ -275,6 +275,7 @@ def try_auto_link_plan_item(
     session_id: str,
     stop_condition: str,
     interval_seconds: float,
+    store=None,
 ) -> str | None:
     """
     Best-effort auto-link: find a planned imaging item that matches the
@@ -332,7 +333,11 @@ def try_auto_link_plan_item(
             status=PlanItemStatus.IN_PROGRESS,
             session_id=session_id,
         )
-        cs.link_session_campaign(session_id, matched_item.campaign_id)
+        from gently.app.filing import file_session_under
+
+        file_session_under(
+            store, cs, session_id, matched_item.campaign_id, matched_item.id, by="agent"
+        )
         logger.info(
             f"Auto-linked session {session_id} to plan item "
             f"'{matched_item.title}' ({matched_item.id})"

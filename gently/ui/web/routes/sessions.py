@@ -286,6 +286,7 @@ def create_router(server) -> APIRouter:
                     {
                         "session_id": sid,
                         "project_id": s.get("project_id"),
+                        "projects": s.get("projects") or [],
                         "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
                         **extra,
@@ -630,13 +631,14 @@ def create_router(server) -> APIRouter:
         if store is None or store.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found")
         from gently.app.filing import file_session_under, unfile_session
+        from gently.ui.web.auth import current_username
 
         campaign_id = body.get("campaign_id")
         if not campaign_id:
             return {
                 "ok": True,
-                "unfiled": unfile_session(store, cs, session_id),
-                "project_id": None,
+                "unfiled": unfile_session(store, cs, session_id, body.get("from") or None),
+                "project_id": (store.get_session(session_id) or {}).get("project_id"),
             }
         if cs is None:
             raise HTTPException(status_code=503, detail="Context store not available")
@@ -648,9 +650,13 @@ def create_router(server) -> APIRouter:
                 campaign_id,
                 body.get("plan_item_id") or None,
                 move=bool(body.get("move")),
+                role=body.get("role") or None,
+                by=current_username(request) or None,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Campaign not found") from None
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
         return {"ok": True, **result}
 
     @router.get("/api/sessions/{session_id}/plans")

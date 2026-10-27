@@ -45,7 +45,10 @@ def _web_routes() -> list[tuple[str, re.Pattern]]:
     decorator = re.compile(
         r'@router\.(?:get|post|put|delete|patch|websocket|api_route)\(\s*"([^"]+)"'
     )
-    for f in sorted((WEB / "routes").glob("*.py")):
+    # The routers the server registers live in routes/, and the tools' routers
+    # in gently/tools/ (routes/__init__.py imports them alongside).
+    files = list((WEB / "routes").glob("*.py")) + list((WEB.parents[1] / "tools").glob("*.py"))
+    for f in sorted(files):
         for m in decorator.finditer(f.read_text(encoding="utf-8")):
             path = m.group(1)
             rx = re.escape(path)

@@ -145,9 +145,15 @@ class AgentBridge:
                     try:
                         item = cs.get_plan_item(active_id)
                         if item:
-                            cs.link_session_campaign(
+                            from gently.app.filing import file_session_under
+
+                            file_session_under(
+                                getattr(self.agent, "store", None),
+                                cs,
                                 self.agent.session_id,
                                 item.campaign_id,
+                                active_id,
+                                by="agent",
                             )
                     except Exception:
                         pass
