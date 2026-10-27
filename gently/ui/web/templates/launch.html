@@ -308,43 +308,61 @@ async function loadWho() {
   }
   // No accounts: a known name is one click, a new one is typed. Either is
   // remembered by the rig and becomes the cookie the server reads as who.
-  const choose = async (who) => {
+  // Picks are updated in place, never rebuilt, so an edit in progress stays.
+  const chipFor = id => who.querySelector(`[data-user="${CSS.escape(id)}"]`);
+  const markCurrent = () => {
+    who.querySelectorAll("[data-user]").forEach(b => b.setAttribute("aria-checked", String(b.dataset.user === current)));
+    box.placeholder = operatorNames[current] || "Your name";
+  };
+  const choose = async (payload) => {
     try {
-      const r = await fetch("/api/auth/operator", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(who) });
+      const r = await fetch("/api/auth/operator", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!r.ok) return;
       const d = await r.json();
-      if (!(users.users || []).some(u => u.id === d.id)) users.users = [{ id: d.id, name: d.name }, ...(users.users || [])];
       operatorNames[d.id] = d.name;
+      if (!(users.users || []).some(u => u.id === d.id)) users.users = [{ id: d.id, name: d.name }, ...(users.users || [])];
+      if (!chipFor(d.id)) {
+        who.hidden = false;
+        who.insertAdjacentHTML("afterbegin", `<button type="button" class="who-pick" role="radio" data-user="${esc(d.id)}" aria-checked="false" title="Double-click to edit the name">${esc(d.name)}</button>`);
+      }
       current = d.id; box.value = "";
-      paintWho(); paintWhich();
+      markCurrent(); paintWhich();
     } catch (e) {}
   };
-  who.addEventListener("click", e => { const b = e.target.closest("[data-user]"); if (b && !b.querySelector("input")) choose({ id: b.dataset.user }); });
-  // A double-click edits the display name in place: Enter keeps it, Escape
-  // leaves it. The id, and so every record, stays as it was.
+  // A click picks, after a beat; a double-click within that beat edits instead.
+  let clickTimer = null;
+  who.addEventListener("click", e => {
+    const b = e.target.closest("[data-user]");
+    if (!b || b.querySelector("input")) return;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => choose({ id: b.dataset.user }), 260);
+  });
   who.addEventListener("dblclick", e => {
     const b = e.target.closest("[data-user]");
     if (!b || b.querySelector("input")) return;
+    clearTimeout(clickTimer);
     const id = b.dataset.user, old = operatorNames[id] || id;
     b.innerHTML = `<input class="who-edit" value="${esc(old)}" maxlength="40" aria-label="Rename ${esc(old)}">`;
     const inp = b.querySelector("input");
     inp.focus(); inp.select();
-    const done = () => { b.textContent = old; };
+    let closed = false;
+    const close = (text) => { if (closed) return; closed = true; b.textContent = text; };
     inp.addEventListener("keydown", async ev => {
-      if (ev.key === "Escape") { done(); return; }
+      if (ev.key === "Escape") { close(old); return; }
       if (ev.key !== "Enter") return;
+      ev.preventDefault();
       const name = inp.value.trim();
-      if (!name || name === old) { done(); return; }
+      if (!name || name === old) { close(old); return; }
       try {
         const r = await fetch("/api/auth/operator/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name }) });
-        if (!r.ok) { done(); return; }
+        if (!r.ok) { close(old); return; }
         const d = await r.json();
         operatorNames[d.id] = d.name;
         (users.users || []).forEach(u => { if (u.id === d.id) u.name = d.name; });
-        paintWho(); paintWhich();
-      } catch (err) { done(); }
+        close(d.name); markCurrent(); paintWhich();
+      } catch (err) { close(old); }
     });
-    inp.addEventListener("blur", done);
+    inp.addEventListener("blur", () => setTimeout(() => close(operatorNames[id] || old), 120));
   });
   box.addEventListener("keydown", e => { if (e.key === "Enter" && box.value.trim()) choose({ name: box.value.trim() }); });
   box.addEventListener("blur", () => { if (box.value.trim()) choose({ name: box.value.trim() }); });
