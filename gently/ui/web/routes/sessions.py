@@ -287,6 +287,7 @@ def create_router(server) -> APIRouter:
                         "session_id": sid,
                         "project_id": s.get("project_id"),
                         "projects": s.get("projects") or [],
+                        "operators": [str(x) for x in (s.get("operators") or [])],
                         "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
                         **extra,
@@ -392,7 +393,9 @@ def create_router(server) -> APIRouter:
                 if held is None:
                     continue
                 held["active"] = sid == active
-                held["project_id"] = (store.get_session(sid) or {}).get("project_id")
+                info = store.get_session(sid) or {}
+                held["project_id"] = info.get("project_id")
+                held["operators"] = [str(x) for x in (info.get("operators") or [])]
                 out.append(held)
                 if len(out) >= limit:
                     break
@@ -528,7 +531,7 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"switch failed: {e}") from e
 
     @router.post("/api/sessions/new", dependencies=[Depends(require_control)])
-    async def new_session():
+    async def new_session(request: Request):
         """Open a fresh session from inside the app — until now that meant
         closing Gently and opening it again. The current session is saved;
         the embryo list, transcript and per-session logs start empty; a
@@ -543,6 +546,7 @@ def create_router(server) -> APIRouter:
             server.rehydrate_session(sid)
         except Exception:
             logger.debug("rehydrate of a fresh session failed", exc_info=True)
+        _remember_operator(request, sid)
         server.gate_passed = True
         try:
             await server.manager.broadcast({"type": "session_changed", "session_id": sid})
@@ -550,8 +554,20 @@ def create_router(server) -> APIRouter:
             pass
         return {"ok": True, "session_id": sid, "previous": got.get("previous")}
 
+    def _remember_operator(request: Request, sid: str | None) -> None:
+        """A session remembers who opened or resumed it."""
+        from gently.ui.web.auth import current_username
+
+        try:
+            store = _file_store()
+            who = current_username(request)
+            if sid and store is not None and who:
+                store.add_session_operator(sid, who)
+        except Exception:
+            logger.debug("could not stamp the operator on %s", sid, exc_info=True)
+
     @router.post("/api/sessions/{session_id}/resume", dependencies=[Depends(require_control)])
-    async def resume_session(session_id: str):
+    async def resume_session(session_id: str, request: Request):
         """Make a saved session live: new images, the transcript and the
         stage targets belong to it from here on. Viewing a session needs
         none of this — the Sessions tab reads the folder. The current
@@ -587,6 +603,7 @@ def create_router(server) -> APIRouter:
         # assistant. gate_passed is in-memory and resets on any backend restart,
         # which is exactly what made a resume-to-view land on the launch gate.
         server.gate_passed = True
+        _remember_operator(request, session_id)
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
         try:

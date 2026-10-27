@@ -144,6 +144,21 @@ const HomeApp = (() => {
         } catch (_) { /* the chip falls back to the id */ }
     }
 
+    const _operatorNames = {};
+    async function ensureOperatorNames() {
+        if (Object.keys(_operatorNames).length) return;
+        try {
+            const d = await (await fetch('/api/auth/users')).json();
+            (d.users || []).forEach(u => { _operatorNames[u.id] = u.name; });
+        } catch (_) { /* ids show as themselves */ }
+    }
+
+    function whoChip(s) {
+        const ops = s.operators || [];
+        if (!ops.length) return '';
+        return `<span class="home-tag" title="Who worked this session">${escapeHtml(ops.map(o => _operatorNames[o] || o).join(', '))}</span>`;
+    }
+
     function projectChip(s) {
         if (!s.project_id) return '<span class="home-tag home-tag-unfiled" title="In no project yet">unfiled</span>';
         const name = _projectNames[s.project_id] || String(s.project_id).slice(0, 8);
@@ -154,7 +169,7 @@ const HomeApp = (() => {
         const el = document.getElementById('home-recent-sessions');
         if (!el) return;
         try {
-            const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames()]);
+            const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames(), ensureOperatorNames()]);
             const sessions = (data.sessions || []).slice(0, SESSIONS_N);
             if (!sessions.length) { empty(el, 'No sessions yet.'); return; }
             el.innerHTML = sessions.map(s => {
@@ -166,7 +181,7 @@ const HomeApp = (() => {
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;

@@ -668,6 +668,30 @@ class FileStore:
         self._write_links(session_id, links)
         return links
 
+    def add_session_operator(self, session_id: str, operator_id: str | None) -> list[str]:
+        """Who has worked this session: ids, in order of first appearance.
+        Stamped when a session is opened, resumed or started at the gate."""
+        if not operator_id:
+            return self.session_operators(session_id)
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return []
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return []
+        ops = [str(x) for x in (data.get("operators") or [])]
+        if operator_id not in ops:
+            ops.append(operator_id)
+            data["operators"] = ops
+            _write_yaml(yaml_path, data)
+        return ops
+
+    def session_operators(self, session_id: str) -> list[str]:
+        data: Mapping[str, Any] = self.get_session(session_id) or {}
+        ops = data.get("operators") or []
+        return [str(x) for x in ops] if isinstance(ops, list) else []
+
     def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
         """The old scalar door, kept for its callers: make ``project_id`` the
         home, or clear every link when None."""
