@@ -127,7 +127,7 @@ def pot(store: Any, cs: Any, project_id: str) -> dict:
         for n in notes:
             when = n.created_at.strftime("%Y-%m-%d %H:%M") if n.created_at else ""
             who = "agent" if getattr(n.author, "value", n.author) == "agent" else "person"
-            parts.append(f"  {when} ({who}) {n.body}")
+            parts.append(f"  {when} ({who}) {n.title + ': ' if n.title else ''}{n.body}")
     return {
         "text": "\n".join(parts),
         "sessions": sorted(members),
