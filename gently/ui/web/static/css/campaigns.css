@@ -1716,6 +1716,8 @@
 .pj-stats b { color: var(--text); font-weight: 600; }
 .pj-q { padding: 6px 18px 0; font-size: 0.92rem; color: var(--text); }
 .pj-q small { color: var(--text-muted); margin-left: 8px; font-size: 0.78rem; }
+.pj-row1 .pj-head-in { font: inherit; font-size: 1.05rem; font-weight: 600; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg-card); color: var(--text); width: 18ch; }
+.pj-headform { display: grid; gap: 6px; margin: 6px 18px 0; max-width: 560px; }
 .pj-facets { display: grid; grid-template-columns: 64px 1fr; gap: 6px 12px; padding: 10px 18px 12px; align-items: baseline; }
 .pj-k { color: var(--text-muted); font-size: 0.66rem; letter-spacing: .06em; text-transform: uppercase; }
 .pj-vals { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-height: 22px; min-width: 0; }
@@ -1793,7 +1795,7 @@
 .pj-addrow small { color: var(--text-muted); margin-left: 6px; }
 .pj-addrow:hover { text-decoration: underline; }
 .pj-form { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg-dark); }
-.pj-form input, .pj-form select, .pj-form textarea, .pj-newform input { font: inherit; font-size: 0.78rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); width: 100%; box-sizing: border-box; }
+.pj-form input, .pj-form select, .pj-form textarea, .pj-newform input, .pj-headform input { font: inherit; font-size: 0.78rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); width: 100%; box-sizing: border-box; }
 .pj-form textarea { resize: vertical; }
 .pj-err { color: var(--accent-red); font-size: 0.74rem; padding: 4px 0 0; }
 .pj-err::before { content: '\25C6 '; }
