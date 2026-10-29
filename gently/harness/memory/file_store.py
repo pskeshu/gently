@@ -558,6 +558,24 @@ class FileContextStore:
             return
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
+        if description is not None or shorthand is not None:
+            self._follow_name(campaign_id, folder, data)
+
+    def _follow_name(self, campaign_id: str, folder: Path, data: dict) -> None:
+        """The folder is named id_slug for whoever browses the tree, so a
+        renamed project's folder moves to its new slug. The id inside
+        campaign.yaml is what finds it again, so a rename that fails, a handle
+        held open on Windows, leaves everything working under the old name."""
+        slug = self._slugify(data.get("shorthand") or data.get("description") or "")
+        new = folder.with_name(f"{campaign_id}_{slug}")
+        if new == folder or new.exists():
+            return
+        try:
+            folder.rename(new)
+        except OSError:
+            logger.debug("campaign folder %s kept its name", folder.name, exc_info=True)
+            return
+        self._campaign_index[campaign_id] = new
 
     def root_campaign_id(self, campaign_id: str) -> str | None:
         """The project a campaign belongs to: itself when it is a root, else the

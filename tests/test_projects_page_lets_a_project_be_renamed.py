@@ -34,3 +34,21 @@ def test_an_empty_short_name_clears_it(tmp_path):
     c = cs.get_campaign(pid)
     assert c.description == "Does LED dose change hatching time?"
     assert not c.shorthand
+
+
+def test_the_folder_on_disk_follows_the_name(tmp_path):
+    cs = FileContextStore(tmp_path / "agent")
+    pid = cs.create_campaign("Does LED dose change time to hatching?", shorthand="dose")
+    before = cs.campaign_dir(pid)
+    assert before.name == f"{pid}_dose"
+    (before / "reading.md").write_text("KNOWN. Nothing yet.", encoding="utf-8")
+    cs.update_campaign(pid, shorthand="led-dose")
+    after = cs.campaign_dir(pid)
+    assert after.name == f"{pid}_led-dose" and after.is_dir() and not before.exists()
+    assert (after / "reading.md").read_text(encoding="utf-8") == "KNOWN. Nothing yet."
+    assert cs.get_campaign(pid).shorthand == "led-dose"
+    # a fresh store finds it by the id in its yaml, under the new name
+    assert FileContextStore(tmp_path / "agent").campaign_dir(pid) == after
+    # no short name: the question names the folder
+    cs.update_campaign(pid, shorthand="")
+    assert cs.campaign_dir(pid).name == f"{pid}_does-led-dose-change-time-to-h"
