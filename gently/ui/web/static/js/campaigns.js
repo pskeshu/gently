@@ -2317,6 +2317,7 @@ function renderOverview() {
     const lines = state.stream, on = state.ptools;
     if (!lines || !on) return loadingBox('the project');
     const cat = (state.catalogue || []).filter(t => t.scope === 'project');
+    const tools = new Set((state.catalogue || []).map(t => t.title));  // a tool's line wears its name; a person's headline leads the text
     const avail = cat.filter(t => !on.includes(t.name));
     const title = n => ((cat.find(t => t.name === n) || {}).title || n);
     const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
@@ -2331,8 +2332,8 @@ function renderOverview() {
         <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
         <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
             <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
-            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
-            <span class="rd-text">${esc(n.body)}</span>
+            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${tools.has(n.title) ? `<span class="pj-chip">${esc(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
+            <span class="rd-text">${n.title && !tools.has(n.title) ? `<b>${esc(n.title)}</b>: ` : ''}${esc(n.body)}</span>
             ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
         </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
     </div>`;

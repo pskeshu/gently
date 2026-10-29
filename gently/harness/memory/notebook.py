@@ -304,6 +304,20 @@ class NotebookStore:
         data = self._read_yaml(path)
         return note_from_dict(data) if data else None
 
+    def delete_note(self, note_id: str) -> bool:
+        """Take a note out: its file and its index entries. For a line a tool
+        rewrites and owns; a note another note rests on is superseded, not
+        deleted. False when there was no such note."""
+        path = self._note_path(note_id)
+        if path is None:
+            return False
+        path.unlink()
+        for buckets in self._index.values():
+            for ids in buckets.values():
+                if note_id in ids:
+                    ids.remove(note_id)
+        return True
+
     def query_notes(
         self,
         *,

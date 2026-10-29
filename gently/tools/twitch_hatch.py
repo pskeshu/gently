@@ -13,13 +13,14 @@ report is derived on read, never stored.
 
 from datetime import datetime
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from gently.app.brightfield import overview_frames
 from gently.core.file_store import _read_yaml, _write_yaml
+from gently.harness.memory.notebook import Author, Note, NoteKind
 from gently.tools import TOOLS, session_tools, set_session_tools
 from gently.ui.web.auth import current_username, require_control
 
@@ -28,6 +29,7 @@ from gently.ui.web.auth import current_username, require_control
 SULSTON_TWITCH_TO_HATCH_MIN = 370.0
 
 FILE = Path("annotations") / "twitch_hatch.yaml"
+TITLE = TOOLS["twitch_hatch"]["title"]
 
 
 def _key(r: dict) -> tuple:
@@ -98,6 +100,65 @@ def session_report(store: Any, sid: str) -> list[dict]:
     if not rows:
         return []
     return report(rows, overview_frames(store, sid), store.read_temperature_log(sid) or [])
+
+
+def line(rep: list[dict]) -> str:
+    """The session's stream line: what is marked, with the minutes as they
+    stand. A template, not a model, so it says only what the rows say; the
+    reading is where prose about several sessions gets written. Empty when
+    nothing is marked."""
+    done = [r for r in rep if r.get("minutes") is not None]
+    waiting = len(rep) - len(done)
+    parts: list[str] = []
+    if done:
+        ms = sorted(float(r["minutes"]) for r in done)
+        n = len(ms)
+        bit = f"Marked on {n} embryo{'' if n == 1 else 's'}: "
+        bit += f"{ms[0]:g} min" if n == 1 else f"{ms[0]:g} to {ms[-1]:g} min, median {median(ms):g}"
+        temps = [float(r["temp_c"]) for r in done if r.get("temp_c") is not None]
+        if temps:
+            bit += f", at {mean(temps):.1f} °C"
+        parts.append(bit + ".")
+    if waiting:
+        parts.append(f"{waiting} more without a hatching time yet.")
+    return " ".join(parts)
+
+
+def note_marks(store: Any, cs: Any, sid: str, who: str | None) -> str | None:
+    """The session's one note for this tool: filed to the session, so it is in
+    the stream of every project the session is in, now or later; signed by
+    whoever saved last. Written on the first save, rewritten in place after,
+    gone when the last mark is taken off. Returns the note id, or None."""
+    nb = getattr(cs, "notebook", None)
+    if nb is None:
+        return None
+    # ponytail: a scan of the people's notes; give the notebook a session index when it grows.
+    have = next(
+        (n for n in nb.query_notes(author=Author.HUMAN) if n.title == TITLE and sid in n.sessions),
+        None,
+    )
+    body = line(session_report(store, sid))
+    if not body:
+        if have is not None:
+            nb.delete_note(have.id)
+        return None
+    note = have or Note(
+        id="",
+        kind=NoteKind.OBSERVATION,
+        body=body,
+        author=Author.HUMAN,
+        title=TITLE,
+        sessions=[sid],
+    )
+    note.body, note.by = body, who
+    nid: str = nb.write_note(note)
+    try:
+        from gently.core.event_bus import EventType, emit
+
+        emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="twitch_hatch")
+    except Exception:
+        pass
+    return nid
 
 
 def create_router(server) -> APIRouter:
@@ -179,6 +240,7 @@ def create_router(server) -> APIRouter:
                 row["by"], row["at"] = who, datetime.now().isoformat(timespec="seconds")
             rows.append(row)
         _write_yaml(sd / FILE, rows)
+        note_marks(store, getattr(server, "context_store", None), sid, who)
         return {"rows": rows}
 
     return router
