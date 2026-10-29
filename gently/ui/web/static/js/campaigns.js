@@ -77,6 +77,7 @@ const state = {
     sectionError: '',
     openForm: null,             // the one inline form or menu open, e.g. 'item', 'answer:<id>'
     newProjectOpen: false,
+    editHead: false,       // the header's question and short name are inputs
     search: null,               // the add popover: {q, groups, sel, rows, ctrls, timer}
     searchMsg: '',
     planMsg: '',
@@ -192,6 +193,10 @@ function boot() {
     });
     document.addEventListener('keydown', e => {
         if (e.target && e.target.id === 'pj-search-input') onSearchKey(e);
+        else if (state.editHead && e.target.closest?.('#pj-head [data-field]')) {
+            if (e.key === 'Enter') { e.preventDefault(); projectAction('head-save', e.target, e); }
+            else if (e.key === 'Escape') projectAction('head-cancel', e.target, e);
+        }
     });
     document.addEventListener('change', e => {
         const el = e.target.closest ? e.target.closest('select[data-action]') : null;
@@ -2082,7 +2087,7 @@ async function api(method, url, body) {
 
 // An error is shown beside the control that caused it, never in an alert.
 function showErr(el, msg) {
-    const host = el?.closest?.('.pj-form, .pj-entry, .pj-chip, .pj-head, .pj-card, .pj-newform, .pj-planbar') || el?.parentElement;
+    const host = el?.closest?.('.pj-form, .pj-headform, .pj-entry, .pj-chip, .pj-head, .pj-card, .pj-newform, .pj-planbar') || el?.parentElement;
     if (!host) return;
     let box = host.querySelector(':scope > .pj-err');
     if (!box) {
@@ -2229,9 +2234,12 @@ function renderProjectHeader() {
         ['notes', 'Notes', null],
     ];
     const stat = (n, word) => `<span><b>${n}</b> ${word}</span>`;
+    const attr = v => esc(v).replace(/"/g, '&quot;');  // esc() leaves quotes alone; a value attribute cannot
     return `<div class="pj-head" id="pj-head">
         <div class="pj-row1">
-            <h2>${esc(c.shorthand || c.description || 'Project')}</h2>
+            ${state.editHead
+                ? `<input class="pj-head-in" data-field="shorthand" value="${attr(c.shorthand)}" placeholder="short name (optional)" title="The short name, as the navigator and the breadcrumb show it">`
+                : `<h2>${esc(c.shorthand || c.description || 'Project')}</h2><button class="pj-add" data-action="head-edit" title="Change the question or the short name">edit</button>`}
             <span class="pj-state"><span class="pj-dot ${dot}"></span>${summary.live ? 'live now' : esc(c.status || 'active')}</span>
             <span class="pj-muted">since ${esc(formatDate(c.created_at))}</span>
             <span class="pj-stats">
@@ -2241,7 +2249,9 @@ function renderProjectHeader() {
                 ${summary.proposed_findings ? stat(summary.proposed_findings, 'finding' + (summary.proposed_findings === 1 ? '' : 's') + ' to confirm') : ''}
             </span>
         </div>
-        <div class="pj-q">${esc(c.description || '')}${c.target ? `<small>${esc(c.target)}</small>` : ''}</div>
+        ${state.editHead
+            ? `<div class="pj-headform"><input data-field="description" value="${attr(c.description)}" placeholder="What does the project ask? One line."><div class="pj-act"><button data-action="head-save">Save</button><button data-action="head-cancel">Cancel</button></div></div>`
+            : `<div class="pj-q">${esc(c.description || '')}${c.target ? `<small>${esc(c.target)}</small>` : ''}</div>`}
         <div class="pj-facets">
             <span class="pj-k">Strains</span>
             <div class="pj-vals">${strains.map(s => refChip(s, true)).join('')}<button class="pj-add" data-action="search-open" data-as="strain">+ add</button></div>
@@ -2993,6 +3003,24 @@ async function projectAction(action, el, e) {
                 state.newProjectOpen = !state.newProjectOpen;
                 renderNewProjectForm();
                 return;
+            case 'head-edit':
+                state.editHead = true;
+                renderCanvas();
+                document.querySelector('#pj-head [data-field="description"]')?.focus();
+                return;
+            case 'head-cancel':
+                state.editHead = false;
+                renderCanvas();
+                return;
+            case 'head-save': {
+                const d = fields(document.getElementById('pj-head'));
+                if (!d.description) { showErr(el, 'Say what the project asks, in one line.'); return; }
+                // An empty short name clears it: the route keeps every field it is sent and drops only the ones left out.
+                await api('PATCH', `/api/campaigns/${P}`, { description: d.description, shorthand: d.shorthand });
+                state.editHead = false;
+                await refreshActiveCampaign();
+                return;
+            }
             case 'new-project-cancel':
                 state.newProjectOpen = false;
                 renderNewProjectForm();
