@@ -311,9 +311,9 @@ def create_router(server) -> APIRouter:
                         # The walk over a session's files is the one slow read
                         # left here: a cached size comes now, the rest arrive
                         # through /api/sessions/sizes once the list is drawn.
-                        "bytes": folder_bytes(
-                            store._session_dir(sid), fresh=sid == active_id, cached_only=True
-                        ),
+                        # Never a walk from the list, the live session's included:
+                        # its row shows the last size counted, the detail counts afresh.
+                        "bytes": folder_bytes(store._session_dir(sid), cached_only=True),
                         "brightfield_references": _reference_count(store, sid),
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
@@ -751,8 +751,12 @@ def create_router(server) -> APIRouter:
             "last_active": info.get("last_active", ""),
             "run": (held or {}).get("run"),
             "last_run": (held or {}).get("last_run"),
+            # A fresh count only for the live session, whose folder is growing;
+            # a finished session's size is what the cache last counted.
             "bytes": await asyncio.to_thread(
-                folder_bytes, store._session_dir(session_id), fresh=True
+                folder_bytes,
+                store._session_dir(session_id),
+                fresh=session_id == _active_session_id(),
             ),
             "acquisition": acquisition,
             "embryos": embryos,

@@ -33,6 +33,8 @@ from typing import Any
 import numpy as np
 import yaml
 
+from gently.core.file_store import _read_yaml
+
 logger = logging.getLogger(__name__)
 
 FOLDER = ("calibration", "brightfield")
@@ -285,8 +287,8 @@ def read_record(folder: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        doc = _read_yaml(path)
+    except (OSError, yaml.YAMLError, ValueError):
         return None
     return doc if isinstance(doc, dict) else None
 

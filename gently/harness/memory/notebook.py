@@ -20,6 +20,8 @@ from typing import Any
 
 import yaml
 
+from gently.core.file_store import _read_yaml as _read_yaml_memo
+
 from .model import Confidence, Learning, Observation
 
 
@@ -307,11 +309,12 @@ class NotebookStore:
         os.replace(str(tmp), str(path))
 
     def _read_yaml(self, path: Path) -> dict | None:
+        # The store's reader: libyaml, and a note that has not changed is not parsed again.
         try:
-            with open(path, encoding="utf-8") as fh:
-                return yaml.safe_load(fh)
-        except OSError:
+            doc = _read_yaml_memo(path)
+        except (OSError, ValueError):
             return None
+        return doc if isinstance(doc, dict) else None
 
     def _note_path(self, note_id: str) -> Path | None:
         return next(self.notes_dir.glob(f"{note_id}_*.yaml"), None)

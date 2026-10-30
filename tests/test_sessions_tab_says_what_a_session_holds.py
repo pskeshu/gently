@@ -389,11 +389,16 @@ class TestTheListIsQuick:
         # Walked once, the list knows it from then on.
         assert c.get("/api/sessions").json()["sessions"][0]["bytes"] == sizes["s1"]
 
-    def test_the_active_session_is_always_walked_fresh(self, store):
+    def test_the_list_never_walks_and_the_detail_counts_the_live_session_afresh(self, store):
+        # The live session's folder is the biggest and it grows; a walk of it
+        # on every list call was the one slow read left in the list. The row
+        # takes the last size counted; opening the session counts it anew.
         _session_with_a_run(store)
         sessions_routes._SIZE_CACHE.clear()
-        s = _client(store, active="s1").get("/api/sessions").json()["sessions"][0]
-        assert s["active"] and s["bytes"] > 0
+        c = _client(store, active="s1")
+        s = c.get("/api/sessions").json()["sessions"][0]
+        assert s["active"] and s["bytes"] is None
+        assert c.get("/api/sessions/s1").json()["bytes"] > 0
 
     def test_the_tab_draws_the_list_then_asks_for_sizes_in_batches(self):
         load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:1200]

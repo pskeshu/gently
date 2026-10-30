@@ -55,6 +55,7 @@ Usage::
 """
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -107,13 +108,15 @@ def _validate_path_component(value: str, label: str) -> str:
 
 
 def _safe_child_path(parent: Path, component: str, label: str) -> Path:
-    """Return parent/component after validating it stays below parent."""
+    """Return parent/component after validating it stays below parent.
+
+    The component is one plain name (no separators, not a dot name), so the
+    only way out of ``parent`` is a symlink planted under that name. One
+    lstat catches it; the two resolve() walks this did before cost the
+    Sessions list a tenth of its time."""
     component = _validate_path_component(component, label)
-    base = parent.resolve()
-    child = (parent / component).resolve()
-    try:
-        child.relative_to(base)
-    except ValueError:
+    child = parent / component
+    if os.path.islink(child):
         raise ValueError(f"{label} escapes storage root: {component!r}") from None
     return child
 
@@ -204,6 +207,17 @@ def _write_yaml(path: Path, data: Any) -> None:
         raise
 
 
+# libyaml when it is installed: the same safe constructor, ten times the parse speed.
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+# path -> (mtime_ns, size, document). A file that has not changed since it
+# was last read is not opened or parsed again; the Sessions list read every
+# session.yaml twice per call and that was most of its time. Callers get a
+# copy, so what they do to the document stays theirs.
+# ponytail: unbounded; a rig holds tens of thousands of small yaml files at most.
+_YAML_MEMO: dict[str, tuple[int, int, Any]] = {}
+
+
 def _read_yaml(path: Path) -> Any:
     """Read a YAML file.  Returns None if missing or empty.
 
@@ -213,12 +227,18 @@ def _read_yaml(path: Path) -> Any:
     unsafe_load them, since a YAML file on disk is not a trust boundary
     (it may be synced, imported, or attacker-supplied).
     """
-    if not path.exists():
+    try:
+        st = os.stat(path)
+    except OSError:
         return None
+    key = str(path)
+    hit = _YAML_MEMO.get(key)
+    if hit is not None and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return copy.deepcopy(hit[2])
     with open(path, encoding="utf-8") as f:
         text = f.read()
     try:
-        return yaml.safe_load(text)
+        data = yaml.load(text, Loader=_LOADER)  # noqa: S506 - a safe loader, chosen above
     except yaml.constructor.ConstructorError as err:
         marker = str(err)
         if "python/object" not in marker and "numpy" not in marker:
@@ -227,6 +247,8 @@ def _read_yaml(path: Path) -> Any:
             f"Refusing to load unsafe YAML tags from {path}. "
             "Migrate this file to safe YAML before opening it in Gently."
         ) from err
+    _YAML_MEMO[key] = (st.st_mtime_ns, st.st_size, data)
+    return copy.deepcopy(data)
 
 
 def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
@@ -1403,24 +1425,49 @@ class FileStore:
             return proj_path
         return None
 
+    def projection_timepoints_and_latest(
+        self, session_id: str, embryo_id: str
+    ) -> tuple[list[int], float | None]:
+        """The timepoints with a projection, sorted, and the newest one's
+        mtime: one directory scan, no Path per file, one stat at the end."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return [], None
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
+        tps: list[int] = []
+        newest: os.DirEntry | None = None
+        best = -1
+        try:
+            with os.scandir(proj_dir) as it:
+                for entry in it:
+                    name = entry.name
+                    if not (name.startswith("t") and name.endswith(".jpg")):
+                        continue
+                    digits = name[1:-4]
+                    if not digits.isdigit():
+                        continue
+                    tp = int(digits)
+                    tps.append(tp)
+                    if tp > best:
+                        best, newest = tp, entry
+        except FileNotFoundError:
+            return [], None
+        tps.sort()
+        latest: float | None = None
+        if newest is not None:
+            try:
+                latest = newest.stat().st_mtime
+            except OSError:
+                latest = None
+        return tps, latest
+
     def list_projection_timepoints(self, session_id: str, embryo_id: str) -> list[int]:
-        """Cheaply list projection timepoints (glob only, no PIL/meta reads).
+        """Cheaply list projection timepoints (names only, no PIL/meta reads).
 
         Used to rehydrate the viz image store on resume without paying the
         per-file cost of list_projections().
         """
-        sd = self._session_dir(session_id)
-        if sd is None:
-            return []
-        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
-        if not proj_dir.exists():
-            return []
-        tps: list[int] = []
-        for jpg in proj_dir.glob("t*.jpg"):
-            m = re.match(r"t(\d+)\.jpg$", jpg.name)
-            if m:
-                tps.append(int(m.group(1)))
-        return sorted(tps)
+        return self.projection_timepoints_and_latest(session_id, embryo_id)[0]
 
     def get_projection_b64(self, session_id: str, embryo_id: str, timepoint: int) -> str | None:
         """Return base64-encoded JPEG projection, or None."""
