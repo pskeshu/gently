@@ -298,11 +298,11 @@
 .session-plan {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 12px 16px;
     margin: 12px 0 16px;
 }
-.session-plan-empty { color: var(--text-muted); font-size: 13px; }
+.session-plan-empty { color: var(--text-muted); font-size: 12.5px; background: none; border: 0; padding: 2px 0; margin: 6px 0 2px; }
 .session-plan-title {
     font-size: 11px;
     font-weight: 600;
@@ -389,11 +389,7 @@
 }
 .msg-tool code { font-size: 11px; opacity: 0.9; }
 
-.empty-tab {
-    text-align: center;
-    padding: 48px;
-    color: var(--text-muted);
-}
+.empty-tab { text-align: center; padding: 36px 16px; color: var(--text-muted); font-size: 13px; }
 
 /* Embryo grid */
 .embryo-grid {
@@ -405,7 +401,7 @@
 .embryo-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px;
 }
 
@@ -439,15 +435,15 @@
     gap: 6px;
 }
 
-.embryo-details .detail {
-    font-size: 13px;
-    color: var(--text-muted);
-}
-
-.embryo-details .detail span {
-    color: var(--text);
-    font-weight: 500;
-}
+/* The stage is the fact; the rest is one quiet line under it. */
+.embryo-stage { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.005em; }
+.embryo-stage.is-none { font-weight: 500; color: var(--text-muted); font-style: italic; }
+.embryo-conf { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-left: 6px; }
+.embryo-meta { font-size: 12px; color: var(--text-muted); }
+.embryo-pos { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.embryo-role { margin-left: auto; }
+.embryo-header { gap: 8px; }
+.embryo-header h3 { font-size: 15px; font-weight: 600; }
 
 /* Detections */
 
@@ -514,7 +510,7 @@
 .message {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px;
 }
 
@@ -619,6 +615,13 @@
     border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer;
 }
 .session-edit-btn:hover { color: var(--text); border-color: var(--accent); }
+/* Beside the title and on the filed line, an action is a quiet link, not a chip
+   among chips; the one real button up here is Make live. */
+.session-title .session-edit-btn, .session-filed .session-edit-btn {
+    border: 0; background: none; color: var(--accent); padding: 0 2px; font-size: 12.5px;
+}
+.session-title .session-edit-btn:hover, .session-filed .session-edit-btn:hover { text-decoration: underline; color: var(--accent); }
+.session-export-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-right: 2px; }
 .session-name-form { display: grid; gap: 8px; margin: 4px 0 8px; max-width: 640px; }
 .session-name-form input, .session-name-form textarea {
     font: inherit; width: 100%; box-sizing: border-box; padding: 6px 10px;
@@ -670,7 +673,7 @@
 /* Export */
 /* Export and movies share one line; filled after the first paint, they keep their height. */
 .session-export, .session-movies { display: inline-flex; vertical-align: middle; align-items: center; margin-top: 8px; min-height: 30px; }
-.session-movies { margin-left: 6px; }
+.session-movies { margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--border); }
 .session-movie-option { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); }
 /* The form's input rule is for text boxes; a radio or checkbox is not one. */
 .session-movie-option input { width: auto; flex: 0 0 auto; margin: 0; padding: 0; font-size: inherit; }
@@ -779,10 +782,11 @@
 .th-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .th-fields { display: flex; gap: 4px; }
 .session-edit-btn.is-on { color: var(--text); border-color: var(--accent); }
-.th-slider { flex: 1; accent-color: var(--accent); }
+.th-slider { flex: 1; max-width: 440px; accent-color: var(--accent); }
+.th-empty { color: var(--text-muted); font-style: italic; font-weight: 400; }
 .th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }
-.th-img { display: block; max-width: 100%; max-height: 70vh; border-radius: 6px; border: 1px solid var(--border); background: var(--img-bg); }
+.th-img { display: block; max-width: 100%; width: 720px; max-height: 70vh; object-fit: contain; border-radius: 8px; border: 1px solid var(--border); background: var(--img-bg); }
 .th-pin { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
 .th-pin.is-open { background: #f59e0b; }
 .th-table { margin-top: 10px; border-collapse: collapse; font-size: 12px; }

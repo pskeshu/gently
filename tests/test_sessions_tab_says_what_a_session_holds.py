@@ -335,7 +335,9 @@ class TestTheFilters:
         assert 'id="session-filters"' in panel and "filter-with-content" not in panel
         for needle in (
             "FILTERS:",
-            "holds:",
+            "content:",
+            "channel:",
+            "spim:",
             "brightfield:",
             "interrupted:",
             "never:",
@@ -350,8 +352,10 @@ class TestTheFilters:
             assert needle in REVIEW_JS, needle
         # Every chip says how many sessions it would keep.
         assert '<span class="n">${n}</span>' in REVIEW_JS
-        # Brightfield-only sessions are content: the old checkbox hid them.
-        assert "defaults: ['embryos', 'brightfield']" in REVIEW_JS
+        # The usual view hides empties; the channel chips only narrow when asked.
+        # "i think the idea is i want channel filter -- not embryos or brightfield"
+        assert "defaults: ['nonempty']" in REVIEW_JS and "defaults: []," in REVIEW_JS
+        assert "label: 'SPIM'" in REVIEW_JS and "label: 'non-empty'" in REVIEW_JS
 
 
 class TestTheListIsQuick:
