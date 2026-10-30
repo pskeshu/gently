@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from gently.core.file_store import _read_yaml
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,11 +114,8 @@ def read_checkpoint(store, sid: str) -> dict:
     """The session's timelapse.yaml, or {}."""
     try:
         folder = store._session_dir(sid)
-        path = Path(folder) / "timelapse.yaml" if folder is not None else None
-        if path is not None and path.is_file():
-            import yaml
-
-            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if folder is not None:
+            doc = _read_yaml(Path(folder) / "timelapse.yaml") or {}
             return doc if isinstance(doc, dict) else {}
     except Exception:
         logger.debug("checkpoint of %s could not be read", sid, exc_info=True)
@@ -136,20 +135,22 @@ def what_a_session_holds(store, sid: str) -> dict | None:
     timepoints = 0
     last_image: float | None = None
     for eid in embryo_ids:
+        # One scan of the projections folder gives both the count and the
+        # newest file; the second walk this used to make was a third of the
+        # Sessions list's file operations.
+        taken: float | None = None
         try:
-            tps = store.list_projection_timepoints(sid, eid) or []
+            tps, taken = store.projection_timepoints_and_latest(sid, eid)
         except Exception:
-            tps = []
+            try:
+                tps = store.list_projection_timepoints(sid, eid) or []
+            except Exception:
+                tps = []
         if not tps:
             continue
         timepoints += len(tps)
-        try:
-            newest = store.get_projection_path(sid, eid, max(tps))
-            if newest is not None:
-                taken = newest.stat().st_mtime
-                last_image = taken if last_image is None else max(last_image, taken)
-        except OSError:
-            pass
+        if taken is not None:
+            last_image = taken if last_image is None else max(last_image, taken)
 
     # ``run`` is only an interrupted run — the launch gate offers those to
     # carry on. ``last_run`` is whatever the checkpoint says, for the
