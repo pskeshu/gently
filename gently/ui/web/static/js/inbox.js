@@ -43,25 +43,28 @@ const Inbox = (() => {
         return name ? `${lead || ''}${name}` : '';
     }
 
-    // The count sits after your name. Presence redraws its container on every
-    // update, so the pill is put back each time.
+    // Your name in the header is the door: click it for the asks and your own
+    // lines, and the count of unopened asks sits on it as a badge. Presence
+    // redraws its container on every update, so the chip is wired each time.
     function draw() {
         const you = document.querySelector('.presence-you');
         if (!you) return;
         if (!pill) {
-            pill = document.createElement('button');
-            pill.type = 'button';
+            pill = document.createElement('span');
             pill.className = 'inbox-pill';
-            pill.addEventListener('click', e => { e.stopPropagation(); toggle(); });
+            pill.setAttribute('aria-hidden', 'true');
         }
         const n = data.asks.filter(i => !i.seen).length;
-        // The count is what you have not opened. Always drawn: with nothing
-        // unopened it is a quiet 0, and behind it are the list and your own lines.
         pill.textContent = String(n);
-        pill.classList.toggle('has-new', n > 0);
         pill.classList.toggle('is-empty', !n);
-        pill.title = n ? `${n} unopened for you` : 'Nothing unopened · the list and your own lines';
-        if (pill.previousElementSibling !== you) you.insertAdjacentElement('afterend', pill);
+        if (pill.parentElement !== you) you.appendChild(pill);
+        you.classList.add('is-inbox');
+        you.setAttribute('role', 'button');
+        you.tabIndex = 0;
+        you.setAttribute('aria-haspopup', 'true');
+        you.setAttribute('data-tooltip', n ? `${n} unopened for you · click for the list and your own lines` : 'Who is on this view · click for the asks and your own lines');
+        you.onclick = e => { e.stopPropagation(); toggle(); };
+        you.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
     }
 
     function toggle() { if (pop) close(); else show(); }
