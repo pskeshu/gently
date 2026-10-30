@@ -1921,6 +1921,14 @@
 .lf-dot:hover { r: 6; }
 .lf-foot { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
+/* the data tool: every measurement, pooled per tool, one row per embryo */
+.dt-tool + .dt-tool { border-top: 1px solid var(--border); }
+.dt-head { display: flex; align-items: baseline; gap: 10px; padding: 8px 14px 4px; font-size: 0.8rem; font-weight: 600; }
+.dt-head .pj-muted { font-weight: 400; }
+.dt-wrap { overflow-x: auto; }
+.dt-foot { font-size: 12px; color: var(--text-muted); padding: 6px 14px 10px; }
+.pj-obs .z { color: var(--text-muted); }
+
 /* ---- between: the reading and the stream ---- */
 #reading .pj-card-head .rd-btn { margin-left: auto; }
 .rd-stale { color: var(--accent); font-weight: 600; }

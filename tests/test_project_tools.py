@@ -11,7 +11,7 @@ from gently.tools import (
 
 def test_tools_have_a_scope_and_each_side_imports_only_its_own(tmp_path):
     assert tools_of("session") == ["twitch_hatch"]
-    assert tools_of("project") == ["figures", "reading"]
+    assert tools_of("project") == ["figures", "reading", "data"]
     store = FileStore(tmp_path)
     cs = FileContextStore(tmp_path / "agent")
     proj = cs.create_campaign("A question", shorthand="q")
