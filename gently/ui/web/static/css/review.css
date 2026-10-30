@@ -87,6 +87,7 @@
 }
 
 .session-item {
+    content-visibility: auto; contain-intrinsic-size: auto 120px;   /* rows off screen are not laid out */
     padding: 14px 14px 12px;
     background: transparent;
     border-radius: 10px;
@@ -236,7 +237,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: all 0.15s ease;
+    transition: color, border-color, background 0.15s ease;
 }
 
 .session-tabs .tab:hover {
@@ -367,22 +368,6 @@
 }
 .embryo-header h3 small { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 4px; }
 
-.stage-calls { display: flex; flex-wrap: wrap; gap: 6px; }
-.stage-call {
-    display: inline-flex;
-    gap: 6px;
-    align-items: baseline;
-    font-size: 12px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text);
-    text-decoration: none;
-}
-.stage-call:hover { border-color: var(--accent); }
-.stage-call-t { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); }
-.stage-call-conf { color: var(--text-muted); }
 
 .message.tool { opacity: 0.85; }
 .message.tool .message-role { color: var(--text-muted); }
@@ -458,19 +443,7 @@
 }
 
 /* Detections */
-.detections-list {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
 
-.detection-group h4 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
 
 .detection-item {
     background: var(--bg-card);
@@ -675,10 +648,6 @@
 .session-temp svg { width: 100%; height: 72px; display: block; }
 .session-temp-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; display: flex; gap: 12px; }
 .session-temp-head span { font-weight: 400; letter-spacing: 0; text-transform: none; }
-.event-list { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; }
-.event-list time { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; }
-.event-list .is-warn::before { content: '! '; color: var(--accent-amber); font-weight: 700; }
-.event-list .is-error::before { content: '✕ '; color: var(--accent-red); font-weight: 700; }
 
 /* A fresh session from here */
 .sidebar-header { gap: 8px; }
@@ -691,8 +660,8 @@
 .session-new-btn:hover { background: var(--accent); color: var(--bg-dark); }
 
 /* Export */
-.session-export { margin-top: 10px; }
-.session-movies { margin-top: 6px; }
+.session-export { margin-top: 10px; min-height: 30px; }   /* filled after the first paint: keep the height */
+.session-movies { margin-top: 6px; min-height: 30px; }
 .session-movie-option { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); }
 /* The form's input rule is for text boxes; a radio or checkbox is not one. */
 .session-movie-option input { width: auto; flex: 0 0 auto; margin: 0; padding: 0; font-size: inherit; }
@@ -759,6 +728,7 @@
 .session-filed .session-edit-btn { margin-left: 2px; }
 
 /* the session's stream: the project's card, on the session */
+.session-stream { min-height: 150px; }
 .session-stream .pj-card { margin: 12px 0 4px; }
 
 /* the add-to-a-project popover: a project, in a role, optionally serving a plan item */

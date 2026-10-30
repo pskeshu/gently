@@ -76,9 +76,20 @@ const TwitchHatchTool = {
     // rest of the pane stands, so the image element is not rebuilt per step.
     scrub() {
         const cur = this.frame(), el = this.el;
-        el.querySelector('.th-img').src = `${this.url(cur.stem)}?max=1024`;
+        this.setFrame(el.querySelector('.th-img'), `${this.url(cur.stem)}?max=1024`);
         el.querySelector('.th-when').textContent = `frame ${cur.frame ?? ''} · ${this.hms(cur.captured_at)}`;
         el.querySelectorAll('[data-hatch]').forEach(b => { b.textContent = `hatch here (f${cur.frame})`; });
+    },
+
+    // A slider sweep asks the server for the frames it can show, one at a time.
+    setFrame(img, src) {
+        if (!img._gated) {
+            img._gated = true;
+            const landed = () => { img.dataset.loading = ''; const w = img.dataset.want; if (w) { img.dataset.want = ''; this.setFrame(img, w); } };
+            img.addEventListener('load', landed); img.addEventListener('error', landed);
+        }
+        if (img.dataset.loading) { img.dataset.want = src; return; }
+        img.dataset.loading = '1'; img.src = src;
     },
 
     wire() {
@@ -110,7 +121,7 @@ const TwitchHatchTool = {
         const r = await fetch(`/api/sessions/${encodeURIComponent(this.sid)}/tools/twitch_hatch`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows }),
         });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || `HTTP ${r.status}`); return; }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); const m = d.detail || `HTTP ${r.status}`; if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, 6000, 'error'); else console.error(m); return; }
         await this.mount(this.el, this.sid);
     },
 };

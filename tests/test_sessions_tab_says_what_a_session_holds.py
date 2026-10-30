@@ -140,8 +140,15 @@ class TestThePane:
         assert 'class="tab-content"' not in REVIEW_JS
         assert "session-tab-content" in REVIEW_JS and ".session-tab-content" in REVIEW_CSS
 
-    def test_the_pane_shows_plan_pictures_frames_and_stage_calls(self):
-        needles = ("renderPlan(", "embryo-thumb", "renderBfStrip(", "stage-call", "tool_result")
+    def test_the_pane_shows_plan_pictures_frames_and_the_stage_strip(self):
+        needles = (
+            "renderPlan(",
+            "embryo-thumb",
+            "renderBfStrip(",
+            "stageBar(",
+            "stageRuns(",
+            "tool_result",
+        )
         for needle in needles:
             assert needle in REVIEW_JS, needle
 
@@ -302,7 +309,7 @@ class TestNaming:
 
 
 class TestThePaneAgain:
-    def test_the_pane_names_scrubs_bars_doses_and_tells_what_happened(self):
+    def test_the_pane_names_scrubs_bars_doses_and_removed_embryos(self):
         needles = (
             "editName(",
             "suggestName(",
@@ -310,8 +317,6 @@ class TestThePaneAgain:
             "wireScrub(",
             "stageBar(",
             "dose(",
-            "renderEventsTab(",
-            "temperatureSpark(",
             "renderRemoved(",
             "session-search",
         )
@@ -445,3 +450,35 @@ class TestASessionInformsSeveralProjects:
             assert needle in REVIEW_JS, needle
         # the project filter keeps a session linked there in any role
         assert "test: s => this.linksOf(s).some(l => l.id === pid)" in REVIEW_JS
+
+
+class TestThePageKeepsItsPlace:
+    """ "after i leave a stream comment in the session, the sessions page
+    reloads... it does not give a snap feeling to gently." A note changes no
+    row, so it reloads nothing; a filing repaints its row and the filed line;
+    rows already drawn are never replaced by "Loading"; the Stage calls and
+    What happened tabs are gone."""
+
+    def test_a_note_does_not_reload_the_list_and_a_filing_repaints_one_row(self):
+        assert "ClientEventBus.on('CONTEXT_UPDATED', bump)" not in REVIEW_JS
+        assert "'PLAN_UPDATED', 'SESSION_STARTED', 'SESSION_RESTORED'" in REVIEW_JS
+        assert 'if (!this.sessions.length) list.innerHTML = \'<div class="loading">' in REVIEW_JS
+        for needle in (
+            "repaintRow(",
+            "repaintFiled(",
+            "showing()",
+            "chipTable()",
+            "searchInput()",
+            "_loadRun",
+        ):
+            assert needle in REVIEW_JS, needle
+        for gone in (
+            'data-tab="detections"',
+            'data-tab="events"',
+            "renderDetectionsTab(",
+            "renderEventsTab(",
+            "alert(",
+        ):
+            assert gone not in REVIEW_JS, gone
+        panel = (WEB / "templates" / "_sessions_panel.html").read_text(encoding="utf-8")
+        assert 'oninput="ReviewApp.searchInput()"' in panel

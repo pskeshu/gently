@@ -13,7 +13,7 @@
         </div>
         <div class="sidebar-filter">
             <input type="search" class="session-search" id="session-search" placeholder="Find a session…"
-                   aria-label="Find a session" oninput="ReviewApp.renderSessionList()">
+                   aria-label="Find a session" oninput="ReviewApp.searchInput()">
             {# Filter chips: what a session holds, how its run ended, when, and
                the recordings it carries. review.js draws them with counts. #}
             <div class="session-filters" id="session-filters"></div>
