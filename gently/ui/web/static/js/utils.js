@@ -202,3 +202,85 @@ const Who = {
     },
 };
 
+/**
+ * Mentions — "@ryan" in a line is an ask. Typing @ in a box offers the rig's
+ * people; a saved line draws each person it asks as their chip. The server
+ * decides which @words are people (the note's `mentions`); the box only
+ * helps type them.
+ */
+const Mentions = {
+    RE: /(^|[^\w@])@([a-z0-9][a-z0-9-]*)/gi,
+    // The line as html: the people it asks as chips, everything else escaped.
+    html(text, mentions) {
+        const asked = new Set(mentions || []);
+        const s = text || '';
+        let out = '', last = 0, m;
+        const re = new RegExp(this.RE.source, 'gi');
+        while ((m = re.exec(s)) !== null) {
+            const id = m[2].replace(/-+$/, '');
+            if (!asked.has(id)) continue;
+            const at = m.index + m[1].length;
+            out += escapeHtml(s.slice(last, at)) + Who.chip(id);
+            last = at + 1 + id.length;
+        }
+        return out + escapeHtml(s.slice(last));
+    },
+    // Offer people while the caret is in an @word; Enter, Tab or a click completes it.
+    attach(input) {
+        if (!input || input._mentions) return;
+        input._mentions = true;
+        let pop = null, hits = [], sel = 0;
+        const close = () => { if (pop) pop.remove(); pop = null; hits = []; };
+        const word = () => {
+            const m = /(^|[^\w@])@([a-z0-9-]*)$/i.exec(input.value.slice(0, input.selectionStart));
+            return m ? { start: input.selectionStart - m[2].length - 1, q: m[2].toLowerCase() } : null;
+        };
+        const pick = i => {
+            const w = word(), u = hits[i];
+            if (!w || !u) return;
+            const v = input.value, c = input.selectionStart;
+            input.value = v.slice(0, w.start) + '@' + u.id + ' ' + v.slice(c);
+            const at = w.start + u.id.length + 2;
+            input.setSelectionRange(at, at);
+            close();
+        };
+        const draw = () => {
+            const w = word();
+            if (!w) { close(); return; }
+            hits = Object.values(Who.people).filter(u => u.id !== 'agent'
+                && (u.id.toLowerCase().startsWith(w.q) || (u.name || '').toLowerCase().startsWith(w.q))).slice(0, 6);
+            if (!hits.length) { close(); return; }
+            sel = Math.min(sel, hits.length - 1);
+            if (!pop) { pop = document.createElement('div'); pop.className = 'mention-pop'; input.insertAdjacentElement('afterend', pop); }
+            pop.innerHTML = hits.map((u, i) => `<button type="button" class="mention-opt${i === sel ? ' on' : ''}" data-i="${i}">${Who.chip(u.id)}</button>`).join('');
+            pop.querySelectorAll('.mention-opt').forEach(b => { b.onmousedown = e => { e.preventDefault(); pick(Number(b.dataset.i)); }; });
+        };
+        input.addEventListener('input', () => { sel = 0; draw(); });
+        // Before the box's own Enter: while the list is up, Enter completes the name.
+        input.addEventListener('keydown', e => {
+            if (!pop) return;
+            if (e.key === 'ArrowDown') { sel = (sel + 1) % hits.length; draw(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { sel = (sel + hits.length - 1) % hits.length; draw(); e.preventDefault(); }
+            else if (e.key === 'Enter' || e.key === 'Tab') { pick(sel); e.preventDefault(); e.stopImmediatePropagation(); }
+            else if (e.key === 'Escape') { close(); e.stopImmediatePropagation(); }
+        }, true);
+        input.addEventListener('blur', () => setTimeout(close, 150));
+    },
+};
+
+/**
+ * One stream line, the same on a project's Overview and on a session: when,
+ * who, a tool's title as a chip or a person's headline as the lead, the
+ * words with the people they ask as chips, and the session it cites.
+ */
+function streamLineHtml(n, toolTitles) {
+    const isTool = !!(toolTitles && n.title && toolTitles.has(n.title));
+    const lead = n.title && !isTool ? `<b>${escapeHtml(n.title)}</b>: ` : '';
+    return `<div class="pj-entry rd-line">
+        <span class="pj-muted rd-when">${escapeHtml(formatDate(n.created_at))}</span>
+        ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${isTool ? `<span class="pj-chip">${escapeHtml(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${escapeHtml(n.kind)}</span>` : ''}
+        <span class="rd-text">${lead}${Mentions.html(n.body, n.mentions)}</span>
+        ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => escapeHtml(String(x).slice(0, 8))).join(' ')}</span>` : ''}
+    </div>`;
+}
+

@@ -12,7 +12,9 @@ from gently.harness.memory.notebook import (
     Note,
     NoteKind,
     NoteStatus,
+    as_tags,
     embryo_refs,
+    mentions_in,
     note_to_dict,
 )
 from gently.ui.web.auth import current_username, require_control
@@ -135,6 +137,13 @@ def create_router(server) -> APIRouter:
         status = _coerce(NoteStatus, body.get("status")) or (
             NoteStatus.OPEN if kind == NoteKind.QUESTION else NoteStatus.CONFIRMED
         )
+        # "@ryan …" is an ask: the people named, if the rig knows them, go in
+        # mentions, and the line reaches their inbox.
+        from gently.ui.web.routes.inbox import known_people
+
+        mentions = list(
+            dict.fromkeys(as_tags(body.get("mentions")) + mentions_in(text, known_people(server)))
+        )
         note = Note(
             id="",
             kind=kind,
@@ -147,6 +156,7 @@ def create_router(server) -> APIRouter:
             sessions=body.get("sessions") or [],
             threads=body.get("threads") or [],
             projects=body.get("projects") or [],
+            mentions=mentions,
             basis=list(body.get("basis") or []),
             by=current_username(request),
         )

@@ -26,6 +26,7 @@ QUIET = (
     "/api/images",
     "/api/volumes3d",
     "/api/ui/",
+    "/api/inbox/",
     "/replay/",
 )
 

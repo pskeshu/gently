@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -111,6 +112,7 @@ class Note:
     sessions: list[str] = field(default_factory=list)
     threads: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)  # root campaign ids
+    mentions: list[str] = field(default_factory=list)  # people asked, by id (@ryan)
     basis: list[str] = field(default_factory=list)  # note ids this rests on
     links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
     artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
@@ -126,6 +128,7 @@ class Note:
         self.sessions = as_tags(self.sessions)
         self.threads = as_tags(self.threads)
         self.projects = as_tags(self.projects)
+        self.mentions = as_tags(self.mentions)
 
 
 def note_to_dict(n: Note) -> dict[str, Any]:
@@ -143,6 +146,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "sessions": list(n.sessions),
         "threads": list(n.threads),
         "projects": list(n.projects),
+        "mentions": list(n.mentions),
         "basis": list(n.basis),
         "links": list(n.links),
         "artifacts": list(n.artifacts),
@@ -167,6 +171,7 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         sessions=as_tags(d.get("sessions")),
         threads=as_tags(d.get("threads")),
         projects=as_tags(d.get("projects")),
+        mentions=as_tags(d.get("mentions")),
         basis=list(d.get("basis") or []),
         links=list(d.get("links") or []),
         artifacts=list(d.get("artifacts") or []),
@@ -207,11 +212,34 @@ def learning_to_note(learning: Learning) -> Note:
     )
 
 
+# "@ryan", "@hari-shroff": an id after an @ that does not sit inside a word
+# or an address (x@ryan.org is not an ask).
+MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9-]*)", re.IGNORECASE)
+
+
+def mentions_in(text: str, people: Iterable[str]) -> list[str]:
+    """The people a line asks, in order of first mention: each @id in the
+    text that names someone the rig knows. An @word that is nobody stays words."""
+    known = {p.lower(): p for p in people}
+    out: list[str] = []
+    for m in MENTION.finditer(text or ""):
+        pid = known.get(m.group(1).rstrip("-").lower())
+        if pid and pid not in out:
+            out.append(pid)
+    return out
+
+
 class NotebookStore:
     """File-backed store for notebook Notes. One YAML per note under notes/;
     flat pool, rebuildable reverse-indexes (added in Task 3)."""
 
-    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads", "project": "projects"}
+    _FACETS = {
+        "strain": "strains",
+        "embryo": "embryos",
+        "thread": "threads",
+        "project": "projects",
+        "person": "mentions",
+    }
 
     def __init__(self, notebook_dir: Path):
         self.root = Path(notebook_dir)
@@ -225,6 +253,7 @@ class NotebookStore:
             "embryo": {},
             "thread": {},
             "project": {},
+            "person": {},
         }
         self.rebuild_index()
 
@@ -238,7 +267,7 @@ class NotebookStore:
 
     def rebuild_index(self) -> None:
         """Rebuild reverse-indexes by scanning notes/."""
-        self._index = {"strain": {}, "embryo": {}, "thread": {}, "project": {}}
+        self._index = {"strain": {}, "embryo": {}, "thread": {}, "project": {}, "person": {}}
         for f in sorted(self.notes_dir.glob("*.yaml")):
             data = self._read_yaml(f)
             if data:
@@ -255,6 +284,10 @@ class NotebookStore:
 
     def ids_for_project(self, project: str) -> list[str]:
         return list(self._index["project"].get(project, []))
+
+    def ids_for_person(self, person: str) -> list[str]:
+        """Notes that ask this person: their id is in ``mentions``."""
+        return list(self._index["person"].get(person, []))
 
     # ---- helpers (mirror FileContextStore conventions) ----
     @staticmethod
@@ -328,6 +361,7 @@ class NotebookStore:
         embryo: str | None = None,
         thread: str | None = None,
         project: str | None = None,
+        person: str | None = None,
     ) -> list[Note]:
         """Structural query: narrow by scope via the indexes, then filter by
         kind/author/status. Returned newest-first. (No semantic ranking here —
@@ -342,6 +376,8 @@ class NotebookStore:
             scope_sets.append(set(self.ids_for_thread(thread)))
         if project is not None:
             scope_sets.append(set(self.ids_for_project(project)))
+        if person is not None:
+            scope_sets.append(set(self.ids_for_person(person)))
         candidate_ids: set[str] | None = set.intersection(*scope_sets) if scope_sets else None
 
         # 2. load + filter

@@ -170,6 +170,10 @@ const ReviewApp = {
         };
         ClientEventBus.on('PLAN_UPDATED', bump);
         ClientEventBus.on('CONTEXT_UPDATED', bump);
+        // A line written elsewhere on the open session shows up in its stream.
+        ClientEventBus.on('CONTEXT_UPDATED', d => {
+            if ((!d || !d.kind || d.kind === 'note') && this.currentSession) this.mountStream(this.currentSession.session_id, true);
+        });
     },
 
     // ---- filing: a session informs several projects, in a role per link; the
@@ -746,6 +750,8 @@ const ReviewApp = {
                 <div class="session-movies" id="session-movies"></div>
             </div>
 
+            <div class="session-stream" id="session-stream"></div>
+
             ${this.renderPlan(s.acquisition)}
 
             <div class="session-tabs">
@@ -780,7 +786,44 @@ const ReviewApp = {
         this.wireScrub();
         this.pollExport(true);
         this.pollMovie(true);
+        this.mountStream(s.session_id);
         void frames;
+    },
+
+    // ---- the stream: what people wrote on this session, and the box -------
+    // The same lines the project's Overview shows for this session, written
+    // here. @ a person in a line to ask them; it reaches their inbox. A tool
+    // note (saved marks) is a line too. `quiet` is a redraw from an event:
+    // it leaves a line someone is still typing alone.
+    async mountStream(sid, quiet) {
+        const host = document.getElementById('session-stream');
+        if (!host || !sid) return;
+        const typing = document.getElementById('session-stream-line');
+        if (quiet && typing && document.activeElement === typing && typing.value) return;
+        let notes = [];
+        try {
+            const [n, t] = await Promise.all([
+                fetch(`/api/notebook/notes?session=${encodeURIComponent(sid)}`).then(r => r.json()),
+                this._toolTitles ? Promise.resolve(null) : fetch('/api/tools').then(r => r.json()).catch(() => ({})),
+            ]);
+            notes = n.notes || [];
+            if (t) this._toolTitles = new Set((t.tools || []).map(x => x.title));
+        } catch (e) { /* the box still works */ }
+        if (!this.currentSession || this.currentSession.session_id !== sid) return;
+        notes.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        host.innerHTML = `<div class="pj-card session-stream-card">
+            <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed here, in your words; @ a person to ask them</span></div>
+            <div class="rd-add"><input id="session-stream-line" placeholder="One line, in your words. Enter files it to this session." autocomplete="off"></div>
+            <div class="pj-stack">${notes.length ? notes.map(n => streamLineHtml(n, this._toolTitles)).join('') : '<div class="pj-none">Nothing written on this session yet.</div>'}</div>
+        </div>`;
+        const box = document.getElementById('session-stream-line');
+        Mentions.attach(box);
+        box.onkeydown = async e => {
+            if (e.key !== 'Enter' || !box.value.trim()) return;
+            try { await this._post('/api/notebook/notes', { body: box.value.trim(), sessions: [sid] }); }
+            catch (err) { alert(`Could not file the line: ${err.message || err}`); return; }
+            this.mountStream(sid);
+        };
     },
 
     // ---- export, for Fiji and for finding the experiment again -----------

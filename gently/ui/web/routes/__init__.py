@@ -24,6 +24,7 @@ from .data import create_router as create_data_router
 from .device_layer import create_router as create_device_layer_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
+from .inbox import create_router as create_inbox_router
 from .logs import create_router as create_logs_router
 from .notebook import create_router as create_notebook_router
 from .operation_plan import create_router as create_operation_plan_router
@@ -58,6 +59,7 @@ def register_all_routes(server):
         create_chat_router,
         create_context_router,
         create_notebook_router,
+        create_inbox_router,
         create_temperature_router,
         create_operation_plan_router,
         create_roles_router,

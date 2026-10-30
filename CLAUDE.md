@@ -136,6 +136,7 @@ D:/Gently3/
     active/watchpoints.yaml
     active/questions.yaml
     embryo_understanding/{uid}.yaml
+    people/{id}/seen.yaml                  # which asks (@mentions in notes) this person has opened
     ml/pipelines/{id}.yaml
     ml/runs/{id}.yaml
     ml/assessments/{id}.yaml
