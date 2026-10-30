@@ -289,7 +289,9 @@ function streamLineHtml(n, toolTitles, opts = {}) {
     const who = n.author === 'agent' ? Who.head('agent') : Who.head(n.by);
     const cite = opts.cite === false || !(n.sessions || []).length ? ''
         : `<span class="pj-cite" title="The session this was written on">${n.sessions.map(x => escapeHtml(String(x).slice(0, 8))).join(' ')}</span>`;
-    return `<div class="rd-line${isTool ? ' is-tool' : ''}${n.author === 'agent' ? ' is-agent' : ''}">
+    // data-note-id: a link from elsewhere (a Notebook card's session chip,
+    // /review?session=…#note-<id>) lands on this very line.
+    return `<div class="rd-line${isTool ? ' is-tool' : ''}${n.author === 'agent' ? ' is-agent' : ''}" data-note-id="${escapeHtml(n.id || '')}">
         <div class="rd-head">${who}${isTool ? `<span class="pj-chip">${escapeHtml(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${escapeHtml(n.kind)}</span>` : ''}<span class="rd-when">${escapeHtml(formatDate(n.created_at))}</span>${cite}</div>
         <div class="rd-text">${lead}${Mentions.html(n.body, n.mentions)}</div>
     </div>`;

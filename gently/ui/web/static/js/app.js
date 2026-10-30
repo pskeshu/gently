@@ -777,10 +777,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial statusbar update (subsequent updates are event-driven from websocket.js)
     setTimeout(updateStatusbar, 500);
 
-    // Handle hash-based tab routing (e.g., /#plans, /#sessions, /#plans:campaignId)
+    // Handle hash-based tab routing (e.g., /#plans, /#sessions, /#plans:campaignId,
+    // /#sessions:sessionId:noteId — a session, landing on one line of its stream)
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
-        const [tab, param] = hash.split(':');
+        const [tab, param, item] = hash.split(':');
         if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY || tab === TABS.DEVICES || tab === TABS.SETTINGS) {
             switchTab(tab);
             if (tab === TABS.SETTINGS && param && typeof SettingsTab !== 'undefined') {
@@ -788,6 +789,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);
+            }
+            if (tab === TABS.SESSIONS && param && typeof ReviewApp !== 'undefined') {
+                setTimeout(() => ReviewApp.openNote(param, item || null), 200);
             }
         }
         // Clean up the hash

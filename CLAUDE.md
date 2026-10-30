@@ -136,6 +136,9 @@ D:/Gently3/
     active/watchpoints.yaml
     active/questions.yaml
     embryo_understanding/{uid}.yaml
+    notebook/notes/{id}_{slug}.yaml        # the shared lab notebook: one note per file, flat; `in_notebook: false` = set aside
+    notebook/removed/{id}_{slug}.yaml      # a deleted note, whole, restorable
+    notebook/pages/{id}_{slug}.yaml        # a page: a saved query over the notes + its conversation with the agent
     people/{id}/seen.yaml                  # which asks (@mentions in notes) this person has opened
     ml/pipelines/{id}.yaml
     ml/runs/{id}.yaml

@@ -1952,3 +1952,6 @@
 .pj-tool-actions select { font: inherit; font-size: 12px; padding: 2px 6px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
 .pj-tool-drop { font-weight: 400; }
 .pj-tool-body .pj-figures { padding-top: 0; }
+
+/* The line a Notebook link landed on (/review?session=…#note-<id>), lit for a moment. */
+.rd-line.is-target { background: var(--accent-soft, #f5f8ff); box-shadow: inset 3px 0 0 var(--accent); transition: background .6s; }

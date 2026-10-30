@@ -191,12 +191,16 @@ class TestTheTool:
 
 class TestThePage:
     def test_the_tag_is_the_label_the_server_built(self):
-        assert "n.embryo_refs.map(r => r.label)" in JS
+        assert "n.embryo_refs.map(r => ({ label: r.label" in JS
 
     def test_a_string_is_never_walked_as_a_list(self):
         assert "(n.embryos || []).map" not in JS
-        assert "Array.isArray(n.embryos) ? n.embryos : []" in JS
+        assert "Array.isArray(n.embryos) ? n.embryos.map(e => ({ label: e, sid: null })) : []" in JS
 
     def test_a_note_without_embryos_still_says_its_session(self):
-        assert "const sessions = embryos.length ? [] :" in JS
-        assert "sessions.map(s => 'session ' + s)" in JS
+        assert "const sessions = Array.isArray(n.sessions) ? n.sessions : []" in JS
+        assert (
+            ".concat(embryos.length ? [] : sessions.map(s => ({ text: sessionLabel(s), sid: s })))"
+            in JS
+        )
+        assert "return name && name !== sid ? name : 'session ' + String(sid).slice(0, 8);" in JS

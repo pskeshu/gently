@@ -99,6 +99,23 @@
     margin-left: auto; font-size: 11px; color: var(--text-muted, #94a3b8);
     text-transform: uppercase; letter-spacing: .05em;
 }
+/* "Put back", on a card in the Set aside view. */
+.nb-putback {
+    flex: none; margin-left: 4px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--accent, #2f6df6); background: transparent; color: var(--accent, #2f6df6);
+    font: 600 11px/1.4 inherit; letter-spacing: .02em; transition: background .12s, color .12s;
+}
+.nb-putback:hover { background: var(--accent, #2f6df6); color: #fff; }
+/* The × that sets a note aside: quiet until the card is under the pointer,
+   red when the × itself is. Undo lives in the toast it raises. */
+.nb-del {
+    flex: none; width: 22px; height: 22px; margin-left: 4px; padding: 0;
+    border: 0; border-radius: 6px; background: transparent;
+    color: var(--text-muted, #94a3b8); font: 600 16px/1 inherit; cursor: pointer;
+    opacity: 0; transition: opacity .12s, background .12s, color .12s;
+}
+.nb-card:hover .nb-del, .nb-del:focus-visible { opacity: 1; }
+.nb-del:hover { color: var(--accent-red, #dc2626); background: color-mix(in srgb, var(--accent-red, #dc2626) 12%, transparent); }
 .nb-body-text { font-size: 14px; line-height: 1.5; color: var(--text, #0f172a); white-space: pre-wrap; }
 
 .nb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -106,3 +123,85 @@
     font-size: 11.5px; color: var(--text-secondary, #475569);
     background: var(--bg-hover, #f1f5f9); border-radius: 7px; padding: 2px 8px;
 }
+
+/* The shelf toggle: the notebook (what the agent reads) or what was set aside. */
+.nb-shelves { display: flex; gap: 6px; margin-left: auto; }
+
+/* A chip that goes somewhere: the session a note was written on, or its thread. */
+.nb-chip-link {
+    cursor: pointer; text-decoration: none; border: 0; font: inherit; font-size: 11.5px;
+    color: var(--accent, #2f6df6); background: var(--accent-soft, #f5f8ff);
+}
+.nb-chip-link:hover { text-decoration: underline; }
+
+/* ---- pages: the rail, the page head, the conversation ---- */
+.nb-rail { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 12px; min-width: 0; }
+.nb-rail-h {
+    font-size: var(--v2-fs-eyebrow, 11px); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted, #94a3b8); margin: 10px 11px 4px;
+}
+.nb-rail-h:first-child { margin-top: 0; }
+.nb-pages, .nb-threads { display: flex; flex-direction: column; gap: 2px; position: static; }
+.nb-rail .nb-thread { display: flex; align-items: center; gap: 6px; }
+.nb-rail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nb-rail-talk { flex: none; color: var(--text-muted, #94a3b8); font-weight: 700; }
+.nb-rail-count { flex: none; font-size: 11px; color: var(--text-muted, #94a3b8); font-variant-numeric: tabular-nums; }
+.nb-thread.active .nb-rail-count, .nb-thread.active .nb-rail-talk { color: inherit; }
+.nb-rail-none { color: var(--text-muted, #94a3b8); font-size: 12.5px; font-style: italic; padding: 6px 11px; }
+
+.nb-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.nb-page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.nb-page-title { flex: 1; min-width: 0; }
+.nb-page-title h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--text, #0f172a); }
+.nb-page-q { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-secondary, #475569); }
+.nb-page-actions { display: flex; gap: 6px; }
+.nb-head-btn {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 5px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s;
+}
+.nb-head-btn:hover { color: var(--text, #0f172a); border-color: var(--border-strong, #cbd5e1); }
+.nb-head-btn.is-danger:hover { color: var(--accent-red, #dc2626); border-color: var(--accent-red, #dc2626); }
+.nb-page-save { flex-basis: 100%; display: flex; gap: 6px; }
+.nb-page-save[hidden] { display: none; }
+.nb-page-save input {
+    flex: 1; border: 1px solid var(--border, #e4e9f0); border-radius: 9px; padding: 7px 11px;
+    font: inherit; font-size: 13.5px; color: var(--text, #0f172a); background: var(--bg-card, #fff);
+}
+
+/* a card a citation landed on */
+.nb-card.is-target { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #2f6df6) 35%, transparent); transition: box-shadow .4s; }
+
+/* the conversation */
+.nb-conv {
+    border: 1px solid var(--border, #e4e9f0); border-radius: 13px; padding: 6px 18px;
+    background: var(--accent-soft, #f5f8ff); display: flex; flex-direction: column;
+    max-height: 60vh; overflow-y: auto;
+}
+.nb-conv-empty { color: var(--text-muted, #94a3b8); font-size: 13.5px; font-style: italic; padding: 12px 0; }
+.nb-turn { padding: 12px 0; border-top: 1px solid var(--border, #e4e9f0); }
+.nb-turn:first-child { border-top: 0; }
+.nb-turn-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.nb-turn-head .nb-ask-cov { margin: 0 0 0 auto; }
+.nb-turn-when { font-size: 11px; color: var(--text-muted, #94a3b8); }
+.nb-turn-text { font-size: 14px; line-height: 1.55; color: var(--text, #0f172a); white-space: pre-wrap; }
+.nb-turn.is-person .nb-turn-text { font-weight: 500; }
+.nb-turn.is-pending .nb-turn-text { color: var(--text-secondary, #475569); }
+.nb-turn .nb-ask-points { margin-top: 8px; }
+.nb-turn-foot { margin-top: 8px; display: flex; gap: 6px; }
+.nb-turn-foot:empty { display: none; }
+button.nb-cite { cursor: pointer; }
+button.nb-cite:hover { text-decoration: underline; }
+.nb-keep, .nb-kept {
+    border-radius: 999px; padding: 4px 11px; font: 600 11.5px/1.4 inherit; cursor: pointer;
+    border: 1px solid var(--accent-green, #16a34a); color: var(--accent-green, #16a34a); background: transparent;
+    transition: background .12s, color .12s;
+}
+.nb-keep:hover { background: var(--accent-green, #16a34a); color: #fff; }
+.nb-kept { border-style: dashed; cursor: pointer; }
+.nb-note-go {
+    flex: none; border: 1px solid var(--border, #e4e9f0); border-radius: 11px; padding: 11px 16px; font: inherit;
+    font-size: 14px; font-weight: 600; color: var(--text-secondary, #475569); background: var(--bg-card, #fff); cursor: pointer;
+}
+.nb-note-go:hover { color: var(--text, #0f172a); border-color: var(--border-strong, #cbd5e1); }
+.nb-ask-go:disabled, .nb-note-go:disabled { opacity: .5; cursor: wait; }

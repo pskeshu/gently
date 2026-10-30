@@ -238,3 +238,71 @@ class TestApplyUpdatesMirror:
         cs = file_context_store
         cs.apply_updates(ContextUpdates())
         assert cs.notebook.query_notes() == []
+
+
+class TestNotebookDeleteRestore:
+    def test_delete_moves_the_file_to_removed_and_drops_the_index(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        nid = store.write_note(Note(id="", kind=NoteKind.FINDING, body="x", threads=["t1"]))
+        assert store.delete_note(nid) is True
+        assert store.get_note(nid) is None
+        assert store.ids_for_thread("t1") == []
+        removed = list((tmp_path / "notebook" / "removed").glob(f"{nid}_*.yaml"))
+        assert len(removed) == 1  # kept whole, so the delete can be undone
+        assert list((tmp_path / "notebook" / "notes").glob("*.yaml")) == []
+
+    def test_restore_brings_it_back_indexed(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        nid = store.write_note(
+            Note(id="", kind=NoteKind.FINDING, body="x", strains=["N2"], threads=["t1"])
+        )
+        store.delete_note(nid)
+        back = store.restore_note(nid)
+        assert back is not None and back.id == nid and back.body == "x"
+        assert store.ids_for_thread("t1") == [nid]
+        assert store.ids_for_strain("N2") == [nid]
+        assert list((tmp_path / "notebook" / "removed").glob("*.yaml")) == []
+
+    def test_restore_of_nothing_is_none_and_delete_of_nothing_is_false(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        assert store.restore_note("nope") is None
+        assert store.delete_note("nope") is False
+
+    def test_rewrite_under_the_same_id_clears_the_removed_copy(self, tmp_path):
+        # A tool that owns a line deletes and rewrites it; undo must not bring
+        # the old copy back over the live one.
+        store = NotebookStore(tmp_path / "notebook")
+        nid = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="old"))
+        store.delete_note(nid)
+        store.write_note(Note(id=nid, kind=NoteKind.OBSERVATION, body="new"))
+        assert list((tmp_path / "notebook" / "removed").glob("*.yaml")) == []
+        live = store.restore_note(nid)
+        assert live is not None and live.body == "new"
+
+
+class TestNotebookSetAside:
+    def test_flag_round_trips_and_old_files_are_in(self, tmp_path):
+        n = Note(id="a1", kind=NoteKind.OBSERVATION, body="x", in_notebook=False)
+        d = note_to_dict(n)
+        assert d["in_notebook"] is False
+        assert note_from_dict(d).in_notebook is False
+        d.pop("in_notebook")  # a file written before the flag existed
+        assert note_from_dict(d).in_notebook is True
+
+    def test_set_aside_leaves_the_record_and_filters_the_notebook(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        keep = store.write_note(Note(id="", kind=NoteKind.FINDING, body="keep", threads=["t"]))
+        aside = store.write_note(Note(id="", kind=NoteKind.FINDING, body="aside", threads=["t"]))
+        out = store.set_in_notebook(aside, False)
+        assert out is not None and out.in_notebook is False
+        # The record still has both; the notebook has one; the aside view the other.
+        assert {n.id for n in store.query_notes()} == {keep, aside}
+        assert {n.id for n in store.query_notes(in_notebook=True)} == {keep}
+        assert {n.id for n in store.query_notes(in_notebook=False)} == {aside}
+        assert {n.id for n in store.query_notes(thread="t", in_notebook=True)} == {keep}
+        # Nothing moved on disk.
+        assert len(list((tmp_path / "notebook" / "notes").glob("*.yaml"))) == 2
+        # And back.
+        store.set_in_notebook(aside, True)
+        assert {n.id for n in store.query_notes(in_notebook=True)} == {keep, aside}
+        assert store.set_in_notebook("nope", False) is None

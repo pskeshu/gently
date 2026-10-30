@@ -895,6 +895,7 @@ const ReviewApp = {
             <div class="rd-add"><input id="session-stream-line" placeholder="One line, in your words. Enter files it to this session." autocomplete="off"></div>
             <div class="pj-stack rd-stream">${notes.length ? notes.map(n => streamLineHtml(n, this._toolTitles, { cite: false })).join('') : '<div class="pj-none">Nothing written on this session yet.</div>'}</div>
         </div>`;
+        this.landOnNote();
         const box = document.getElementById('session-stream-line');
         Mentions.attach(box);
         box.onkeydown = async e => {
@@ -905,6 +906,30 @@ const ReviewApp = {
             catch (err) { box.disabled = false; reviewToast(`Could not file the line: ${err.message || err}`); return; }
             this.mountStream(sid);
         };
+    },
+
+    // A link in from the Notebook lands on the line itself, not just the
+    // session. openNote(sid, noteId) opens the session (the Sessions tab is
+    // inited if it is not yet) and remembers the line; the stream, once
+    // drawn, scrolls to it and lights it for a moment. Once — the memory is
+    // cleared so a redraw does not jump again. The same thing reached by URL
+    // is /#sessions:<sid>:<noteId>, which app.js routes here.
+    _landOn: null,
+    async openNote(sessionId, noteId) {
+        this._landOn = noteId || null;
+        await this.init();
+        await this.loadSession(sessionId);
+    },
+
+    landOnNote() {
+        const id = this._landOn;
+        if (!id) return;
+        const line = document.querySelector(`.rd-line[data-note-id="${CSS.escape(id)}"]`);
+        if (!line) return;
+        this._landOn = null;
+        line.classList.add('is-target');
+        line.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setTimeout(() => line.classList.remove('is-target'), 4000);
     },
 
     // ---- export, for Fiji and for finding the experiment again -----------
