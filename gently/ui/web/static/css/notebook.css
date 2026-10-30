@@ -2,7 +2,11 @@
    The reading room for the shared lab notebook: thread rail + kind filter +
    note cards. Tokens reuse the app theme (--accent, --accent-green, --border …). */
 
-.nb-container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+/* The panel itself scrolls: the shell gives every tab a fixed-height box
+   with overflow hidden and leaves the scroll to the tab. Home puts it on an
+   inner wrapper; here the panel is the wrapper, so the bar sits at its edge. */
+#notebook-content { overflow-y: auto; }
+.nb-container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; width: 100%; box-sizing: border-box; }
 
 .nb-header {
     display: flex; align-items: center; justify-content: space-between;
