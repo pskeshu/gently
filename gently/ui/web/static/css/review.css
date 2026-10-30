@@ -758,6 +758,9 @@
 .session-filed a { color: var(--accent); text-decoration: none; }
 .session-filed .session-edit-btn { margin-left: 2px; }
 
+/* the session's stream: the project's card, on the session */
+.session-stream .pj-card { margin: 12px 0 4px; }
+
 /* the add-to-a-project popover: a project, in a role, optionally serving a plan item */
 .filing-pop {
     border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-card);

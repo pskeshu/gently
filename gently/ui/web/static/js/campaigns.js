@@ -2336,16 +2336,11 @@ function renderOverview() {
         <div class="pj-tool-body" data-ptool-body><div class="pj-loading">Loading…</div></div>
     </div>`).join('')}
     <div class="pj-card" id="stream">
-        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; the reading sorts out what it was</span>
+        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; @ a person to ask them; the reading sorts out what it was</span>
             ${avail.length ? `<span class="pj-tool-actions"><select id="ptool-pick">${avail.map(t => `<option value="${esc(t.name)}" title="${esc(t.summary)}">${esc(t.title)}</option>`).join('')}</select><button class="pj-add" data-ptool-import="1">+ tool</button></span>` : ''}
         </div>
         <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
-        <div class="pj-stack">${stream.length ? stream.map(n => `<div class="pj-entry rd-line">
-            <span class="pj-muted rd-when">${esc(formatDate(n.created_at))}</span>
-            ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${tools.has(n.title) ? `<span class="pj-chip">${esc(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${esc(n.kind)}</span>` : ''}
-            <span class="rd-text">${n.title && !tools.has(n.title) ? `<b>${esc(n.title)}</b>: ` : ''}${esc(n.body)}</span>
-            ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => esc(String(x).slice(0, 8))).join(' ')}</span>` : ''}
-        </div>`).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
+        <div class="pj-stack">${stream.length ? stream.map(n => streamLineHtml(n, tools)).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
     </div>`;
 }
 
@@ -2374,6 +2369,7 @@ const Stream = {
     mount() {
         const box = document.getElementById('stream-line');
         if (!box) return;
+        Mentions.attach(box);
         box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim()); };
     },
     async add(text) {

@@ -63,6 +63,7 @@ MANIFEST = {
         "observations": "Individual YAML files — synthesized experiment notes",
         "active": "Short-lived items: expectations, watchpoints, questions",
         "embryo_understanding": "Per-embryo understanding, keyed by persistent uid",
+        "people": "Per-person files: seen.yaml, the asks (@mentions) this person has opened",
     },
 }
 
