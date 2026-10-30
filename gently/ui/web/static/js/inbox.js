@@ -12,6 +12,7 @@
  */
 const Inbox = (() => {
     let data = { me: null, asks: [], new: [], open: [], done: [], mine: [] };
+    let tab = 'for';          // which tab the popover shows: 'for' (you) or 'by' (you)
     let known = null;        // ids in `new` at the last load, so a toast is for a fresh one
     let pill = null, pop = null, timer = null;
 
@@ -97,22 +98,30 @@ const Inbox = (() => {
         document.querySelectorAll('.presence-pop').forEach(p => p.remove());
         pop = document.createElement('div');
         pop.className = 'presence-pop inbox-pop';
-        const asks = data.asks || [];
+        paint(pop);
+        (document.getElementById('presence-container') || document.body).appendChild(pop);
+        setTimeout(() => document.addEventListener('click', onDoc), 0);
+    }
+
+    // Two tabs: the asks for you, with how many are unopened, and your own
+    // lines. Switching stays inside the popover; the tab is remembered.
+    function paint(pop) {
+        const asks = data.asks || [], mine = data.mine || [];
         const unopened = asks.filter(i => !i.seen).length;
-        const forYou = `<div class="presence-pop-title">For you${asks.length ? ` <span class="inbox-count">${unopened ? `${unopened} unopened` : 'all opened'}</span>` : ''}</div>`
-            + (asks.length ? asks.slice(0, 30).map(item).join('') : '<div class="inbox-none">Nothing for you yet.</div>');
-        const mine = (data.mine || []);
-        const byYou = `<div class="presence-pop-title inbox-by-you">By you</div>` + (mine.length
-            ? mine.slice(0, 12).map(mineItem).join('')
-            : '<div class="inbox-none">Nothing written yet. A line on a session or a project lands here.</div>');
-        pop.innerHTML = forYou + byYou;
+        const tabs = `<div class="inbox-tabs" role="tablist">
+            <button type="button" role="tab" class="inbox-tab${tab === 'for' ? ' on' : ''}" data-tab="for" aria-selected="${tab === 'for'}">For you${unopened ? ` <b class="inbox-tab-n">${unopened}</b>` : ''}</button>
+            <button type="button" role="tab" class="inbox-tab${tab === 'by' ? ' on' : ''}" data-tab="by" aria-selected="${tab === 'by'}">By you</button>
+        </div>`;
+        const body = tab === 'for'
+            ? (asks.length ? asks.slice(0, 30).map(item).join('') : '<div class="inbox-none">Nothing for you yet.</div>')
+            : (mine.length ? mine.slice(0, 20).map(mineItem).join('') : '<div class="inbox-none">Nothing written yet. A line on a session or a project lands here.</div>');
+        pop.innerHTML = tabs + `<div class="inbox-list">${body}</div>`;
+        pop.querySelectorAll('.inbox-tab').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); tab = b.dataset.tab; paint(pop); }));
         const all = [...asks, ...mine];
         pop.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
             const i = all.find(x => x.note.id === b.dataset.open);
             if (i) open(i, { mine: !!b.dataset.mine });
         }));
-        (document.getElementById('presence-container') || document.body).appendChild(pop);
-        setTimeout(() => document.addEventListener('click', onDoc), 0);
     }
 
     // Opening an ask: it is seen, and you are taken to where it was written.
