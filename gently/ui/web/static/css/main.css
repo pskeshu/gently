@@ -390,6 +390,13 @@ body {
 .inbox-item.is-seen .inbox-line { font-weight: 400; color: var(--text-muted); }
 .inbox-item.is-seen .rd-who { opacity: .8; }
 .inbox-count { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); margin-left: 6px; }
+.inbox-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 2px 4px; }
+.inbox-tab { font: inherit; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 10px 7px; cursor: pointer; }
+.inbox-tab:hover { color: var(--text); }
+.inbox-tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.inbox-tab-n { font-weight: 700; font-size: 11px; color: #fff; background: var(--accent); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+.inbox-tab:not(.on) .inbox-tab-n { background: var(--bg-hover); color: var(--text-muted); }
+.inbox-list { display: grid; gap: 2px; }
 .inbox-line { font-size: 13px; line-height: 1.4; white-space: normal; padding-left: 42px; }
 .inbox-item.is-mine .inbox-line { padding-left: 0; }
 .inbox-by-you { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
