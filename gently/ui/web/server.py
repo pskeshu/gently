@@ -263,6 +263,19 @@ class VisualizationServer(Service):
                     )
             except Exception:
                 logging.getLogger(__name__).debug("project backfill failed", exc_info=True)
+            # Marks made before the tool wrote a stream line get theirs, once.
+            try:
+                from gently.tools.twitch_hatch import backfill_notes
+
+                noted = backfill_notes(self.gently_store, context_store)
+                if noted:
+                    logging.getLogger(__name__).info(
+                        "Wrote the twitching-to-hatching line for %d session(s) marked "
+                        "before it existed",
+                        noted,
+                    )
+            except Exception:
+                logging.getLogger(__name__).debug("marks backfill failed", exc_info=True)
 
     def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> str | None:
         """Resolve volume file path from timelapse tracker or FileStore."""
