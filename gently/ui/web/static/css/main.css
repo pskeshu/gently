@@ -379,11 +379,12 @@ body {
 .inbox-pill.has-new { background: var(--accent); border-color: var(--accent); color: #fff; }
 .inbox-pill.is-empty { opacity: .55; }
 .inbox-pop { min-width: 340px; max-width: 440px; max-height: 70vh; overflow: auto; }
-.inbox-item { display: grid; gap: 3px; border-left: 3px solid transparent; }
+.inbox-item { display: grid; gap: 4px; border-left: 3px solid transparent; padding: 8px 10px; }
 .inbox-item.is-new { border-left-color: var(--accent); }
 .inbox-item.is-done { opacity: .6; }
-.inbox-who { font-size: 12px; }
-.inbox-line { font-size: 13px; line-height: 1.35; white-space: normal; }
+.inbox-item .rd-head { gap: 7px; }
+.inbox-line { font-size: 13px; line-height: 1.4; white-space: normal; padding-left: 27px; }
+.inbox-item.is-mine .inbox-line { padding-left: 0; }
 .inbox-by-you { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
 .inbox-item.is-mine { border-left-color: transparent; }
 .inbox-state { font-size: 11px; color: var(--text-muted); }
@@ -11927,3 +11928,24 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .who-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .who-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--who, #8b949e); display: inline-block; }
 .who-when { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* A line someone wrote: who on top, in their colour, the words under it.
+   The author is the avatar and the name; a person named inside the words is
+   an @name in that person's colour and nothing more, so the two never read
+   as the same thing. One rule set for the stream, the session and the inbox. */
+.rd-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.rd-avatar {
+    width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 'Inter Tight', system-ui, sans-serif; color: #fff; background: var(--who, #8b949e);
+}
+.rd-avatar.is-agent { background: transparent; color: var(--accent-purple); border: 1.5px solid var(--accent-purple); }
+.rd-avatar.is-nobody { background: var(--bg-hover); color: var(--text-muted); }
+.rd-who { font-size: 12.5px; font-weight: 650; color: var(--who, var(--text)); white-space: nowrap; }
+.rd-who.is-agent { color: var(--accent-purple); }
+.rd-who.is-nobody { color: var(--text-muted); font-weight: 500; }
+.rd-when { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.rd-place { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+.rd-mention { font-weight: 650; color: var(--who, var(--accent)); }
+.rd-text { font-size: 13.5px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.rd-text b:not(.rd-mention) { font-weight: 600; }

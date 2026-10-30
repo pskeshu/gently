@@ -741,10 +741,12 @@ const ReviewApp = {
                 <div class="session-project">${this.projectChip(s)}</div>
                 ${this._filing && this._filing.sid === s.session_id && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
-                ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
-                ${typeof Reveal !== 'undefined' ? Reveal.button(
-                    { what: 'session', session_id: s.session_id }, 'show',
-                    { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
+                <div class="session-row-actions">
+                    ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
+                    ${typeof Reveal !== 'undefined' ? Reveal.button(
+                        { what: 'session', session_id: s.session_id }, 'show',
+                        { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
+                </div>
             </div>`;
     },
 
@@ -882,7 +884,7 @@ const ReviewApp = {
         host.innerHTML = `<div class="pj-card session-stream-card">
             <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed here, in your words; @ a person to ask them</span></div>
             <div class="rd-add"><input id="session-stream-line" placeholder="One line, in your words. Enter files it to this session." autocomplete="off"></div>
-            <div class="pj-stack">${notes.length ? notes.map(n => streamLineHtml(n, this._toolTitles)).join('') : '<div class="pj-none">Nothing written on this session yet.</div>'}</div>
+            <div class="pj-stack rd-stream">${notes.length ? notes.map(n => streamLineHtml(n, this._toolTitles, { cite: false })).join('') : '<div class="pj-none">Nothing written on this session yet.</div>'}</div>
         </div>`;
         const box = document.getElementById('session-stream-line');
         Mentions.attach(box);

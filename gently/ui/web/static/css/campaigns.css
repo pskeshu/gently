@@ -1937,9 +1937,15 @@
 .rd-k { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-right: 6px; }
 .rd-add { display: flex; gap: 8px; padding: 10px 14px 4px; position: relative; }
 .rd-add input { flex: 1; font: inherit; font-size: 0.92rem; padding: 6px 10px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
-.rd-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.rd-when { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-.rd-text { flex: 1; min-width: 200px; }
+/* The stream: a flat list of lines, a hairline between them, the words
+   indented under their author. No box per line. */
+.rd-stream { gap: 0; padding: 2px 14px 6px; }
+.rd-line { display: grid; gap: 3px; padding: 10px 2px 11px; border-top: 1px solid var(--border); min-width: 0; }
+.rd-line:first-child { border-top: 0; }
+.rd-line .rd-head .pj-cite { margin-left: auto; }
+.rd-line .rd-text { padding-left: 28px; }
+.rd-line.is-tool .rd-text { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rd-line.is-tool .rd-text b { color: var(--text); }
 
 /* ---- project tools: cards mounted on the project ---- */
 .pj-tool-actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }

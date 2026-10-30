@@ -2340,7 +2340,7 @@ function renderOverview() {
             ${avail.length ? `<span class="pj-tool-actions"><select id="ptool-pick">${avail.map(t => `<option value="${esc(t.name)}" title="${esc(t.summary)}">${esc(t.title)}</option>`).join('')}</select><button class="pj-add" data-ptool-import="1">+ tool</button></span>` : ''}
         </div>
         <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
-        <div class="pj-stack">${stream.length ? stream.map(n => streamLineHtml(n, tools)).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
+        <div class="pj-stack rd-stream">${stream.length ? stream.map(n => streamLineHtml(n, tools)).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
     </div>`;
 }
 
