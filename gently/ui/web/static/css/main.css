@@ -377,13 +377,18 @@ body {
     border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer;
 }
 .inbox-pill.has-new { background: var(--accent); border-color: var(--accent); color: #fff; }
-.inbox-pill.is-empty { display: none; }
+.inbox-pill.is-empty { opacity: .55; }
 .inbox-pop { min-width: 340px; max-width: 440px; max-height: 70vh; overflow: auto; }
 .inbox-item { display: grid; gap: 3px; border-left: 3px solid transparent; }
 .inbox-item.is-new { border-left-color: var(--accent); }
 .inbox-item.is-done { opacity: .6; }
 .inbox-who { font-size: 12px; }
 .inbox-line { font-size: 13px; line-height: 1.35; white-space: normal; }
+.inbox-by-you { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.inbox-item.is-mine { border-left-color: transparent; }
+.inbox-state { font-size: 11px; color: var(--text-muted); }
+.inbox-state.is-answered { color: var(--accent-green, var(--text-muted)); }
+.inbox-none { font-size: 12px; color: var(--text-muted); padding: 2px 8px 6px; }
 
 /* @ while typing: the rig's people, under the box */
 .mention-pop {

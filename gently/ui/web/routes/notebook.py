@@ -57,6 +57,7 @@ def create_router(server) -> APIRouter:
         thread: str | None = None,
         project: str | None = None,
         session: str | None = None,
+        by: str | None = None,
         limit: int | None = None,
     ):
         nb = _nb()
@@ -74,6 +75,8 @@ def create_router(server) -> APIRouter:
             project=project,
             session=session or None,
         )
+        if by:
+            notes = [n for n in notes if n.by == by]  # a person's own lines
         if limit is not None and limit >= 0:
             notes = notes[:limit]
         return {"available": True, "notes": [_for_view(n) for n in notes]}

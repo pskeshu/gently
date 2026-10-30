@@ -100,7 +100,13 @@ def test_a_line_that_names_nobody_is_for_nobody(tmp_path, monkeypatch):
         == []
     )
     c.cookies.set("gently_operator", "ryan")
-    assert c.get("/api/inbox").json() == {"me": "ryan", "new": [], "open": [], "done": []}
+    assert c.get("/api/inbox").json() == {
+        "me": "ryan",
+        "new": [],
+        "open": [],
+        "done": [],
+        "mine": [],
+    }
 
 
 def test_an_ask_with_no_place_is_done_once_opened(tmp_path, monkeypatch):
@@ -114,3 +120,32 @@ def test_an_ask_with_no_place_is_done_once_opened(tmp_path, monkeypatch):
     assert (
         box["new"] == [] and box["open"] == [] and [i["note"]["id"] for i in box["done"]] == [ask]
     )
+
+
+def test_your_own_lines_are_one_list_with_where_and_whether_answered(tmp_path, monkeypatch):
+    """ "if I have left comments on different places, i should have a unified
+    interface to see where I have made my recent social activities." """
+    c, store, cs = _client(tmp_path, monkeypatch, "kesavan")
+    store.create_session("s1", name="monday")
+    proj = cs.create_campaign("Does LED dose change time to hatching?", shorthand="dose")
+    ask = c.post(
+        "/api/notebook/notes",
+        json={"body": "@ryan can you mark fields 1 to 3?", "sessions": ["s1"]},
+    ).json()["note"]["id"]
+    plain = c.post(
+        "/api/notebook/notes", json={"body": "dim at dose 2", "projects": [proj]}
+    ).json()["note"]["id"]
+    mine = c.get("/api/inbox").json()["mine"]
+    assert [i["note"]["id"] for i in mine] == [plain, ask]  # newest first
+    assert mine[1]["session"] == {"id": "s1", "name": "monday"} and mine[1]["answered_by"] == []
+    assert mine[0]["project"] == {"id": proj, "name": "dose"} and "answered_by" not in mine[0]
+    # ryan answers on the session: the ask says so
+    c.cookies.set("gently_operator", "ryan")
+    c.post("/api/notebook/notes", json={"body": "done, all three", "sessions": ["s1"]})
+    c.cookies.set("gently_operator", "kesavan")
+    mine = c.get("/api/inbox").json()["mine"]
+    assert next(i for i in mine if i["note"]["id"] == ask)["answered_by"] == ["ryan"]
+    # the notebook route lists a person's lines too
+    by = c.get("/api/notebook/notes?by=kesavan").json()["notes"]
+    assert sorted(n["id"] for n in by) == sorted([ask, plain])
+    assert c.get("/api/notebook/notes?by=ryan").json()["notes"][0]["body"] == "done, all three"

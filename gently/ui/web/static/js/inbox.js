@@ -5,9 +5,11 @@
  * /api/inbox, which derives it from the notebook; "seen" is the one thing
  * it writes. Opening an ask goes to the session (or project) it was
  * written on, where the answer is written: a line, or the marks themselves.
+ * Under the asks sit your own lines, "By you": where each was written and,
+ * for an ask of yours, who has answered it.
  */
 const Inbox = (() => {
-    let data = { me: null, new: [], open: [], done: [] };
+    let data = { me: null, new: [], open: [], done: [], mine: [] };
     let known = null;        // ids in `new` at the last load, so a toast is for a fresh one
     let pill = null, pop = null, timer = null;
 
@@ -49,10 +51,12 @@ const Inbox = (() => {
             pill.addEventListener('click', e => { e.stopPropagation(); toggle(); });
         }
         const n = data.new.length, o = data.open.length;
-        pill.textContent = String(n || o || '');
+        // Always drawn: with nothing addressed to you it is a quiet 0, and
+        // behind it are still your own lines.
+        pill.textContent = String(n || o || 0);
         pill.classList.toggle('has-new', n > 0);
         pill.classList.toggle('is-empty', !n && !o);
-        pill.title = n ? `${n} new for you` : (o ? `${o} open for you` : 'Nothing for you');
+        pill.title = n ? `${n} new for you` : (o ? `${o} open for you` : 'Nothing for you · your own lines');
         if (pill.previousElementSibling !== you) you.insertAdjacentElement('afterend', pill);
     }
 
@@ -68,29 +72,51 @@ const Inbox = (() => {
         </button>`;
     }
 
+    // One of your own lines: when and where, and for an ask, who has answered.
+    function mineItem(i) {
+        const where = place(i, 'on ');
+        const asked = (i.note.mentions || []);
+        const answered = i.answered_by || [];
+        const state = !asked.length ? '' : answered.length
+            ? ` <span class="inbox-state is-answered">answered by ${answered.map(p => Who.chip(p)).join(' ')}</span>`
+            : ` <span class="inbox-state is-waiting">waiting on ${asked.map(p => Who.chip(p)).join(' ')}</span>`;
+        return `<button type="button" class="presence-pop-item inbox-item is-mine" data-open="${escapeHtml(i.note.id)}" data-mine="1">
+            <span class="inbox-who"><span class="who-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? ` <span class="pj-muted">${escapeHtml(where)}</span>` : ''}${state}</span>
+            <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
+        </button>`;
+    }
+
     function show() {
         document.querySelectorAll('.presence-pop').forEach(p => p.remove());
         pop = document.createElement('div');
         pop.className = 'presence-pop inbox-pop';
         const section = (title, items, cls) => items.length
             ? `<div class="presence-pop-title">${title}</div>` + items.map(i => item(i, cls)).join('') : '';
-        pop.innerHTML = section('New', data.new, 'is-new') + section('Open', data.open, '') + section('Done', data.done.slice(0, 5), 'is-done')
+        const forYou = section('New', data.new, 'is-new') + section('Open', data.open, '') + section('Done', data.done.slice(0, 5), 'is-done')
             || '<div class="presence-pop-title">Nothing for you</div>';
-        const all = [...data.new, ...data.open, ...data.done];
+        const mine = (data.mine || []);
+        const byYou = `<div class="presence-pop-title inbox-by-you">By you</div>` + (mine.length
+            ? mine.slice(0, 12).map(mineItem).join('')
+            : '<div class="inbox-none">Nothing written yet. A line on a session or a project lands here.</div>');
+        pop.innerHTML = forYou + byYou;
+        const all = [...data.new, ...data.open, ...data.done, ...mine];
         pop.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
             const i = all.find(x => x.note.id === b.dataset.open);
-            if (i) open(i);
+            if (i) open(i, { mine: !!b.dataset.mine });
         }));
         (document.getElementById('presence-container') || document.body).appendChild(pop);
         setTimeout(() => document.addEventListener('click', onDoc), 0);
     }
 
     // Opening an ask: it is seen, and you are taken to where it was written.
-    async function open(i) {
+    // Opening one of your own lines just goes there.
+    async function open(i, opts = {}) {
         close();
-        try {
-            await fetch('/api/inbox/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [i.note.id] }) });
-        } catch (e) { /* the page still opens */ }
+        if (!opts.mine) {
+            try {
+                await fetch('/api/inbox/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [i.note.id] }) });
+            } catch (e) { /* the page still opens */ }
+        }
         if (i.session && i.session.id) {
             goTab('sessions');
             if (typeof ReviewApp !== 'undefined' && ReviewApp.loadSession) ReviewApp.loadSession(i.session.id);
