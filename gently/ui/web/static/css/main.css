@@ -379,11 +379,18 @@ body {
 .inbox-pill.has-new { background: var(--accent); border-color: var(--accent); color: #fff; }
 .inbox-pill.is-empty { opacity: .55; }
 .inbox-pop { min-width: 340px; max-width: 440px; max-height: 70vh; overflow: auto; }
-.inbox-item { display: grid; gap: 4px; border-left: 3px solid transparent; padding: 8px 10px; }
-.inbox-item.is-new { border-left-color: var(--accent); }
-.inbox-item.is-done { opacity: .6; }
+/* One list in time order. Unopened: a dot before the author and a heavier
+   line. Opened: the dot is gone and the line is plain, in its place. Answered
+   says so in a small tag. */
+.inbox-item { display: grid; gap: 4px; padding: 8px 10px 8px 8px; }
 .inbox-item .rd-head { gap: 7px; }
-.inbox-line { font-size: 13px; line-height: 1.4; white-space: normal; padding-left: 27px; }
+.inbox-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 7px; }
+.inbox-item.is-seen .inbox-dot { background: transparent; }
+.inbox-item.is-new .inbox-line { font-weight: 600; color: var(--text); }
+.inbox-item.is-seen .inbox-line { font-weight: 400; color: var(--text-muted); }
+.inbox-item.is-seen .rd-who { opacity: .8; }
+.inbox-count { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); margin-left: 6px; }
+.inbox-line { font-size: 13px; line-height: 1.4; white-space: normal; padding-left: 42px; }
 .inbox-item.is-mine .inbox-line { padding-left: 0; }
 .inbox-by-you { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
 .inbox-item.is-mine { border-left-color: transparent; }

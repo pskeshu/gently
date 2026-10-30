@@ -115,10 +115,19 @@ def inbox_for(store: Any, cs: Any, pid: str) -> dict:
             return _wrote_after(mine, pid, a)
         return a.id in seen
 
+    # One list in time order, newest first, each ask saying whether it has
+    # been opened and whether it has been answered; the piles are the same
+    # facts sorted, kept for callers that read them.
+    ordered: list[dict] = []
     piles: dict[str, list[dict]] = {"new": [], "open": [], "done": []}
     for a in asks:
-        pile = "done" if answered(a) else ("open" if a.id in seen else "new")
-        piles[pile].append(_item(store, cs, a))
+        done = answered(a)
+        item = _item(store, cs, a)
+        item["seen"] = a.id in seen
+        item["answered"] = done
+        ordered.append(item)
+        pile = "done" if done else ("open" if a.id in seen else "new")
+        piles[pile].append(item)
     piles["done"] = piles["done"][:20]
     written = []
     for n in mine[:30]:
@@ -126,7 +135,7 @@ def inbox_for(store: Any, cs: Any, pid: str) -> dict:
         if n.mentions:
             item["answered_by"] = [p for p in n.mentions if _wrote_after(everything, p, n)]
         written.append(item)
-    return {"me": pid, **piles, "mine": written}
+    return {"me": pid, "asks": ordered[:50], **piles, "mine": written}
 
 
 def create_router(server: Any) -> APIRouter:
@@ -147,7 +156,7 @@ def create_router(server: Any) -> APIRouter:
         store, cs = _stores()
         me = current_username(request)
         if cs is None or not me:
-            return {"me": me, "new": [], "open": [], "done": [], "mine": []}
+            return {"me": me, "asks": [], "new": [], "open": [], "done": [], "mine": []}
         return inbox_for(store, cs, me)
 
     @router.post("/api/inbox/seen")
@@ -156,7 +165,7 @@ def create_router(server: Any) -> APIRouter:
         store, cs = _stores()
         me = current_username(request)
         if cs is None or not me:
-            return {"me": me, "new": [], "open": [], "done": [], "mine": []}
+            return {"me": me, "asks": [], "new": [], "open": [], "done": [], "mine": []}
         mark_seen(cs, me, [str(x) for x in (body.get("ids") or [])])
         return inbox_for(store, cs, me)
 

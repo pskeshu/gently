@@ -102,6 +102,7 @@ def test_a_line_that_names_nobody_is_for_nobody(tmp_path, monkeypatch):
     c.cookies.set("gently_operator", "ryan")
     assert c.get("/api/inbox").json() == {
         "me": "ryan",
+        "asks": [],
         "new": [],
         "open": [],
         "done": [],
@@ -194,3 +195,32 @@ def test_an_older_line_touched_later_does_not_answer_a_newer_ask(tmp_path, monke
     )
     nb.write_note(nb.get_note(tool))
     assert [i["note"]["id"] for i in c.get("/api/inbox").json()["done"]] == [ask]
+
+
+def test_the_asks_are_one_list_in_time_order_with_seen_and_answered_flags(tmp_path, monkeypatch):
+    """ "i do not like this open/new model rather the notification is listed in
+    order, and the ones that were opened appear different than the new one"."""
+    c, store, cs = _client(tmp_path, monkeypatch, "kesavan")
+    store.create_session("s1", name="monday")
+    first = c.post(
+        "/api/notebook/notes", json={"body": "@ryan first ask", "sessions": ["s1"]}
+    ).json()["note"]["id"]
+    second = c.post(
+        "/api/notebook/notes", json={"body": "@ryan second ask", "sessions": ["s1"]}
+    ).json()["note"]["id"]
+    c.cookies.set("gently_operator", "ryan")
+    asks = c.get("/api/inbox").json()["asks"]
+    assert [a["note"]["id"] for a in asks] == [second, first]  # newest first, both unopened
+    assert [a["seen"] for a in asks] == [False, False] and [a["answered"] for a in asks] == [
+        False,
+        False,
+    ]
+    asks = c.post("/api/inbox/seen", json={"ids": [first]}).json()["asks"]
+    assert [a["note"]["id"] for a in asks] == [second, first]  # opened, and still in its place
+    assert [a["seen"] for a in asks] == [False, True]
+    c.post("/api/notebook/notes", json={"body": "done both", "sessions": ["s1"]})
+    asks = c.get("/api/inbox").json()["asks"]
+    assert [a["answered"] for a in asks] == [True, True] and [a["seen"] for a in asks] == [
+        False,
+        True,
+    ]
