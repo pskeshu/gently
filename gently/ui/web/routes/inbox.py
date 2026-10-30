@@ -71,24 +71,39 @@ def _item(store: Any, cs: Any, n: Note) -> dict:
     }
 
 
+def _wrote_after(notes: list[Note], who: str, ask: Note) -> bool:
+    """Did ``who`` write on the ask's session or project after it was asked?
+    A line of their own or a tool note, either counts as an answer."""
+    if ask.sessions:
+        where = set(ask.sessions)
+        return any(
+            n.by == who and n.updated_at > ask.created_at and set(n.sessions) & where for n in notes
+        )
+    if ask.projects:
+        where = set(ask.projects)
+        return any(
+            n.by == who and n.updated_at > ask.created_at and set(n.projects) & where for n in notes
+        )
+    return False
+
+
 def inbox_for(store: Any, cs: Any, pid: str) -> dict:
-    """What names this person, newest first, in three piles. New: not yet
-    opened. Open: opened, and nothing written by them on that session or
-    project since. Done: they wrote there after the ask. An ask with no
-    place to answer is done once opened."""
+    """What names this person, newest first, in three piles, and what they
+    wrote. New: not yet opened. Open: opened, and nothing written by them on
+    that session or project since. Done: they wrote there after the ask. An
+    ask with no place to answer is done once opened. Mine: their own lines,
+    newest first, each with where it was written and, for an ask, who has
+    answered it so far."""
     nb = cs.notebook
     asks = nb.query_notes(person=pid)
     seen = read_seen(cs, pid)
-    # ponytail: a scan for what this person wrote; a `by` index on the notebook when it grows.
-    mine = [n for n in nb.query_notes() if n.by == pid]
+    # ponytail: one scan of every note serves "done" and "mine"; a `by` index when it grows.
+    everything = nb.query_notes()
+    mine = [n for n in everything if n.by == pid]
 
     def answered(a: Note) -> bool:
-        if a.sessions:
-            where = set(a.sessions)
-            return any(n.updated_at > a.created_at and set(n.sessions) & where for n in mine)
-        if a.projects:
-            where = set(a.projects)
-            return any(n.updated_at > a.created_at and set(n.projects) & where for n in mine)
+        if a.sessions or a.projects:
+            return _wrote_after(mine, pid, a)
         return a.id in seen
 
     piles: dict[str, list[dict]] = {"new": [], "open": [], "done": []}
@@ -96,7 +111,13 @@ def inbox_for(store: Any, cs: Any, pid: str) -> dict:
         pile = "done" if answered(a) else ("open" if a.id in seen else "new")
         piles[pile].append(_item(store, cs, a))
     piles["done"] = piles["done"][:20]
-    return {"me": pid, **piles}
+    written = []
+    for n in mine[:30]:
+        item = _item(store, cs, n)
+        if n.mentions:
+            item["answered_by"] = [p for p in n.mentions if _wrote_after(everything, p, n)]
+        written.append(item)
+    return {"me": pid, **piles, "mine": written}
 
 
 def create_router(server: Any) -> APIRouter:
@@ -117,7 +138,7 @@ def create_router(server: Any) -> APIRouter:
         store, cs = _stores()
         me = current_username(request)
         if cs is None or not me:
-            return {"me": me, "new": [], "open": [], "done": []}
+            return {"me": me, "new": [], "open": [], "done": [], "mine": []}
         return inbox_for(store, cs, me)
 
     @router.post("/api/inbox/seen")
@@ -126,7 +147,7 @@ def create_router(server: Any) -> APIRouter:
         store, cs = _stores()
         me = current_username(request)
         if cs is None or not me:
-            return {"me": me, "new": [], "open": [], "done": []}
+            return {"me": me, "new": [], "open": [], "done": [], "mine": []}
         mark_seen(cs, me, [str(x) for x in (body.get("ids") or [])])
         return inbox_for(store, cs, me)
 
