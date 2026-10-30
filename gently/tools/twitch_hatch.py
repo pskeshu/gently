@@ -161,6 +161,34 @@ def note_marks(store: Any, cs: Any, sid: str, who: str | None) -> str | None:
     return nid
 
 
+def backfill_notes(store: Any, cs: Any) -> int:
+    """Marks saved before the stream line existed get theirs, once: a session
+    with rows and no note is noted, signed by whoever marked last. A session
+    that has its note is left as it is. Returns how many lines were written."""
+    nb = getattr(cs, "notebook", None)
+    if store is None or nb is None:
+        return 0
+    noted = {
+        sid
+        for n in nb.query_notes(author=Author.HUMAN)
+        if n.title == TITLE
+        for sid in (n.sessions or [])
+    }
+    wrote = 0
+    for s in store.list_sessions():
+        sid = s.get("session_id")
+        if not sid or sid in noted:
+            continue
+        sd = store._session_dir(sid)
+        rows = (_read_yaml(Path(sd) / FILE) or []) if sd is not None else []
+        if not rows:
+            continue
+        last = max(rows, key=lambda r: str(r.get("at") or ""))
+        if note_marks(store, cs, sid, last.get("by")):
+            wrote += 1
+    return wrote
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 

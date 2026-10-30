@@ -70,3 +70,45 @@ def test_marks_become_one_line_in_the_session_stream(tmp_path):
     _write_yaml(marks, [])
     assert twitch_hatch.note_marks(store, cs, "s1", who="ryan") is None
     assert cs.notebook.query_notes() == []
+
+
+def test_marks_saved_before_the_line_existed_get_theirs_once(tmp_path):
+    """Session e3afe0b6 was marked on Oct 27 and filed under t2h; the stream
+    line came after and is written on save, so t2h's stream stayed empty:
+    "i added a session with data that is not showing up in t2h"."""
+    from gently.core.file_store import FileStore, _write_yaml
+    from gently.harness.memory.file_store import FileContextStore
+    from gently.tools import reading, twitch_hatch
+
+    store = FileStore(tmp_path)
+    cs = FileContextStore(tmp_path / "agent")
+    proj = cs.create_campaign("time to hatching", shorthand="t2h")
+    for sid in ("marked", "noted", "bare"):
+        store.create_session(sid, name=sid)
+        for n, t in ((1, "20:00"), (2, "21:00"), (3, "22:30")):
+            meta = {"frame": n, "field": 0, "captured_at": f"2026-10-27T{t}:00"}
+            store.put_snapshot(sid, "bf", [[0]], metadata=meta, stem=f"f{n}")
+    store.link_session("marked", proj, role="control", home=True)
+    rows = [
+        {"field": 0, "x": 0.1, "y": 0.1, "twitch_frame": 1, "hatch_frame": 2},
+        {"field": 0, "x": 0.5, "y": 0.5, "twitch_frame": 1, "hatch_frame": 3},
+    ]
+    marked = [
+        {**rows[0], "by": "kesavan", "at": "2026-10-27T14:01:13"},
+        {**rows[1], "by": "ryan", "at": "2026-10-27T14:03:45"},
+    ]
+    _write_yaml(store._session_dir("marked") / "annotations" / "twitch_hatch.yaml", marked)
+    _write_yaml(store._session_dir("noted") / "annotations" / "twitch_hatch.yaml", rows[:1])
+    nid = twitch_hatch.note_marks(store, cs, "noted", who="kesavan")  # saved after the line came
+    assert reading.stream_notes(cs, proj, {"marked"}) == []
+
+    assert twitch_hatch.backfill_notes(store, cs) == 1
+    [note] = reading.stream_notes(cs, proj, {"marked"})
+    assert note.sessions == ["marked"] and note.by == "ryan"  # whoever marked last
+    assert note.body == "Marked on 2 embryos: 60 to 150 min, median 105."
+
+    # once: the next start writes nothing, the note already there keeps its
+    # signature, and a session with no marks gets no line
+    assert twitch_hatch.backfill_notes(store, cs) == 0
+    assert cs.notebook.get_note(nid).by == "kesavan"
+    assert len(cs.notebook.query_notes()) == 2
