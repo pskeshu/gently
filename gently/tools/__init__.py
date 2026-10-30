@@ -31,6 +31,12 @@ TOOLS: dict[str, dict[str, str]] = {
         "summary": "What the sessions say about the question, in the agent's prose "
         "over the stream and the pooled rows: known, deviates, open, next.",
     },
+    "data": {
+        "scope": "project",
+        "title": "Data",
+        "summary": "Every measurement from the project's sessions, pooled per tool: "
+        "one row per embryo, with its session and role; the same rows as CSV.",
+    },
 }
 
 

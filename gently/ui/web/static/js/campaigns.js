@@ -2621,7 +2621,90 @@ function addForm(form) {
 }
 
 // the project tools register beside the session tools, by name
-window.GentlyTools = Object.assign(window.GentlyTools || {}, { figures: FiguresTool, reading: ReadingTool });
+// ── the data, as a project tool: every measurement, pooled per tool ────
+// One row per embryo across the project's sessions, with the session and its
+// role on each row; the same rows as CSV. Every session tool that can be
+// pooled answers here. Twitch-to-hatch has its columns named; any other
+// tool's columns are its row keys.
+const DataTool = {
+    el: null, pid: null, slots: {}, pools: [],
+    COLUMNS: {
+        twitch_hatch: [['n', 'Embryo'], ['field', 'Field'], ['twitch_frame', 'Twitch frame'], ['hatch_frame', 'Hatch frame'],
+            ['minutes', 'Minutes'], ['temp_c', '°C'], ['vs_sulston_min', 'vs Sulston'], ['by', 'Marked by']],
+    },
+    // What names the row, or what the named columns already say.
+    HIDE: new Set(['session_id', 'session_name', 'role', 'condition', 'x', 'y', 'at', 'twitch_at', 'hatch_at']),
+
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        const pools = [];
+        for (const t of (state.catalogue || []).filter(t => t.scope === 'session')) {
+            let d;
+            try { d = await api('GET', `/api/tools/${enc(t.name)}/pool?project=${enc(pid)}`); }
+            catch (_) { continue; }   // a tool with nothing to pool answers 404
+            pools.push({ tool: t.name, title: t.title, ...d });
+        }
+        this.pools = pools;
+        this.paint();
+    },
+
+    columns(p) {
+        if (this.COLUMNS[p.tool]) return this.COLUMNS[p.tool];
+        const keys = [];
+        (p.rows || []).forEach(r => Object.keys(r).forEach(k => { if (!this.HIDE.has(k) && !keys.includes(k)) keys.push(k); }));
+        return keys.map(k => [k, k.replace(/_/g, ' ')]);
+    },
+
+    cell(r, key) {
+        const v = r[key];
+        if (v == null || v === '') return '<span class="z">—</span>';
+        if (key === 'by') return Who.chip(v, { when: r.at });
+        if (typeof v === 'number') return `<span class="num">${Number.isInteger(v) ? v : v.toFixed(1)}</span>`;
+        return esc(String(v));
+    },
+
+    foot(p) {
+        const done = (p.rows || []).map(r => r.minutes).filter(m => typeof m === 'number').sort((a, b) => a - b);
+        if (p.tool !== 'twitch_hatch' || !done.length) return '';
+        const med = done.length % 2 ? done[(done.length - 1) / 2] : (done[done.length / 2 - 1] + done[done.length / 2]) / 2;
+        const ref = Object.entries(p.reference || {}).map(([k, v]) => `${k} ${v} min`).join(', ');
+        return `<div class="dt-foot">Median ${med} min over ${done.length} embryo${done.length === 1 ? '' : 's'} with a hatching time${ref ? ` · ${ref}` : ''}.</div>`;
+    },
+
+    render() {
+        const pools = this.pools.filter(p => (p.rows || []).length);
+        if (!pools.length) return '<div class="pj-none">No measurement is filed under this project yet. A session tool\'s rows land here once a session in the project has some.</div>';
+        return pools.map(p => {
+            const cols = this.columns(p);
+            return `<div class="dt-tool">
+                <div class="dt-head">${esc(p.title)} <span class="pj-muted">${p.rows.length} row${p.rows.length === 1 ? '' : 's'}</span></div>
+                <div class="dt-wrap"><table class="pj-obs"><thead><tr><th>Session</th><th>Role</th>${cols.map(([, label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>
+                ${p.rows.map(r => `<tr data-sgo="${esc(r.session_id)}" title="Open the session">
+                    <td class="name">${esc(r.session_name || r.session_id)}</td>
+                    <td>${r.role && r.role !== 'unassigned' ? `<span class="pj-chip">${esc(r.role)}</span>` : '<span class="pj-muted">—</span>'}</td>
+                    ${cols.map(([key]) => `<td>${this.cell(r, key)}</td>`).join('')}
+                </tr>`).join('')}
+                </tbody></table></div>
+                ${this.foot(p)}
+            </div>`;
+        }).join('');
+    },
+
+    paint() {
+        const pools = this.pools.filter(p => (p.rows || []).length);
+        const rows = pools.reduce((n, p) => n + p.rows.length, 0);
+        const sess = new Set(); pools.forEach(p => p.rows.forEach(r => sess.add(r.session_id)));
+        if (this.slots.head) this.slots.head.textContent = rows
+            ? `${rows} row${rows === 1 ? '' : 's'} from ${sess.size} session${sess.size === 1 ? '' : 's'}, one per embryo, pooled here every time`
+            : 'nothing measured yet';
+        if (this.slots.actions) this.slots.actions.innerHTML = pools.map(p =>
+            `<a class="pj-add" href="/api/tools/${enc(p.tool)}/pool?project=${enc(this.pid)}&format=csv" download title="The same rows as CSV">CSV${pools.length > 1 ? ` · ${esc(p.title)}` : ''}</a>`).join(' ');
+        this.el.innerHTML = this.render();
+        this.el.onclick = e => { const tr = e.target.closest('[data-sgo]'); if (tr) goToSession(tr.dataset.sgo); };
+    },
+};
+
+window.GentlyTools = Object.assign(window.GentlyTools || {}, { figures: FiguresTool, reading: ReadingTool, data: DataTool });
 
 // ── the plan bar: today's canvas, plus the ways to add to it ──
 
@@ -2668,7 +2751,7 @@ function renderProjSessions() {
             <div class="pj-act"><button data-action="session-add-submit">Link it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
     const body = rows.length === 0
         ? '<div class="pj-none">No session is filed under this project yet.</div>'
-        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Role</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead><tbody>
+        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Role</th><th>Holds</th><th>Ended</th><th>Agent</th><th></th></tr></thead><tbody>
         ${rows.map(s => {
             const [cls, label] = endedOf(s);
             const run = runOf(s) || {};
@@ -2683,9 +2766,6 @@ function renderProjSessions() {
                 s.timepoints ? `${s.timepoints} tp` : '',
                 s.bf_frames ? `${s.bf_frames} brightfield` : '',
             ].filter(Boolean).join(' · ') || '—';
-            const signals = (s.errors || s.warnings)
-                ? [s.errors ? `<span class="e">${s.errors} error${s.errors !== 1 ? 's' : ''}</span>` : '', s.warnings ? `<span class="w">${s.warnings} warning${s.warnings !== 1 ? 's' : ''}</span>` : ''].filter(Boolean).join(' · ')
-                : '<span class="z">—</span>';
             const agent = s.turns != null
                 ? `<b>${s.turns}</b> turn${s.turns !== 1 ? 's' : ''}${s.corrections ? ` · <span class="corr">${s.corrections} correction${s.corrections !== 1 ? 's' : ''}</span>` : ' · 0 corrections'}`
                 : '<span class="z">—</span>';
@@ -2696,7 +2776,6 @@ function renderProjSessions() {
                 <td>${roleOf(s)}</td>
                 <td>${holds}</td>
                 <td><span class="ended"><span class="pj-dot ${cls}"></span>${label}</span></td>
-                <td class="sig">${signals}</td>
                 <td class="ag">${agent}</td>
                 <td>${chips}</td>
             </tr>`;
@@ -2709,9 +2788,11 @@ function renderProjSessions() {
     </div>`;
 }
 
+// The Sessions tab, on this session. ReviewApp is a top-level const there: a
+// global binding, never a window property, so it is reached by name.
 function goToSession(sid) {
     if (typeof switchTab === 'function') switchTab('sessions');
-    setTimeout(() => { if (window.ReviewApp && typeof window.ReviewApp.loadSession === 'function') window.ReviewApp.loadSession(sid); }, 80);
+    setTimeout(() => { if (typeof ReviewApp !== 'undefined') ReviewApp.loadSession(sid); }, 80);
 }
 
 // ── findings and notes ───────────────────────────────────
