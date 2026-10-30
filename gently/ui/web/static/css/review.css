@@ -783,6 +783,9 @@
 .th-fields { display: flex; gap: 4px; }
 .session-edit-btn.is-on { color: var(--text); border-color: var(--accent); }
 .th-slider { flex: 1; max-width: 440px; accent-color: var(--accent); }
+.th-step { font: inherit; font-size: 16px; line-height: 1; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0 0 2px; }
+.th-step:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.th-step:disabled { opacity: .35; cursor: default; }
 .th-empty { color: var(--text-muted); font-style: italic; font-weight: 400; }
 .th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }

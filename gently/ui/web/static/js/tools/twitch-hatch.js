@@ -18,10 +18,20 @@ const TwitchHatchTool = {
         this.sid = sid; this.el = el;
         document.removeEventListener('keydown', this._onKey);
         this._onKey = ev => {
-            if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'z' || !document.body.contains(el)) return;
-            if (/^(INPUT|TEXTAREA)$/.test(ev.target.tagName) && ev.target.type !== 'range') return;
+            if (!document.body.contains(el)) return;
+            if (/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName) && ev.target.type !== 'range') return;
+            if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+                ev.preventDefault();
+                if (this.history.length) this.save(this.history.pop(), { undo: true });
+                return;
+            }
+            // Arrows walk the frames while the pane is on screen.
+            const steps = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' };
+            if (!(ev.key in steps) || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+            const r = el.getBoundingClientRect();
+            if (r.bottom < 0 || r.top > window.innerHeight) return;
             ev.preventDefault();
-            if (this.history.length) this.save(this.history.pop(), { undo: true });
+            this.step(steps[ev.key]);
         };
         document.addEventListener('keydown', this._onKey);
         this.data = await fetch(`/api/sessions/${encodeURIComponent(sid)}/tools/twitch_hatch`).then(r => r.json());
@@ -45,8 +55,10 @@ const TwitchHatchTool = {
         this.el.innerHTML = `
           <div class="th-bar">
             <span class="th-fields">${this.fields().map(f => `<button class="session-edit-btn ${f === this.field ? 'is-on' : ''}" data-field="${f}">field ${f}</button>`).join('')}</span>
-            <input class="th-slider" type="range" min="0" max="${frames.length - 1}" value="${this.idx}">
-            <span class="th-when">frame ${cur.frame ?? ''} · ${this.hms(cur.captured_at)}</span>
+            <button type="button" class="th-step" data-step="-1" title="Previous frame (←)" aria-label="Previous frame">‹</button>
+            <input class="th-slider" type="range" min="0" max="${frames.length - 1}" value="${this.idx}" aria-label="Frame">
+            <button type="button" class="th-step" data-step="1" title="Next frame (→)" aria-label="Next frame">›</button>
+            <span class="th-when">${this.whenText()}</span>
           </div>
           <div class="th-stage">
             <img class="th-img" src="${this.url(cur.stem)}?max=1024" draggable="false" title="Click an embryo on the frame it first twitches">
@@ -77,8 +89,26 @@ const TwitchHatchTool = {
     scrub() {
         const cur = this.frame(), el = this.el;
         this.setFrame(el.querySelector('.th-img'), `${this.url(cur.stem)}?max=1024`);
-        el.querySelector('.th-when').textContent = `frame ${cur.frame ?? ''} · ${this.hms(cur.captured_at)}`;
+        el.querySelector('.th-when').textContent = this.whenText();
+        const slider = el.querySelector('.th-slider');
+        if (slider && +slider.value !== this.idx) slider.value = this.idx;
         el.querySelectorAll('[data-hatch]').forEach(b => { b.textContent = `hatch here (f${cur.frame})`; });
+        el.querySelectorAll('.th-step').forEach(b => { b.disabled = +b.dataset.step < 0 ? this.idx <= 0 : this.idx >= this.frames().length - 1; });
+    },
+
+    whenText() {
+        const cur = this.frame(), n = this.frames().length;
+        return `frame ${cur.frame ?? ''} · ${this.idx + 1} of ${n} · ${this.hms(cur.captured_at)}`;
+    },
+
+    // One frame forward or back; the arrows, the keyboard and Home/End all land here.
+    step(d) {
+        const n = this.frames().length;
+        if (!n) return;
+        const idx = Math.max(0, Math.min(n - 1, d === 'first' ? 0 : d === 'last' ? n - 1 : this.idx + d));
+        if (idx === this.idx) return;
+        this.idx = idx;
+        this.scrub();
     },
 
     // A slider sweep asks the server for the frames it can show, one at a time.
@@ -97,6 +127,8 @@ const TwitchHatchTool = {
         el.querySelectorAll('[data-field]').forEach(b => b.onclick = () => { this.field = +b.dataset.field; this.idx = 0; this.render(); });
         const slider = el.querySelector('.th-slider');
         slider.oninput = () => { this.idx = +slider.value; this.scrub(); };
+        el.querySelectorAll('.th-step').forEach(b => { b.onclick = () => this.step(+b.dataset.step); });
+        this.scrub();   // the arrows' disabled state at the ends
         el.querySelector('.th-img').onclick = ev => {
             const img = ev.currentTarget, r = img.getBoundingClientRect();
             this.save([...this.data.rows, {
