@@ -170,8 +170,13 @@ const HomeApp = (() => {
         if (!el) return;
         try {
             const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames(), ensureOperatorNames()]);
-            const sessions = (data.sessions || []).slice(0, SESSIONS_N);
-            if (!sessions.length) { empty(el, 'No sessions yet.'); return; }
+            // Only sessions that hold embryo data. A session opened and closed
+            // with nothing in it is still in the Sessions tab, not here; the
+            // live one stays, whatever it holds, because it is the one in use.
+            const sessions = (data.sessions || [])
+                .filter(s => s.active || (s.embryo_count || 0) > 0)
+                .slice(0, SESSIONS_N);
+            if (!sessions.length) { empty(el, 'No sessions with embryos yet.'); return; }
             el.innerHTML = sessions.map(s => {
                 const live = s.active ? '<span class="home-tag home-tag-live">live</span>' : '';
                 const diag = s.advanced_diagnostics
