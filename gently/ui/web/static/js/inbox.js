@@ -67,7 +67,7 @@ const Inbox = (() => {
     function item(i, cls) {
         const where = place(i, 'on ');
         return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}">
-            <span class="inbox-who">${Who.chip(i.note.by, { when: i.note.created_at })}${where ? ` <span class="pj-muted">${escapeHtml(where)}</span>` : ''}</span>
+            <span class="inbox-who rd-head">${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
         </button>`;
     }
@@ -77,11 +77,12 @@ const Inbox = (() => {
         const where = place(i, 'on ');
         const asked = (i.note.mentions || []);
         const answered = i.answered_by || [];
+        const names = ids => ids.map(p => `<b class="rd-mention" style="--who:${escapeHtml(Who.color(p))}">${escapeHtml(Who.name(p))}</b>`).join(', ');
         const state = !asked.length ? '' : answered.length
-            ? ` <span class="inbox-state is-answered">answered by ${answered.map(p => Who.chip(p)).join(' ')}</span>`
-            : ` <span class="inbox-state is-waiting">waiting on ${asked.map(p => Who.chip(p)).join(' ')}</span>`;
+            ? `<span class="inbox-state is-answered">answered by ${names(answered)}</span>`
+            : `<span class="inbox-state is-waiting">waiting on ${names(asked)}</span>`;
         return `<button type="button" class="presence-pop-item inbox-item is-mine" data-open="${escapeHtml(i.note.id)}" data-mine="1">
-            <span class="inbox-who"><span class="who-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? ` <span class="pj-muted">${escapeHtml(where)}</span>` : ''}${state}</span>
+            <span class="inbox-who rd-head"><span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${state}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
         </button>`;
     }

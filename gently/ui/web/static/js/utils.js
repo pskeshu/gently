@@ -194,6 +194,15 @@ const Who = {
     },
     name(id) { const u = this.people[id]; return u ? u.name : (id || ''); },
     color(id) { const u = this.people[id]; return (u && u.color) || '#8b949e'; },
+    initial(id) { const n = this.name(id); return (n || '?').trim().charAt(0).toUpperCase(); },
+    // The person as a line's author: their initial in their colour, then their name.
+    // This is the head of a line; a mention inside the words is Mentions.html.
+    head(id) {
+        if (id === 'agent') return `<span class="rd-avatar is-agent" aria-hidden="true">A</span><b class="rd-who is-agent">agent</b>`;
+        if (!id) return `<span class="rd-avatar is-nobody" aria-hidden="true">·</span><b class="rd-who is-nobody">someone</b>`;
+        const c = escapeHtml(this.color(id));
+        return `<span class="rd-avatar" style="--who:${c}" aria-hidden="true">${escapeHtml(this.initial(id))}</span><b class="rd-who" style="--who:${c}" title="${escapeHtml(id)}">${escapeHtml(this.name(id))}</b>`;
+    },
     chip(id, opts = {}) {
         if (!id) return opts.empty || '';
         const name = id === 'agent' ? 'agent' : this.name(id);
@@ -220,7 +229,8 @@ const Mentions = {
             const id = m[2].replace(/-+$/, '');
             if (!asked.has(id)) continue;
             const at = m.index + m[1].length;
-            out += escapeHtml(s.slice(last, at)) + Who.chip(id);
+            out += escapeHtml(s.slice(last, at))
+                + `<b class="rd-mention" style="--who:${escapeHtml(Who.color(id))}" title="${escapeHtml(id)}">@${escapeHtml(Who.name(id))}</b>`;
             last = at + 1 + id.length;
         }
         return out + escapeHtml(s.slice(last));
@@ -273,14 +283,15 @@ const Mentions = {
  * who, a tool's title as a chip or a person's headline as the lead, the
  * words with the people they ask as chips, and the session it cites.
  */
-function streamLineHtml(n, toolTitles) {
+function streamLineHtml(n, toolTitles, opts = {}) {
     const isTool = !!(toolTitles && n.title && toolTitles.has(n.title));
     const lead = n.title && !isTool ? `<b>${escapeHtml(n.title)}</b>: ` : '';
-    return `<div class="pj-entry rd-line">
-        <span class="pj-muted rd-when">${escapeHtml(formatDate(n.created_at))}</span>
-        ${n.author === 'agent' ? '<span class="pj-chip ai">agent</span>' : Who.chip(n.by)}${isTool ? `<span class="pj-chip">${escapeHtml(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${escapeHtml(n.kind)}</span>` : ''}
-        <span class="rd-text">${lead}${Mentions.html(n.body, n.mentions)}</span>
-        ${(n.sessions || []).length ? `<span class="pj-cite">${n.sessions.map(x => escapeHtml(String(x).slice(0, 8))).join(' ')}</span>` : ''}
+    const who = n.author === 'agent' ? Who.head('agent') : Who.head(n.by);
+    const cite = opts.cite === false || !(n.sessions || []).length ? ''
+        : `<span class="pj-cite" title="The session this was written on">${n.sessions.map(x => escapeHtml(String(x).slice(0, 8))).join(' ')}</span>`;
+    return `<div class="rd-line${isTool ? ' is-tool' : ''}${n.author === 'agent' ? ' is-agent' : ''}">
+        <div class="rd-head">${who}${isTool ? `<span class="pj-chip">${escapeHtml(n.title)}</span>` : ''}${n.kind && n.kind !== 'observation' ? `<span class="pj-chip">${escapeHtml(n.kind)}</span>` : ''}<span class="rd-when">${escapeHtml(formatDate(n.created_at))}</span>${cite}</div>
+        <div class="rd-text">${lead}${Mentions.html(n.body, n.mentions)}</div>
     </div>`;
 }
 
