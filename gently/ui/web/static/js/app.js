@@ -400,17 +400,17 @@ const PresenceManager = {
             }
 
             if (client.is_you) {
-                // You, by name, and the switch: who is here is never a guess.
-                const you = document.createElement('button');
-                you.type = 'button';
+                // You, by name: who is on this view. Set at the landing page and
+                // nowhere else, so a record's `by` is never changed mid-night by
+                // a click up here.
+                const you = document.createElement('span');
                 you.className = 'presence-you';
-                you.setAttribute('data-tooltip', 'Click to work as someone else');
+                you.setAttribute('data-tooltip', 'Who is on this view. Set at the landing page.');
                 you.appendChild(avatar);
                 const label = document.createElement('span');
                 label.className = 'presence-you-name';
                 label.textContent = this.shown(client.name);
                 you.appendChild(label);
-                you.addEventListener('click', () => this.openSwitcher(you));
                 container.appendChild(you);
                 return;
             }
@@ -459,64 +459,6 @@ const PresenceManager = {
             }));
         }
     },
-
-    /** Become a person the rig knows, or a new one; the same door as the landing page. */
-    async become(payload) {
-        const r = await fetch('/api/auth/operator', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-        });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-        await this.refresh();
-        this.announce();
-        this.render();
-    },
-
-    /** The switch: the rig's people, and a box for a new name. With accounts, the login. */
-    async openSwitcher(anchor) {
-        document.querySelectorAll('.presence-pop').forEach(p => p.remove());
-        const pop = document.createElement('div');
-        pop.className = 'presence-pop';
-        const title = document.createElement('div');
-        title.className = 'presence-pop-title';
-        title.textContent = `You are ${this.shown(this.name)}`;
-        pop.appendChild(title);
-        const me = this.me || {};
-        if (me.accounts) {
-            const a = document.createElement('a');
-            a.href = '/login';
-            a.className = 'presence-pop-item';
-            a.textContent = 'Sign in as someone else';
-            pop.appendChild(a);
-        } else {
-            let users = [];
-            try { users = (await (await fetch('/api/auth/users')).json()).users || []; } catch (e) { /* the box still works */ }
-            const list = document.createElement('div');
-            list.className = 'presence-pop-list';
-            users.forEach(u => {
-                const b = document.createElement('button');
-                b.type = 'button';
-                b.className = 'presence-pop-item' + (me.operator && me.operator.id === u.id ? ' is-current' : '');
-                b.textContent = u.name;
-                b.addEventListener('click', () => this.become({ id: u.id }).then(() => pop.remove()).catch(err => { title.textContent = err.message; }));
-                list.appendChild(b);
-            });
-            pop.appendChild(list);
-            const box = document.createElement('input');
-            box.className = 'presence-pop-box';
-            box.placeholder = 'New name, then Enter';
-            box.maxLength = 40;
-            box.addEventListener('keydown', e => {
-                if (e.key === 'Escape') { pop.remove(); return; }
-                if (e.key === 'Enter' && box.value.trim()) {
-                    this.become({ name: box.value.trim() }).then(() => pop.remove()).catch(err => { title.textContent = err.message; });
-                }
-            });
-            pop.appendChild(box);
-        }
-        anchor.parentElement.appendChild(pop);
-        const away = e => { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { pop.remove(); document.removeEventListener('click', away); } };
-        setTimeout(() => document.addEventListener('click', away), 0);
-    }
 };
 
 /**

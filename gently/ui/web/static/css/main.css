@@ -347,15 +347,13 @@ body {
     box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
-/* You, by name, beside your avatar; the click opens the switch. */
+/* You, by name, beside your avatar: who is on this view. Not a control. */
 .presence-you {
     display: inline-flex; align-items: center; gap: 7px;
     font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
     background: none; border: 1px solid transparent; border-radius: 999px;
-    padding: 2px 10px 2px 2px; cursor: pointer;
+    padding: 2px 10px 2px 2px; cursor: default;
 }
-.presence-you:hover { border-color: var(--border); background: var(--bg-hover); }
-.presence-you .presence-avatar { cursor: pointer; }
 .presence-you-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .presence-container { position: relative; }
 .presence-pop {
