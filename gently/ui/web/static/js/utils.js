@@ -69,11 +69,10 @@ function makeSceneScaler(ranges) {
  * HTML-escape a string (safe for insertion into innerHTML).
  * Uses the browser's built-in text node escaping.
  */
+const _ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) {
     if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
+    return String(str).replace(/[&<>"']/g, c => _ESC[c]);
 }
 
 /**
@@ -81,12 +80,13 @@ function escapeHtml(str) {
  * @param {string} isoStr
  * @returns {string} e.g. "Mar 14, 2:30 PM"
  */
+const _DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const _TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
 function formatDate(isoStr) {
     if (!isoStr) return '';
     try {
         const d = new Date(isoStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-            ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        return _DAY.format(d) + ', ' + _TIME.format(d);
     } catch { return isoStr; }
 }
 

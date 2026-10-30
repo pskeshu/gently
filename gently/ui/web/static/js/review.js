@@ -13,19 +13,25 @@ function ageDays(iso) {
     return Number.isFinite(t) ? (Date.now() - t) / 86400000 : Infinity;
 }
 
+// Errors are said in a toast, not a modal that stops the page.
+function reviewToast(msg) {
+    if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 6000, 'error');
+    else console.error(msg);
+}
+
 const ReviewApp = {
     sessions: [],
-    operatorNames: {},          // id -> display name, from /api/auth/users
     currentSession: null,
     currentTab: 'embryos',
 
     _initialized: false,
+    _loadRun: 0,            // the click a session detail answers; an older answer is dropped
+    _stale: false,          // rows changed while the tab was hidden
 
     async init() {
         if (this._initialized) return;
         this._initialized = true;
         fetch('/api/tools').then(r => r.json()).then(d => { window.GentlyToolCatalog = d.tools || []; }).catch(() => {});
-        fetch('/api/auth/users').then(r => r.json()).then(d => { (d.users || []).forEach(u => { this.operatorNames[u.id] = u.name; }); }).catch(() => {});
         await this.loadSessions();
         this.updateStatusbar();
 
@@ -39,19 +45,30 @@ const ReviewApp = {
 
     async loadSessions() {
         const list = document.getElementById('session-list');
-        list.innerHTML = '<div class="loading">Loading sessions...</div>';
+        // Rows that are already drawn stay until the new ones replace them.
+        if (!this.sessions.length) list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         try {
             const [resp] = await Promise.all([fetch('/api/sessions'), this.loadProjects()]);
             const data = await resp.json();
             this.sessions = data.sessions || [];
+            this.sessions.forEach(s => {
+                s._hay = [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
+                    .filter(Boolean).join(' ').toLowerCase();
+            });
             this.renderSessionList();
             this.fillSizes();
         } catch (e) {
-            list.innerHTML = '<div class="error">Failed to load sessions</div>';
+            if (!this.sessions.length) list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);
         }
         this.watchForFiling();
+    },
+
+    /** Is the Sessions tab on screen? Work for a hidden tab waits for it. */
+    showing() {
+        const panel = document.getElementById('sessions-content');
+        return !!(panel && panel.classList.contains('active'));
     },
 
     // ---- sizes come after the list. A walk over a session's files is the one
@@ -166,13 +183,23 @@ const ReviewApp = {
         let timer = null;
         const bump = () => {
             if (timer) clearTimeout(timer);
-            timer = setTimeout(() => { timer = null; this.loadSessions().catch(() => {}); }, 500);
+            timer = setTimeout(() => {
+                timer = null;
+                if (!this.showing()) { this._stale = true; return; }
+                this.loadSessions().catch(() => {});
+            }, 500);
         };
-        ClientEventBus.on('PLAN_UPDATED', bump);
-        ClientEventBus.on('CONTEXT_UPDATED', bump);
+        // What changes a row: a filing or a plan link (PLAN_UPDATED), a session
+        // starting, restored or ending. A note or a tactic changes no row, so
+        // CONTEXT_UPDATED no longer reloads the list.
+        ['PLAN_UPDATED', 'SESSION_STARTED', 'SESSION_RESTORED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED']
+            .forEach(ev => ClientEventBus.on(ev, bump));
+        ClientEventBus.on('TAB_CHANGED', tab => {
+            if (tab === 'sessions' && this._stale) { this._stale = false; this.loadSessions().catch(() => {}); }
+        });
         // A line written elsewhere on the open session shows up in its stream.
         ClientEventBus.on('CONTEXT_UPDATED', d => {
-            if ((!d || !d.kind || d.kind === 'note') && this.currentSession) this.mountStream(this.currentSession.session_id, true);
+            if ((!d || !d.kind || d.kind === 'note') && this.currentSession && this.showing()) this.mountStream(this.currentSession.session_id, true);
         });
     },
 
@@ -190,17 +217,30 @@ const ReviewApp = {
     closeFiling() {
         const sid = this._filing && this._filing.sid;
         this._filing = null;
-        this.renderSessionList();
-        if (sid && this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+        if (sid) this.repaintRow(sid);
+        if (sid && this.currentSession && this.currentSession.session_id === sid) this.repaintFiled();
     },
 
-    // Redraw where the popover lives, and keep the cursor in its text box.
+    // Redraw where the popover lives, that row and the filed line, and keep
+    // the cursor in its text box. The rest of the page does not move.
     _paintFiling() {
         const f = this._filing;
-        this.renderSessionList();
-        if (f && this.currentSession && this.currentSession.session_id === f.sid) this.renderSessionContent();
+        if (f) this.repaintRow(f.sid);
+        if (f && this.currentSession && this.currentSession.session_id === f.sid) this.repaintFiled();
         const box = document.querySelector('.filing-pop input[type="text"]');
         if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    },
+
+    repaintRow(sid) {
+        const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(sid)}"]`);
+        const s = this.sessions.find(x => x.session_id === sid);
+        if (!el || !s) { this.renderSessionList(); return; }
+        el.outerHTML = this.rowHtml(s);
+    },
+
+    repaintFiled() {
+        const host = document.getElementById('session-filed');
+        if (host && this.currentSession) host.innerHTML = this.renderFiled(this.currentSession);
     },
 
     filingChoice(value) { if (this._filing) { this._filing.choice = value; this._paintFiling(); } },
@@ -237,7 +277,7 @@ const ReviewApp = {
             ${home ? `<div class="filing-note">Its home stays <b>${esc(this.projectName(home))}</b>.</div>` : ''}
             ${f.error ? `<div class="filing-err">${esc(f.error)}</div>` : ''}
             <div class="filing-btns">
-                <button type="button" class="go" onclick="ReviewApp.submitFiling()">${home ? 'Add' : 'File'}</button>
+                <button type="button" class="go" ${f.busy ? 'disabled' : ''} onclick="ReviewApp.submitFiling()">${f.busy ? 'Filing…' : (home ? 'Add' : 'File')}</button>
                 <button type="button" onclick="ReviewApp.closeFiling()">Cancel</button>
             </div>
         </div>`;
@@ -252,7 +292,9 @@ const ReviewApp = {
 
     async submitFiling() {
         const f = this._filing;
-        if (!f) return;
+        if (!f || f.busy) return;          // one press files once
+        f.busy = true;
+        this._paintFiling();
         try {
             let campaignId = f.choice;
             if (campaignId === '__new__') {
@@ -273,15 +315,21 @@ const ReviewApp = {
             this._filing = null;
             await this._refiled(f.sid);
         } catch (e) {
+            f.busy = false;
             f.error = `Could not file: ${e.message || e}`;
             this._paintFiling();
         }
     },
 
-    // After a link changes: the list again, and the open session again.
+    // After a link changes: the rows again from a fresh list, drawn in place,
+    // and the open session's filed line. No blanking, no tab reset.
     async _refiled(sid) {
         await this.loadSessions();
-        if (this.currentSession && this.currentSession.session_id === sid) await this.loadSession(sid);
+        if (this.currentSession && this.currentSession.session_id === sid) {
+            const row = this.sessions.find(x => x.session_id === sid);
+            if (row) Object.assign(this.currentSession, { projects: row.projects, project_id: row.project_id, plan_items: row.plan_items });
+            this.repaintFiled();
+        }
     },
 
     // Take the session out of one project. Its other links stay, and if that
@@ -291,7 +339,7 @@ const ReviewApp = {
             await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null, from: pid });
             await this._refiled(sid);
         } catch (e) {
-            alert(`Could not take it out of the project: ${e.message || e}`);
+            reviewToast(`Could not take it out of the project: ${e.message || e}`);
         }
     },
 
@@ -301,7 +349,7 @@ const ReviewApp = {
             await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: pid, move: true });
             await this._refiled(sid);
         } catch (e) {
-            alert(`Could not make it the home: ${e.message || e}`);
+            reviewToast(`Could not make it the home: ${e.message || e}`);
         }
     },
 
@@ -347,17 +395,22 @@ const ReviewApp = {
 
     async loadSession(sessionId) {
         const content = document.getElementById('session-content');
-        content.innerHTML = '<div class="loading-content">Loading session...</div>';
+        const same = !!(this.currentSession && this.currentSession.session_id === sessionId);
+        this.highlightActiveSession(sessionId);                 // the row answers the click now
+        if (!same) content.innerHTML = '<div class="loading-content">Loading session...</div>';
+        const run = ++this._loadRun;
 
         try {
             const resp = await fetch(`/api/sessions/${sessionId}`);
             if (!resp.ok) throw new Error('Session not found');
-            this.currentSession = await resp.json();
-            this.currentTab = 'embryos';
+            const data = await resp.json();
+            if (run !== this._loadRun) return;                  // a later click already answered
+            this.currentSession = data;
+            if (!same) this.currentTab = 'embryos';
             this.renderSessionContent();
-            this.highlightActiveSession(sessionId);
             this.updateStatusbar();
         } catch (e) {
+            if (run !== this._loadRun) return;
             content.innerHTML = '<div class="error">Failed to load session</div>';
             console.error('Failed to load session:', e);
         }
@@ -548,9 +601,16 @@ const ReviewApp = {
         this.renderSessionList();
     },
 
-    passesGroup(s, group, on) {
+    // Every group's chips, built once per render; the project chips come from the rows.
+    chipTable() {
+        const t = {};
+        Object.keys(this.FILTERS).forEach(g => { t[g] = this.chipsOf(g); });
+        return t;
+    },
+
+    passesGroup(s, group, on, table) {
         const def = this.FILTERS[group];
-        const chips = this.chipsOf(group);
+        const chips = table ? table[group] : this.chipsOf(group);
         on = on.filter(k => chips[k]);                                         // a project that is gone filters nothing
         if (def.any) return on.every(k => chips[k].test(s, this));             // requirements
         if (!on.length) return true;                                           // nothing chosen = no filter
@@ -561,10 +621,15 @@ const ReviewApp = {
         const searchBox = document.getElementById('session-search');
         const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
         const out = needle
-            ? this.sessions.filter(s => [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
-                .some(v => v && String(v).toLowerCase().includes(needle)))
+            ? this.sessions.filter(s => (s._hay || '').includes(needle))
             : this.sessions.slice();
         return { needle, sessions: out };
+    },
+
+    // The search box redraws a little after the last keystroke, not on each one.
+    searchInput() {
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(() => this.renderSessionList(), 120);
     },
 
     // What the filters say, in a line: only what differs from the default.
@@ -590,17 +655,19 @@ const ReviewApp = {
         this.renderSessionList();
     },
 
-    renderFilters(searchedSessions) {
+    renderFilters(searchedSessions, table) {
         const host = document.getElementById('session-filters');
         if (!host) return;
         const st = this.filterState();
         const summary = this.filterSummary(st);
         const isDefault = summary.length === 0;
-        const groups = Object.entries(this.FILTERS).map(([g, def]) => {
+        table = table || this.chipTable();
+        // The counts are only drawn when the panel is open, so they are only counted then.
+        const groups = !st.open ? '' : Object.entries(this.FILTERS).map(([g, def]) => {
             // The count a chip shows: the searched sessions that pass every OTHER
             // group and this chip — what turning it on alone would keep.
-            const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || []));
-            const chips = Object.entries(this.chipsOf(g)).map(([k, chip]) => {
+            const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || [], table));
+            const chips = Object.entries(table[g]).map(([k, chip]) => {
                 const n = searchedSessions.filter(s => others(s) && chip.test(s, this)).length;
                 const on = (st.on[g] || []).includes(k);
                 return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.any ? 'Require' : 'Show'} sessions: ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
@@ -619,9 +686,10 @@ const ReviewApp = {
             ${isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>'}` : ''}`;
     },
 
-    applyFilters(sessions) {
+    applyFilters(sessions, table) {
         const st = this.filterState();
-        const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [])));
+        table = table || this.chipTable();
+        const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [], table)));
         const so = this.SORTS[st.sort] || this.SORTS.newest;
         kept.sort((a, b) => {
             const ka = so.key(a), kb = so.key(b);
@@ -634,8 +702,13 @@ const ReviewApp = {
     renderSessionList() {
         const list = document.getElementById('session-list');
         const { needle, sessions: searchedSessions } = this.searched();
-        this.renderFilters(searchedSessions);
-        const filtered = this.applyFilters(searchedSessions);
+        const table = this.chipTable();
+        this.renderFilters(searchedSessions, table);
+        const filtered = this.applyFilters(searchedSessions, table);
+        // Whatever scrolls the list keeps its place across a redraw.
+        const scroller = [list, list.parentElement, list.parentElement && list.parentElement.parentElement]
+            .find(el => el && el.scrollHeight > el.clientHeight + 1);
+        const top = scroller ? scroller.scrollTop : 0;
 
         if (this.sessions.length === 0) {
             list.innerHTML = '<div class="no-sessions">No sessions found</div>';
@@ -650,10 +723,15 @@ const ReviewApp = {
             return;
         }
 
-        list.innerHTML = filtered.map(s => {
+        list.innerHTML = filtered.map(s => this.rowHtml(s)).join('');
+        if (scroller) scroller.scrollTop = top;
+    },
+
+    rowHtml(s) {
             const held = this.holdings(s);
+            const open = this.currentSession && this.currentSession.session_id === s.session_id;
             return `
-            <div class="session-item ${s.active ? 'active-session' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
+            <div class="session-item ${s.active ? 'active-session' : ''}${open ? ' active' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
                 <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
                 <div class="session-meta">
                     <span>${this.formatDate(s.created_at)}</span>
@@ -668,7 +746,6 @@ const ReviewApp = {
                     { what: 'session', session_id: s.session_id }, 'show',
                     { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
             </div>`;
-        }).join('');
     },
 
     // Two intents, said apart. Looking at a session is this tab: nothing
@@ -700,10 +777,10 @@ const ReviewApp = {
                 window.location.href = '/';
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(failure + ': ' + (d.detail || ('HTTP ' + resp.status)));
+                reviewToast(failure + ': ' + (d.detail || ('HTTP ' + resp.status)));
             }
         } catch (e) {
-            alert(failure + ': ' + e);
+            reviewToast(failure + ': ' + e);
         }
     },
 
@@ -722,7 +799,6 @@ const ReviewApp = {
         const s = this.currentSession;
         const embryos = s.embryos || [];
         const frames = s.bf_frames || [];
-        const predictions = embryos.reduce((n, e) => n + ((e.predictions || []).length), 0);
 
         content.innerHTML = `
             <div class="session-header">
@@ -736,7 +812,7 @@ const ReviewApp = {
                         : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 </div>
                 <div id="session-name-form"></div>
-                ${this.renderFiled(s)}
+                <div id="session-filed">${this.renderFiled(s)}</div>
                 ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
@@ -759,17 +835,9 @@ const ReviewApp = {
                     Embryos
                     <span class="tab-count">${embryos.length}</span>
                 </button>
-                <button class="tab ${this.currentTab === 'detections' ? 'active' : ''}" data-tab="detections">
-                    Stage calls
-                    <span class="tab-count">${predictions}</span>
-                </button>
                 <button class="tab ${this.currentTab === 'conversation' ? 'active' : ''}" data-tab="conversation">
                     Conversation
                     <span class="tab-count">${(s.conversation || []).length}</span>
-                </button>
-                <button class="tab ${this.currentTab === 'events' ? 'active' : ''}" data-tab="events">
-                    What happened
-                    <span class="tab-count">${(s.events || []).length}</span>
                 </button>
                 <button class="tab ${this.currentTab === 'tools' ? 'active' : ''}" data-tab="tools">
                     Tools
@@ -819,9 +887,11 @@ const ReviewApp = {
         const box = document.getElementById('session-stream-line');
         Mentions.attach(box);
         box.onkeydown = async e => {
-            if (e.key !== 'Enter' || !box.value.trim()) return;
-            try { await this._post('/api/notebook/notes', { body: box.value.trim(), sessions: [sid] }); }
-            catch (err) { alert(`Could not file the line: ${err.message || err}`); return; }
+            if (e.key !== 'Enter' || !box.value.trim() || box.disabled) return;
+            const text = box.value.trim();
+            box.disabled = true;                                   // one press, one line
+            try { await this._post('/api/notebook/notes', { body: text, sessions: [sid] }); }
+            catch (err) { box.disabled = false; reviewToast(`Could not file the line: ${err.message || err}`); return; }
             this.mountStream(sid);
         };
     },
@@ -1143,10 +1213,23 @@ const ReviewApp = {
             el.classList.add('is-scrubbing');
             const img = el.querySelector('img');
             const cap = el.querySelector('.embryo-thumb-cap');
-            const show = t => {
+            // One frame in flight at a time: a sweep across 300 timepoints asks
+            // for the frames it can show, not every one it crossed.
+            let want = null;
+            const apply = t => {
                 const url = `/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
-                if (img && img.dataset.t !== String(t)) { img.src = url; img.dataset.t = String(t); el.href = url; }
+                img.dataset.loading = '1'; img.dataset.t = String(t); img.src = url; el.href = url;
+            };
+            const landed = () => {
+                img.dataset.loading = '';
+                if (want != null && String(want) !== img.dataset.t) { const t = want; want = null; apply(t); }
+            };
+            if (img) { img.addEventListener('load', landed); img.addEventListener('error', landed); }
+            const show = t => {
                 if (cap) cap.textContent = `t${t} · ${tps.indexOf(t) + 1}/${tps.length}`;
+                if (!img || img.dataset.t === String(t)) return;
+                if (img.dataset.loading) { want = t; return; }
+                apply(t);
             };
             el.addEventListener('mousemove', ev => {
                 const r = el.getBoundingClientRect();
@@ -1163,6 +1246,16 @@ const ReviewApp = {
         return map[stage] || map[String(stage).replace(/-/g, '')] || null;
     },
 
+    // Consecutive calls of one stage, as one segment: a strip of 300 calls is a few spans.
+    stageRuns(preds) {
+        const runs = [];
+        preds.forEach(p => {
+            const r = runs[runs.length - 1];
+            if (r && r.stage === p.stage) { r.n++; r.last = p; } else runs.push({ stage: p.stage, n: 1, first: p, last: p });
+        });
+        return runs;
+    },
+
     stageBar(e) {
         const preds = e.predictions || [];
         if (!preds.length || typeof stageColor !== 'function') return '';
@@ -1171,7 +1264,7 @@ const ReviewApp = {
         const tip = p => `t${p.timepoint} · ${this.stageText(p.stage)}${this.stageTerm(p.stage) ? ` · ${this.stageTerm(p.stage)}` : ''}`;
         return `
             <div class="stage-bar" title="Stage call per timepoint">
-                ${preds.map(p => `<span style="background:${stageColor(p.stage)}" title="${this.escapeHtml(tip(p))}"></span>`).join('')}
+                ${this.stageRuns(preds).map(r => `<span style="background:${stageColor(r.stage)};flex-grow:${r.n}" title="${this.escapeHtml(r.n === 1 ? tip(r.first) : `t${r.first.timepoint}–t${r.last.timepoint} · ${this.stageText(r.stage)}`)}"></span>`).join('')}
             </div>
             <div class="stage-bar-key"><span>t${preds[0].timepoint} ${this.escapeHtml(this.stageText(preds[0].stage))}</span><span>${this.escapeHtml(this.stageText(last.stage))} t${last.timepoint}</span></div>
             ${term ? `<div class="stage-ontology">${this.escapeHtml(this.stageText(last.stage))} · <a href="https://wormbase.org/species/all/life_stage/${encodeURIComponent(term)}" target="_blank" rel="noopener" title="WormBase life stage">${this.escapeHtml(term)}</a></div>` : ''}`;
@@ -1200,43 +1293,7 @@ const ReviewApp = {
             ).join(' · ')}</div>`;
     },
 
-    renderEventsTab() {
-        const s = this.currentSession;
-        const events = s.events || [];
-        const temp = s.temperature || [];
-        const actions = (s.actions || []).slice().reverse();
-        const spark = this.temperatureSpark(temp);
-        if (!events.length && !spark && !actions.length) return '<div class="empty-tab">Nothing recorded beyond the images</div>';
-        const acts = actions.length ? `<div class="session-bf-head">What people did <span class="session-bf-count">${actions.length}</span></div>
-            <div class="event-list action-list">${actions.map(a => `<time>${this.formatDateTime(a.at)}</time><div>${Who.chip(a.by, { empty: '<span class="pj-muted">someone</span>' })} <code>${this.escapeHtml(a.method)} ${this.escapeHtml(a.path)}${a.query ? '?' + this.escapeHtml(a.query) : ''}</code></div>`).join('')}</div>` : '';
-        return `
-            ${spark}${acts}
-            ${events.length ? `<div class="event-list">
-                ${events.map(ev => `<time>${this.formatDateTime(ev.at)}</time><div class="${ev.level === 'warn' ? 'is-warn' : ev.level === 'error' ? 'is-error' : ''}">${this.escapeHtml(ev.text)}</div>`).join('')}
-            </div>` : '<div class="empty-tab">No notable events recorded</div>'}`;
-    },
 
-    temperatureSpark(samples) {
-        const pts = samples.filter(p => Number.isFinite(Number(p.water_c)));
-        if (pts.length < 2) return '';
-        const W = 600, H = 72, pad = 4;
-        const ys = pts.map(p => Number(p.water_c));
-        const sp = pts.map(p => Number(p.setpoint_c)).filter(Number.isFinite);
-        const lo = Math.min(...ys, ...sp) - 0.2, hi = Math.max(...ys, ...sp) + 0.2;
-        const x = i => pad + (i / (pts.length - 1)) * (W - 2 * pad);
-        const y = v => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
-        const line = ys.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-        const set = sp.length ? `<line x1="${pad}" x2="${W - pad}" y1="${y(sp[sp.length - 1]).toFixed(1)}" y2="${y(sp[sp.length - 1]).toFixed(1)}" stroke="var(--temp-setpoint-color)" stroke-dasharray="4 4" stroke-width="1"/>` : '';
-        const minV = Math.min(...ys), maxV = Math.max(...ys);
-        return `
-            <div class="session-temp">
-                <div class="session-temp-head">Water temperature <span>${minV.toFixed(1)}–${maxV.toFixed(1)} °C</span>${sp.length ? `<span>setpoint ${sp[sp.length - 1].toFixed(1)} °C</span>` : ''}<span>${this.formatDateTime(pts[0].t)} → ${this.formatDateTime(pts[pts.length - 1].t)}</span></div>
-                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Water temperature over the session">
-                    ${set}
-                    <polyline fill="none" stroke="var(--temp-water-color)" stroke-width="1.5" points="${line}"/>
-                </svg>
-            </div>`;
-    },
 
     renderRun(run) {
         if (!run || !run.status) return '';
@@ -1304,9 +1361,7 @@ const ReviewApp = {
     renderCurrentTab() {
         switch (this.currentTab) {
             case 'embryos': return this.renderEmbryosTab();
-            case 'detections': return this.renderDetectionsTab();
             case 'conversation': return this.renderConversationTab();
-            case 'events': return this.renderEventsTab();
             case 'tools': return this.renderToolsTab();
             default: return '';
         }
@@ -1349,7 +1404,7 @@ const ReviewApp = {
         const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/tools`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools }),
         });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || `HTTP ${r.status}`); return; }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); reviewToast(d.detail || `HTTP ${r.status}`); return; }
         s.tools = (await r.json()).tools;
         document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
         this.mountTools();
@@ -1418,31 +1473,6 @@ const ReviewApp = {
         `;
     },
 
-    renderDetectionsTab() {
-        const embryos = (this.currentSession.embryos || []).filter(e => (e.predictions || []).length);
-
-        if (embryos.length === 0) {
-            return '<div class="empty-tab">No stage calls recorded</div>';
-        }
-
-        return `
-            <div class="detections-list">
-                ${embryos.map(e => `
-                    <div class="detection-group">
-                        <h4>${this.escapeHtml(e.nickname || e.embryo_id)}</h4>
-                        <div class="stage-calls">
-                            ${e.predictions.map(p => `
-                                <a class="stage-call" href="/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(e.embryo_id)}&t=${p.timepoint}" target="_blank" rel="noopener" title="Open timepoint ${p.timepoint}">
-                                    <span class="stage-call-t">t${p.timepoint}</span>
-                                    <span class="stage-call-stage">${this.escapeHtml(this.stageText(p.stage))}</span>
-                                    ${p.confidence != null ? `<span class="stage-call-conf">${Math.round(p.confidence * 100)}%</span>` : ''}
-                                </a>`).join('')}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    },
 
     renderConversationTab() {
         const conversation = this.currentSession.conversation || [];
