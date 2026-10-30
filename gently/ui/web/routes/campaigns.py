@@ -85,7 +85,15 @@ def create_router(server) -> APIRouter:
         agent = getattr(bridge, "agent", None) if bridge is not None else None
         return getattr(agent, "session_id", None) if agent is not None else None
 
-    def _member_sessions(root_id: str) -> list[dict]:
+    def _member_sessions(root_id: str, sessions: list[dict] | None = None) -> list[dict]:
+        """A project's sessions: picked from ``sessions`` when the caller has
+        walked them already, else one walk for this project."""
+        if sessions is not None:
+            return [
+                s
+                for s in sessions
+                if any(x.get("id") == root_id for x in (s.get("projects") or []))
+            ]
         store = _gently_store()
         if store is None:
             return []
@@ -94,10 +102,10 @@ def create_router(server) -> APIRouter:
         except Exception:
             return []
 
-    def _project_summary(cs, root_id: str) -> dict:
+    def _project_summary(cs, root_id: str, sessions: list[dict] | None = None) -> dict:
         """What Home and the project list say about a project: how many sessions,
         whether one is live, when the last ran, what waits on a person."""
-        sessions = _member_sessions(root_id)
+        sessions = _member_sessions(root_id, sessions)
         active = _active_session_id()
         out = {
             "sessions": len(sessions),
@@ -127,15 +135,27 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/campaigns")
     async def list_campaigns():
-        """List all campaigns as a tree."""
+        """List all campaigns as a tree. One walk of the sessions serves every
+        project's count, in a worker thread: this used to walk them once per
+        project on the event loop, beside the Sessions list."""
         cs = _get_store()
-        roots = cs.get_root_campaigns()
-        trees = []
-        for root in roots:
-            tree = _build_campaign_tree(cs, root.id)
-            tree["project"] = _project_summary(cs, root.id)
-            trees.append(tree)
-        return {"campaigns": trees}
+
+        def build() -> list[dict]:
+            store = _gently_store()
+            try:
+                sessions = store.list_sessions() if store is not None else []
+            except Exception:
+                sessions = []
+            trees: list[dict] = []
+            for root in cs.get_root_campaigns():
+                tree = _build_campaign_tree(cs, root.id)
+                if tree is None:
+                    continue
+                tree["project"] = _project_summary(cs, root.id, sessions)
+                trees.append(tree)
+            return trees
+
+        return {"campaigns": await asyncio.to_thread(build)}
 
     # ------------------------------------------------------------------
     # Projects: a root campaign is a project. These are the writes a person

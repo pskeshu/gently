@@ -281,9 +281,11 @@ function cookie(name) {
   return m ? decodeURIComponent(m[1]) : "";
 }
 async function loadWho() {
-  let me = {}, users = { accounts: false, users: [] };
-  try { me = await (await fetch("/api/auth/me")).json(); } catch (e) {}
-  try { users = await (await fetch("/api/auth/users")).json(); } catch (e) {}
+  // Both at once: the people list is not held behind the identity answer.
+  const [me, users] = await Promise.all([
+    fetch("/api/auth/me").then(r => r.json()).catch(() => ({})),
+    fetch("/api/auth/users").then(r => r.json()).catch(() => ({ accounts: false, users: [] })),
+  ]);
   (users.users || []).forEach(u => { operatorNames[u.id] = u.name; });
   paintWhich();
   const who = document.getElementById("who"), box = document.getElementById("who-name");

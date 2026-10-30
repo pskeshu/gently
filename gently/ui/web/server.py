@@ -250,6 +250,15 @@ class VisualizationServer(Service):
     def set_context_store(self, context_store) -> None:
         """Set the FileContextStore for campaign/plan data access."""
         self.context_store = context_store
+        # People named on sessions' links are written into config/operators.yaml
+        # once, here, so listing people never walks the sessions on a request.
+        if self.gently_store is not None:
+            try:
+                from gently.ui.web.operators import remember_people_on_links
+
+                remember_people_on_links(self.gently_store)
+            except Exception:
+                logging.getLogger(__name__).debug("people on links not remembered", exc_info=True)
         # Sessions filed before the project field existed get their home from
         # the plan links, once; nothing happens for sessions with no link.
         if self.gently_store is not None and context_store is not None:
