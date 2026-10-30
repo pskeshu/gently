@@ -54,7 +54,7 @@ const TwitchHatchTool = {
           </div>
           <table class="th-table">
             <thead><tr><th>#</th><th>field</th><th>twitch</th><th>hatch</th><th>minutes</th><th>°C</th><th>vs Sulston (${this.data.sulston_min} min)</th><th>by</th><th></th></tr></thead>
-            <tbody>${report.map((r, i) => `
+            <tbody>${!report.length ? '<tr><td colspan="9" class="th-empty">No embryo marked yet. Click an embryo on the frame where it first twitches; then move to the frame it hatches and press its hatch button.</td></tr>' : ''}${report.map((r, i) => `
               <tr>
                 <td>${i + 1}</td><td>${r.field}</td>
                 <td><a href="#" data-go="${r.field}:${r.twitch_frame}">f${r.twitch_frame}</a> ${r.twitch_at ? this.hms(r.twitch_at) : ''}</td>

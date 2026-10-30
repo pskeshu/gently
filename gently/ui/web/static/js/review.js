@@ -495,14 +495,23 @@ const ReviewApp = {
     // so a filter never hides sessions silently.
 
     FILTERS: {
-        holds: {
-            label: 'Holds',
+        // What a session holds: anything at all (the usual view hides the
+        // empties), and by channel, SPIM volumes or brightfield frames.
+        content: {
+            label: 'Content',
             chips: {
-                embryos: { label: 'embryos', test: s => s.embryo_count > 0 },
-                brightfield: { label: 'brightfield', test: s => s.bf_frames > 0 },
-                empty: { label: 'empty', test: s => !(s.embryo_count > 0) && !(s.bf_frames > 0) },
+                nonempty: { label: 'non-empty', test: s => s.timepoints > 0 || s.bf_frames > 0 },
+                empty: { label: 'empty', test: s => !(s.timepoints > 0) && !(s.bf_frames > 0) },
             },
-            defaults: ['embryos', 'brightfield'],
+            defaults: ['nonempty'],
+        },
+        channel: {
+            label: 'Channel',
+            chips: {
+                spim: { label: 'SPIM', test: s => s.timepoints > 0 },
+                brightfield: { label: 'brightfield', test: s => s.bf_frames > 0 },
+            },
+            defaults: [],
         },
         run: {
             label: 'Run',
@@ -680,7 +689,7 @@ const ReviewApp = {
             <button type="button" class="session-filters-toggle${isDefault ? '' : ' is-set'}" onclick="ReviewApp.toggleFilters()" aria-expanded="${st.open ? 'true' : 'false'}">
                 <span class="session-filters-caret">${st.open ? '▾' : '▸'}</span>
                 <span class="session-filters-word">Filters</span>
-                <span class="session-filters-summary">${isDefault ? 'embryos or brightfield · newest' : this.escapeHtml(summary.join(' · '))}</span>
+                <span class="session-filters-summary">${isDefault ? 'non-empty · newest' : this.escapeHtml(summary.join(' · '))}</span>
             </button>
             ${st.open ? `<div class="session-filters-grid">${groups}<div class="session-filter-label">Sort</div><div class="session-filter-chips">${sorts}</div></div>
             ${isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>'}` : ''}`;
@@ -942,6 +951,7 @@ const ReviewApp = {
                 : '';
         host.innerHTML = `
             <div class="session-export-row">
+                <span class="session-export-label">Export</span>
                 <button class="session-edit-btn" onclick="ReviewApp.askExport()" title="One folder per embryo, files named in time order, the record beside them; opens in Fiji with Import › Image Sequence">Export for Fiji…</button>
                 ${last}
             </div>
@@ -1380,7 +1390,7 @@ const ReviewApp = {
             <div class="session-tools-bar">
                 ${avail.length ? `<select id="session-tool-pick">${avail.map(t => `<option value="${t.name}" title="${this.escapeHtml(t.summary)}">${this.escapeHtml(t.title)}</option>`).join('')}</select>
                 <button class="session-edit-btn" onclick="ReviewApp.importTool()">Import</button>` : ''}
-                ${!on.length ? '<span class="hint">No tools imported into this session yet.</span>' : ''}
+                ${!on.length ? '<span class="hint">No tools on this session yet.</span>' : ''}
             </div>
             ${on.map(name => {
                 const t = (window.GentlyToolCatalog || []).find(x => x.name === name) || { title: name };
@@ -1440,7 +1450,7 @@ const ReviewApp = {
         const strip = this.renderBfStrip();
 
         if (embryos.length === 0) {
-            return strip + '<div class="empty-tab">No embryo data recorded</div>';
+            return strip + '<div class="empty-tab">No embryos in this session.</div>';
         }
 
         return strip + `
@@ -1457,14 +1467,12 @@ const ReviewApp = {
                             : '<div class="embryo-thumb embryo-thumb-empty">no image</div>'}
                         <div class="embryo-header">
                             <h3>${this.escapeHtml(name)}${sub ? ` <small>${this.escapeHtml(sub)}</small>` : ''}</h3>
+                            ${e.role ? `<span class="chip embryo-role" title="Its role in the run">${this.escapeHtml(e.role)}</span>` : ''}
                             ${e.is_complete ? '<span class="status-badge complete">Complete</span>' : ''}
                         </div>
                         <div class="embryo-details">
-                            ${e.role ? `<div class="detail"><span>Role:</span> ${this.escapeHtml(e.role)}</div>` : ''}
-                            ${stage ? `<div class="detail"><span>Stage:</span> ${this.escapeHtml(stage)}${conf}</div>` : ''}
-                            <div class="detail"><span>Timepoints:</span> ${e.timepoints || 0}</div>
-                            ${e.strain ? `<div class="detail"><span>Strain:</span> ${this.escapeHtml(e.strain)}</div>` : ''}
-                            ${e.position && e.position.x != null ? `<div class="detail"><span>Position:</span> (${Number(e.position.x).toFixed(1)}, ${Number(e.position.y).toFixed(1)})</div>` : ''}
+                            ${stage ? `<div class="embryo-stage">${this.escapeHtml(stage)}${conf ? `<span class="embryo-conf">${conf.trim()}</span>` : ''}</div>` : '<div class="embryo-stage is-none">no stage call yet</div>'}
+                            <div class="embryo-meta">${e.timepoints || 0} timepoint${(e.timepoints || 0) === 1 ? '' : 's'}${e.strain ? ` · ${this.escapeHtml(e.strain)}` : ''}${e.position && e.position.x != null ? ` · <span class="embryo-pos" title="Stage position">${Number(e.position.x).toFixed(0)}, ${Number(e.position.y).toFixed(0)}</span>` : ''}</div>
                         </div>
                         ${this.stageBar(e)}
                         ${this.dose(e)}
@@ -1480,7 +1488,7 @@ const ReviewApp = {
         const conversation = this.currentSession.conversation || [];
 
         if (conversation.length === 0) {
-            return '<div class="empty-tab">No conversation history</div>';
+            return '<div class="empty-tab">No conversation in this session.</div>';
         }
 
         return `
