@@ -241,6 +241,7 @@ class NotebookStore:
         "thread": "threads",
         "project": "projects",
         "person": "mentions",
+        "session": "sessions",
     }
 
     def __init__(self, notebook_dir: Path):
@@ -256,6 +257,7 @@ class NotebookStore:
             "thread": {},
             "project": {},
             "person": {},
+            "session": {},
         }
         self.rebuild_index()
 
@@ -269,7 +271,14 @@ class NotebookStore:
 
     def rebuild_index(self) -> None:
         """Rebuild reverse-indexes by scanning notes/."""
-        self._index = {"strain": {}, "embryo": {}, "thread": {}, "project": {}, "person": {}}
+        self._index = {
+            "strain": {},
+            "embryo": {},
+            "thread": {},
+            "project": {},
+            "person": {},
+            "session": {},
+        }
         for f in sorted(self.notes_dir.glob("*.yaml")):
             data = self._read_yaml(f)
             if data:
@@ -290,6 +299,10 @@ class NotebookStore:
     def ids_for_person(self, person: str) -> list[str]:
         """Notes that ask this person: their id is in ``mentions``."""
         return list(self._index["person"].get(person, []))
+
+    def ids_for_session(self, session: str) -> list[str]:
+        """Notes filed to a session: a session's stream, without a scan of every note."""
+        return list(self._index["session"].get(session, []))
 
     # ---- helpers (mirror FileContextStore conventions) ----
     @staticmethod
@@ -365,6 +378,7 @@ class NotebookStore:
         thread: str | None = None,
         project: str | None = None,
         person: str | None = None,
+        session: str | None = None,
     ) -> list[Note]:
         """Structural query: narrow by scope via the indexes, then filter by
         kind/author/status. Returned newest-first. (No semantic ranking here —
@@ -381,6 +395,8 @@ class NotebookStore:
             scope_sets.append(set(self.ids_for_project(project)))
         if person is not None:
             scope_sets.append(set(self.ids_for_person(person)))
+        if session is not None:
+            scope_sets.append(set(self.ids_for_session(session)))
         candidate_ids: set[str] | None = set.intersection(*scope_sets) if scope_sets else None
 
         # 2. load + filter

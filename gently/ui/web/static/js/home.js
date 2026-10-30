@@ -209,7 +209,7 @@ const HomeApp = (() => {
             const items = trees.slice(0, CAMPAIGNS_N);
             let unfiled = 0;
             try {
-                const u = await (await fetch('/api/sessions?unfiled=1')).json();
+                const u = await (await fetch('/api/sessions?unfiled=1&detail=0')).json();
                 unfiled = (u.sessions || []).length;
             } catch (_) { unfiled = 0; }
             if (!items.length && !unfiled) { empty(el, 'No projects yet.'); return; }

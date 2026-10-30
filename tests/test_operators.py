@@ -21,11 +21,13 @@ def test_a_person_is_an_id_and_a_name(tmp_path, monkeypatch):
         pass
     else:
         raise AssertionError("an unknown id is not a person")
-    # an id on a record the file does not know shows as itself
+    # an id on a record the file does not know is written in once, at start,
+    # shown as itself; listing people never walks the sessions on a request
     store = FileStore(tmp_path)
     store.create_session("s1", name="s1")
     store.link_session("s1", "proj1", by="ryan")
     store.link_session("s1", "proj2", by="agent")
+    assert operators.remember_people_on_links(store) == 1  # ryan; the agent is not a person
     assert operators.list_operators(store)[-1] == {"id": "ryan", "name": "ryan"}
     for bad in ("   ", "@@@"):
         try:

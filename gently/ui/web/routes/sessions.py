@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from gently.core.session_summary import interaction_stats, signal_counts
-from gently.core.session_summary import notable_events as _notable_events
 from gently.core.session_summary import read_checkpoint as _checkpoint
 from gently.core.session_summary import what_a_session_holds as _what_a_session_holds
 from gently.ui.web.auth import require_control
@@ -188,14 +187,6 @@ def folder_bytes(
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
-    def _actions(store, sid: str) -> list[dict]:
-        from gently.ui.web.actions import read_actions
-
-        try:
-            return read_actions(store, sid, limit=200)
-        except Exception:
-            return []
-
     def _session_tools(store, sid: str) -> list[str]:
         from gently.tools import session_tools
 
@@ -261,12 +252,15 @@ def create_router(server) -> APIRouter:
             return {}
 
     @router.get("/api/sessions")
-    async def list_sessions(project_id: str | None = None, unfiled: bool = False):
+    async def list_sessions(
+        project_id: str | None = None, unfiled: bool = False, detail: bool | None = None
+    ):
         """List available sessions (from the live FileStore).
 
         ``project_id`` narrows to one project's sessions and ``unfiled`` to
         those in none. Either adds what the project view shows: errors and
-        warnings from the event capture, the agent's turns and corrections.
+        warnings from the event capture, the agent's turns and corrections;
+        ``detail=0`` leaves those out for a caller that only counts rows.
         Every row carries its project and the plan items it served.
         """
         store = _file_store()
@@ -274,7 +268,7 @@ def create_router(server) -> APIRouter:
             return {"sessions": []}
         active_id = _active_session_id()
         cs = getattr(server, "context_store", None)
-        detail = project_id is not None or unfiled
+        detail = (project_id is not None or unfiled) if detail is None else detail
 
         def gather() -> list[dict]:
             out = []
@@ -713,74 +707,75 @@ def create_router(server) -> APIRouter:
         """Get session state for review, from the live FileStore.
 
         Maps the FileStore session snapshot onto the shape the Sessions review
-        view expects (embryo_states / conversation). detection_history isn't
-        reconstructed here (per-timepoint predictions live elsewhere).
+        view expects (embryo_states / conversation). Every read happens in one
+        worker thread: a session's folder is many small files, and the event
+        loop has other people's requests to answer.
         """
         store = _file_store()
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
-        info = store.get_session(session_id)
-        if info is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        snapshot = store.load_session_snapshot(session_id) or {}
-        experiment = snapshot.get("experiment_data", {}) or {}
-        held = await asyncio.to_thread(_what_a_session_holds, store, session_id)
-        embryos, bf_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
-        acquisition = store.get_acquisition_plan(session_id)
-        state = _checkpoint(store, session_id)
-        _add_dose(embryos, state)
-        events, temperature, removed = await asyncio.to_thread(_what_happened, store, session_id)
-        return {
-            "session_id": session_id,
-            "project_id": info.get("project_id"),
-            "projects": store.links_of(info),
-            "plan_items": _plan_items_by_session(getattr(server, "context_store", None)).get(
-                session_id, []
-            ),
-            "stage_ontology": _stage_ontology(),
-            "name": info.get("name"),
-            "suggested_name": derive_session_name(
-                created_at=info.get("created_at"),
-                embryo_count=len(embryos),
-                last_run=(held or {}).get("last_run"),
-                acquisition=acquisition,
-                embryos=embryos,
-            ),
-            "description": info.get("description", ""),
-            "created_at": info.get("created_at", ""),
-            "last_active": info.get("last_active", ""),
-            "run": (held or {}).get("run"),
-            "last_run": (held or {}).get("last_run"),
-            # A fresh count only for the live session, whose folder is growing;
-            # a finished session's size is what the cache last counted.
-            "bytes": await asyncio.to_thread(
-                folder_bytes,
-                store._session_dir(session_id),
-                fresh=session_id == _active_session_id(),
-            ),
-            "acquisition": acquisition,
-            "embryos": embryos,
-            "bf_frames": bf_frames,
-            "tools": _session_tools(store, session_id),
-            "actions": _actions(store, session_id),
-            "operators": [str(x) for x in (info.get("operators") or [])],
-            "edited": info.get("edited"),
-            "events": events,
-            "temperature": temperature,
-            "removed_embryos": removed,
-            "embryo_states": experiment.get("embryos", {}) or {},
-            "conversation": snapshot.get("conversation_history", []) or [],
-            "detection_history": {},
-        }
+        cs = getattr(server, "context_store", None)
+        active = _active_session_id()
 
-    def _what_to_look_at(store, sid: str) -> tuple[list[dict], list[dict]]:
+        def gather() -> dict | None:
+            info = store.get_session(session_id)
+            if info is None:
+                return None
+            snapshot = store.load_session_snapshot(session_id) or {}
+            experiment = snapshot.get("experiment_data", {}) or {}
+            held = _what_a_session_holds(store, session_id) or {}
+            embryos, bf_frames = _what_to_look_at(store, session_id, snapshot)
+            acquisition = store.get_acquisition_plan(session_id)
+            _add_dose(embryos, _checkpoint(store, session_id))
+            return {
+                "session_id": session_id,
+                "project_id": info.get("project_id"),
+                "projects": store.links_of(info),
+                "plan_items": _plan_items_by_session(cs).get(session_id, []),
+                "stage_ontology": _stage_ontology(),
+                "name": info.get("name"),
+                "suggested_name": derive_session_name(
+                    created_at=info.get("created_at"),
+                    embryo_count=len(embryos),
+                    last_run=held.get("last_run"),
+                    acquisition=acquisition,
+                    embryos=embryos,
+                ),
+                "description": info.get("description", ""),
+                "created_at": info.get("created_at", ""),
+                "last_active": info.get("last_active", ""),
+                "run": held.get("run"),
+                "last_run": held.get("last_run"),
+                # A fresh count only for the live session, whose folder is growing;
+                # a finished session's size is what the cache last counted.
+                "bytes": folder_bytes(store._session_dir(session_id), fresh=session_id == active),
+                "acquisition": acquisition,
+                "embryos": embryos,
+                "bf_frames": bf_frames,
+                "tools": _session_tools(store, session_id),
+                "operators": [str(x) for x in (info.get("operators") or [])],
+                "edited": info.get("edited"),
+                "removed_embryos": _removed(store, session_id),
+                "embryo_states": experiment.get("embryos", {}) or {},
+                "conversation": snapshot.get("conversation_history", []) or [],
+                "detection_history": {},
+            }
+
+        data = await asyncio.to_thread(gather)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return data
+
+    def _what_to_look_at(
+        store, sid: str, snapshot: dict | None = None
+    ) -> tuple[list[dict], list[dict]]:
         """Per embryo: its latest projection and last predicted stage. Per
         brightfield frame: where to fetch it. Paths never leave the server; the
         client gets URLs the routes below resolve through the store."""
         embryos: list[dict] = []
-        states = ((store.load_session_snapshot(sid) or {}).get("experiment_data", {}) or {}).get(
-            "embryos", {}
-        ) or {}
+        if snapshot is None:
+            snapshot = store.load_session_snapshot(sid) or {}
+        states = (snapshot.get("experiment_data", {}) or {}).get("embryos", {}) or {}
         for e in store.list_embryos(sid) or []:
             eid = e.get("embryo_id")
             try:
@@ -854,25 +849,10 @@ def create_router(server) -> APIRouter:
                     budget = float(base)
             e["dose_budget_ms"] = budget
 
-    def _what_happened(store, sid: str) -> tuple[list[dict], list[dict], list[dict]]:
-        """The run's notable events, the night's temperature, and the embryos
-        set aside — what you ask before resuming: did anything go wrong."""
-        folder = store._session_dir(sid)
-        events: list[dict] = []
-        if folder is not None:
-            events = _notable_events(Path(folder) / "events.jsonl")
+    def _removed(store, sid: str) -> list[dict]:
+        """The embryos set aside, with why: what you ask before resuming."""
         try:
-            samples = store.read_temperature_log(sid) or []
-        except Exception:
-            samples = []
-        step = max(1, -(-len(samples) // 240))  # ceil: at most 240 points
-        temperature = [
-            {"t": r.get("t"), "water_c": r.get("water_c"), "setpoint_c": r.get("setpoint_c")}
-            for r in samples[::step]
-            if r.get("water_c") is not None
-        ]
-        try:
-            removed = [
+            return [
                 {
                     "embryo_id": r.get("embryo_id"),
                     "nickname": r.get("nickname"),
@@ -883,8 +863,7 @@ def create_router(server) -> APIRouter:
                 for r in store.list_removed_embryos(sid) or []
             ]
         except Exception:
-            removed = []
-        return events, temperature, removed
+            return []
 
     @router.patch("/api/sessions/{session_id}", dependencies=[Depends(require_control)])
     async def rename_session(session_id: str, body: dict, request: Request):

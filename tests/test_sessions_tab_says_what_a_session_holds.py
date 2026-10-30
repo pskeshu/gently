@@ -195,14 +195,13 @@ def _with_a_night(store, sid):
 
 
 class TestWhatHappened:
-    def test_notable_events_temperature_dose_and_set_aside_come_along(self, store):
+    def test_dose_and_set_aside_come_along_and_what_happened_no_longer_does(self, store):
         sid = _session_with_a_run(store)
         _with_a_night(store, sid)
         d = _client(store).get(f"/api/sessions/{sid}").json()
-        kinds = [e["type"] for e in d["events"]]
-        assert kinds == ["ACQUISITION_STARTED", "WARNING_ISSUED", "ACQUISITION_STOPPED"], kinds
-        assert d["events"][1]["level"] == "warn" and "drift" in d["events"][1]["text"]
-        assert 2 <= len(d["temperature"]) <= 240 and d["temperature"][0]["water_c"] == 20.0
+        # The What happened tab is gone, and with it the events, temperature
+        # and actions the detail parsed for it; the dose and the set-aside stay.
+        assert "events" not in d and "temperature" not in d and "actions" not in d
         (e,) = d["embryos"]
         assert e["projection_timepoints"] == [1, 2, 3]
         assert e["dose_ms"] == 750.0 and e["dose_budget_ms"] == 1000.0  # test role: ×1

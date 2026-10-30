@@ -45,22 +45,34 @@ def _save(rows: list[dict]) -> None:
 
 
 def list_operators(store: Any = None) -> list[dict]:
-    """``[{"id", "name"}]``, most recently seen first, then any id on a
-    session's links that the file does not know, shown as itself."""
+    """``[{"id", "name"}]``, most recently seen first. One small file: the
+    names found on sessions' links are written into it at start
+    (``remember_people_on_links``), so no request walks the sessions to list
+    people; that walk was the landing page's blank users field."""
+    del store  # kept for callers; the file is the list
     rows = sorted(_rows(), key=lambda r: str(r.get("last_seen") or ""), reverse=True)
-    out = [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
-    known = {o["id"] for o in out}
-    if store is not None:
-        try:
-            for s in store.list_sessions():
-                for link in s.get("projects") or []:
-                    by = link.get("by")
-                    if by and by not in NOT_PEOPLE and by not in known:
-                        out.append({"id": str(by), "name": str(by)})
-                        known.add(str(by))
-        except Exception:
-            pass
-    return out
+    return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
+
+
+def remember_people_on_links(store: Any) -> int:
+    """Ids found as ``by`` on sessions' project links that the file does not
+    know yet, written in once, at start. Returns how many were added."""
+    rows = _rows()
+    known = {str(r["id"]) for r in rows}
+    added = 0
+    try:
+        for s in store.list_sessions():
+            for link in s.get("projects") or []:
+                by = link.get("by")
+                if by and by not in NOT_PEOPLE and by not in known:
+                    rows.append({"id": str(by), "name": str(by)})
+                    known.add(str(by))
+                    added += 1
+    except Exception:
+        return 0
+    if added:
+        _save(rows)
+    return added
 
 
 def names_of(store: Any = None) -> dict[str, str]:

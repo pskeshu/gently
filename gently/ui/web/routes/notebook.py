@@ -5,6 +5,8 @@ Reading for everyone; writing a note or settling a finding is a control
 holder's action, the same store methods the agent's tools use.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from gently.harness.memory.notebook import (
@@ -60,7 +62,9 @@ def create_router(server) -> APIRouter:
         nb = _nb()
         if nb is None:
             return {"available": False, "notes": []}
-        notes = nb.query_notes(
+        # Off the event loop: the notebook is one small file per note.
+        notes = await asyncio.to_thread(
+            nb.query_notes,
             kind=_coerce(NoteKind, kind),
             author=_coerce(Author, author),
             status=_coerce(NoteStatus, status),
@@ -68,9 +72,8 @@ def create_router(server) -> APIRouter:
             embryo=embryo,
             thread=thread,
             project=project,
+            session=session or None,
         )
-        if session:
-            notes = [n for n in notes if session in n.sessions]
         if limit is not None and limit >= 0:
             notes = notes[:limit]
         return {"available": True, "notes": [_for_view(n) for n in notes]}
