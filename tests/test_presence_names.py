@@ -114,21 +114,22 @@ class TestThePage:
         j, k = PRESENCE.index("    sendJoin() {"), PRESENCE.index("    handlePresenceUpdate(")
         join = PRESENCE[j:k]
         assert "person: this.personId()" in join
-        a, b = PRESENCE.index("    announce() {"), PRESENCE.index("    async become(")
-        announce = PRESENCE[a:b]
+        a = PRESENCE.index("    announce() {")
+        announce = PRESENCE[a : PRESENCE.index("    },", a)]
         assert "person: this.personId()" in announce
 
-    def test_switching_person_goes_through_the_same_door_as_the_landing_page(self):
-        fn = PRESENCE[PRESENCE.index("async become(") : PRESENCE.index("async openSwitcher(")]
-        assert "fetch('/api/auth/operator'" in fn
-        steps = ("await this.refresh();", "this.announce();", "this.render();")
-        order = [fn.index(step) for step in steps]
-        assert order == sorted(order)
+    def test_there_is_no_switch_at_runtime(self):
+        # "changing user from runtime -- should we remove that feature?
+        # i would actually ask to remove it it simplifies things for who is on
+        # the view." Identity is set at the landing page and nowhere else.
+        assert "openSwitcher" not in PRESENCE and "async become(" not in PRESENCE
+        assert "fetch('/api/auth/operator'" not in PRESENCE
 
-    def test_you_are_shown_by_name_and_the_avatar_is_the_switch(self):
+    def test_you_are_shown_by_name_and_it_is_not_a_control(self):
         render = PRESENCE[PRESENCE.index("render() {") : PRESENCE.index("RIG_ICON:")]
         assert "label.textContent = this.shown(client.name);" in render
-        assert "you.addEventListener('click', () => this.openSwitcher(you));" in render
+        assert "you.addEventListener('click'" not in render
+        assert "Set at the landing page" in render
 
     def test_whoever_is_at_the_microscope_is_shown_as_it(self):
         assert "if (client.name === this.AT_THE_RIG) {" in PRESENCE
