@@ -7,6 +7,7 @@ from gently.harness.memory.notebook_ask import (
     ASK_TOOL,
     answer_question,
     build_ask_messages,
+    normalize_answer,
     select_notes,
 )
 
@@ -93,3 +94,76 @@ class TestAnswerQuestion:
         out = asyncio.run(answer_question(client, "m", "anything?", []))
         assert out["coverage"] == "not_in_notebook"
         assert client.captured == {}  # no API call when nothing to ground on
+
+    def test_garbled_tool_call_is_salvaged_not_crashed(self):
+        # Seen in the wild for "sup": the model leaked tool-call markup into
+        # its own values — `points` a string with a <parameter> tag, and the
+        # point's text/note_ids spilled to the top level. The page's renderer
+        # did `points.map` on a string and showed "Something went wrong".
+        garbled = {
+            "answer": "Hi! Nothing to answer here.",
+            "points": '\n<parameter name="text">Multiple entries ask Ryan to annotate.',
+            "note_ids": ["b2f81c48", "e8194702"],
+            "text": "There are observations from hatching runs.",
+            "coverage": "not_in_notebook",
+        }
+        client = _FakeClient(garbled)
+        notes = [Note(id="b2f81c48", kind=NoteKind.OBSERVATION, body="annotate please")]
+        out = asyncio.run(answer_question(client, "m", "sup", notes))
+        assert out["answer"] == "Hi! Nothing to answer here."
+        assert out["points"] == [
+            {"text": "Multiple entries ask Ryan to annotate.", "note_ids": []},
+            {
+                "text": "There are observations from hatching runs.",
+                "note_ids": ["b2f81c48", "e8194702"],
+            },
+        ]
+        assert out["suggested_next"] == []
+        assert out["coverage"] == "not_in_notebook"
+
+
+class TestNormalizeAnswer:
+    def test_well_formed_passes_through(self):
+        canned = {
+            "answer": "A ring formed.",
+            "points": [{"text": "ring formed", "note_ids": ["o1"]}],
+            "suggested_next": ["try 25C"],
+            "coverage": "covered",
+        }
+        assert normalize_answer(canned) == canned
+
+    def test_wrong_types_are_coerced_never_raised(self):
+        out = normalize_answer(
+            {
+                "answer": None,
+                "points": [
+                    None,
+                    {"text": "", "note_ids": ["o1"]},
+                    {"text": "kept", "note_ids": "o2"},
+                ],
+                "suggested_next": "one thing",
+                "coverage": "sure",
+            }
+        )
+        assert out == {
+            "answer": "",
+            "points": [{"text": "kept", "note_ids": ["o2"]}],
+            "suggested_next": ["one thing"],
+            "coverage": "partial",  # unknown coverage: partial when any point survived
+        }
+
+    def test_not_a_dict_is_empty(self):
+        assert normalize_answer("nope") == {
+            "answer": "",
+            "points": [],
+            "suggested_next": [],
+            "coverage": "not_in_notebook",
+        }
+
+
+class TestSelectNotesReadsTheNotebookOnly:
+    def test_a_note_set_aside_is_out_of_the_ask(self, file_context_store):
+        nb = _seed(file_context_store)
+        nb.set_in_notebook("o1", False)
+        assert {n.id for n in select_notes(nb, thread="t1")} == {"f1"}
+        assert {n.id for n in select_notes(nb)} == {"f1", "x1"}

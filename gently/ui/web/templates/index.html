@@ -362,16 +362,29 @@
                     <button class="nb-kind" data-nb-kind="finding">Findings</button>
                     <button class="nb-kind" data-nb-kind="question">Questions</button>
                 </div>
+                <div class="nb-shelves" title="The notebook is what the agent reads. A note set aside stays in the stream and the inbox.">
+                    <button class="nb-kind active" data-nb-shelf="notebook">In the notebook</button>
+                    <button class="nb-kind" data-nb-shelf="aside">Set aside</button>
+                </div>
             </div>
-            <div class="nb-ask">
-                <input id="nb-ask-input" class="nb-ask-input"
-                       placeholder="Ask the notebook…  e.g. what should I try next on pioneer guidance?">
-                <button id="nb-ask-go" class="nb-ask-go">Ask</button>
-            </div>
-            <div id="nb-ask-result" class="nb-ask-result" hidden></div>
             <div class="nb-body-wrap">
-                <aside class="nb-threads" id="nb-threads"></aside>
-                <div class="nb-notes" id="nb-notes"></div>
+                <aside class="nb-rail" title="A page is a saved query over the notes, with its own conversation with the agent.">
+                    <div class="nb-rail-h">Pages</div>
+                    <div class="nb-pages" id="nb-pages"></div>
+                    <div class="nb-rail-h">Threads</div>
+                    <div class="nb-threads" id="nb-threads"></div>
+                </aside>
+                <div class="nb-main">
+                    <div class="nb-page-head" id="nb-page-head"></div>
+                    <div class="nb-notes" id="nb-notes"></div>
+                    <section class="nb-conv" id="nb-conv" aria-label="Conversation on this page"></section>
+                    <div class="nb-ask">
+                        <input id="nb-ask-input" class="nb-ask-input"
+                               placeholder="Ask the agent about these notes…  (Shift+Enter files it as a line instead)">
+                        <button id="nb-ask-go" class="nb-ask-go">Ask</button>
+                        <button id="nb-note-go" class="nb-note-go" title="File this as a line on this page, in your words">Note it</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

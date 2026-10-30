@@ -389,9 +389,13 @@ class AgentMemory:
             try:
                 from .notebook import NoteKind, NoteStatus
 
+                # In the notebook only: a finding the person set aside is
+                # out of what the agent is told.
                 findings = [
                     n
-                    for n in nb.query_notes(kind=NoteKind.FINDING, project=campaign.id)
+                    for n in nb.query_notes(
+                        kind=NoteKind.FINDING, project=campaign.id, in_notebook=True
+                    )
                     if n.status != NoteStatus.SUPERSEDED
                 ]
             except Exception:

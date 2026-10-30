@@ -27,6 +27,7 @@ from .images import create_router as create_images_router
 from .inbox import create_router as create_inbox_router
 from .logs import create_router as create_logs_router
 from .notebook import create_router as create_notebook_router
+from .notebook_pages import create_router as create_notebook_pages_router
 from .operation_plan import create_router as create_operation_plan_router
 from .pages import create_router as create_pages_router
 from .replay import create_router as create_replay_router
@@ -59,6 +60,7 @@ def register_all_routes(server):
         create_chat_router,
         create_context_router,
         create_notebook_router,
+        create_notebook_pages_router,
         create_inbox_router,
         create_temperature_router,
         create_operation_plan_router,

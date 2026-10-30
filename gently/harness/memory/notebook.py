@@ -120,6 +120,11 @@ class Note:
     artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
     superseded_by: str | None = None
     by: str | None = None  # the person's id when a person wrote it; the agent leaves it None
+    # The notebook is the working set the agent reads and the person curates;
+    # the stream and the inbox are the record. A note set aside (False) stays
+    # in the record and leaves the notebook: the Notebook tab, "ask the
+    # notebook", and the agent's own reading of its findings.
+    in_notebook: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -153,6 +158,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "links": list(n.links),
         "artifacts": list(n.artifacts),
         "superseded_by": n.superseded_by,
+        "in_notebook": bool(n.in_notebook),
         "created_at": n.created_at.isoformat(),
         "updated_at": n.updated_at.isoformat(),
     }
@@ -179,6 +185,7 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         artifacts=list(d.get("artifacts") or []),
         superseded_by=d.get("superseded_by"),
         by=d.get("by"),
+        in_notebook=d.get("in_notebook", True) is not False,  # files before the flag: in
         created_at=datetime.fromisoformat(d["created_at"]),
         updated_at=datetime.fromisoformat(d["updated_at"]),
     )
@@ -248,8 +255,11 @@ class NotebookStore:
         self.root = Path(notebook_dir)
         self.notes_dir = self.root / "notes"
         self.index_dir = self.root / "index"
+        # A deleted note's file goes here, whole, so the delete can be undone.
+        self.removed_dir = self.root / "removed"
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        self.removed_dir.mkdir(parents=True, exist_ok=True)
         # reverse indexes: facet -> {value: [note_id, ...]}
         self._index: dict[str, dict[str, list[str]]] = {
             "strain": {},
@@ -332,6 +342,9 @@ class NotebookStore:
     def _note_path(self, note_id: str) -> Path | None:
         return next(self.notes_dir.glob(f"{note_id}_*.yaml"), None)
 
+    def _removed_path(self, note_id: str) -> Path | None:
+        return next(self.removed_dir.glob(f"{note_id}_*.yaml"), None)
+
     # ---- read/write ----
     def write_note(self, note: Note) -> str:
         if not note.id:
@@ -342,6 +355,11 @@ class NotebookStore:
         old = self._note_path(note.id)
         if old is not None:
             old.unlink()
+        # A line written under this id is live again: an older removed copy
+        # must not come back over it on undo.
+        removed = self._removed_path(note.id)
+        if removed is not None:
+            removed.unlink()
         self._write_yaml(self.notes_dir / f"{note.id}_{slug}.yaml", note_to_dict(note))
         self._index_note(note)
         return note.id
@@ -354,18 +372,36 @@ class NotebookStore:
         return note_from_dict(data) if data else None
 
     def delete_note(self, note_id: str) -> bool:
-        """Take a note out: its file and its index entries. For a line a tool
-        rewrites and owns; a note another note rests on is superseded, not
-        deleted. False when there was no such note."""
+        """Take a note out of the notebook: its file moves whole to removed/
+        and its index entries go, so ``restore_note`` can put it back. For a
+        line a tool rewrites and owns, or a line a person took off the page;
+        a note another note rests on is superseded, not deleted. False when
+        there was no such note."""
         path = self._note_path(note_id)
         if path is None:
             return False
-        path.unlink()
+        os.replace(str(path), str(self.removed_dir / path.name))
         for buckets in self._index.values():
             for ids in buckets.values():
                 if note_id in ids:
                     ids.remove(note_id)
         return True
+
+    def restore_note(self, note_id: str) -> Note | None:
+        """Undo a delete: the removed file comes back to notes/ and is
+        indexed again. A note that is live already is returned as it is.
+        None when there is nothing under this id to bring back."""
+        live = self.get_note(note_id)
+        if live is not None:
+            return live
+        path = self._removed_path(note_id)
+        if path is None:
+            return None
+        os.replace(str(path), str(self.notes_dir / path.name))
+        note = self.get_note(note_id)
+        if note is not None:
+            self._index_note(note)
+        return note
 
     def query_notes(
         self,
@@ -379,10 +415,14 @@ class NotebookStore:
         project: str | None = None,
         person: str | None = None,
         session: str | None = None,
+        in_notebook: bool | None = None,
     ) -> list[Note]:
         """Structural query: narrow by scope via the indexes, then filter by
         kind/author/status. Returned newest-first. (No semantic ranking here —
-        that's a later increment.)"""
+        that's a later increment.)
+
+        ``in_notebook`` None is the record, every note; True is the working
+        set the agent reads; False is what was set aside."""
         # 1. candidate ids — intersect any scope facets given, else all notes
         scope_sets: list[set[str]] = []
         if strain is not None:
@@ -416,9 +456,23 @@ class NotebookStore:
                 continue
             if status is not None and n.status != status:
                 continue
+            if in_notebook is not None and n.in_notebook != in_notebook:
+                continue
             results.append(n)
         results.sort(key=lambda n: n.created_at, reverse=True)
         return results
+
+    def set_in_notebook(self, note_id: str, value: bool) -> Note | None:
+        """Set a note aside from the notebook (False), or put it back (True).
+        The file stays where it is, in the record; only the flag changes.
+        None when there is no such note."""
+        note = self.get_note(note_id)
+        if note is None:
+            return None
+        if note.in_notebook != value:
+            note.in_notebook = value
+            self.write_note(note)
+        return note
 
     # ---- links + supersession (append-only history) ----
     def link_notes(self, from_id: str, rel: str, to_id: str) -> None:
