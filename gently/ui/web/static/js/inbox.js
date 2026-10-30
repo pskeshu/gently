@@ -5,22 +5,25 @@
  * /api/inbox, which derives it from the notebook; "seen" is the one thing
  * it writes. Opening an ask goes to the session (or project) it was
  * written on, where the answer is written: a line, or the marks themselves.
- * Under the asks sit your own lines, "By you": where each was written and,
- * for an ask of yours, who has answered it.
+ * The asks are one list in time order: an unopened one carries a dot and a
+ * heavier line, an opened one sits where it was in plain weight, an answered
+ * one says so. Under them sit your own lines, "By you": where each was
+ * written and, for an ask of yours, who has answered it.
  */
 const Inbox = (() => {
-    let data = { me: null, new: [], open: [], done: [], mine: [] };
+    let data = { me: null, asks: [], new: [], open: [], done: [], mine: [] };
     let known = null;        // ids in `new` at the last load, so a toast is for a fresh one
     let pill = null, pop = null, timer = null;
 
     async function load() {
         let d;
         try { d = await (await fetch('/api/inbox')).json(); } catch (e) { return; }
-        if (!d || !Array.isArray(d.new)) return;
+        if (!d || !Array.isArray(d.asks)) return;
         data = d;
-        const ids = new Set(data.new.map(i => i.note.id));
+        const unseen = data.asks.filter(i => !i.seen);
+        const ids = new Set(unseen.map(i => i.note.id));
         if (known && data.me) {
-            const fresh = data.new.find(i => !known.has(i.note.id));
+            const fresh = unseen.find(i => !known.has(i.note.id));
             if (fresh && typeof showGentlyToast === 'function') {
                 showGentlyToast(`${Who.name(fresh.note.by)}${place(fresh, ', on ')}: ${fresh.note.body}`, 'Open', () => open(fresh), 8000);
             }
@@ -50,13 +53,13 @@ const Inbox = (() => {
             pill.className = 'inbox-pill';
             pill.addEventListener('click', e => { e.stopPropagation(); toggle(); });
         }
-        const n = data.new.length, o = data.open.length;
-        // Always drawn: with nothing addressed to you it is a quiet 0, and
-        // behind it are still your own lines.
-        pill.textContent = String(n || o || 0);
+        const n = data.asks.filter(i => !i.seen).length;
+        // The count is what you have not opened. Always drawn: with nothing
+        // unopened it is a quiet 0, and behind it are the list and your own lines.
+        pill.textContent = String(n);
         pill.classList.toggle('has-new', n > 0);
-        pill.classList.toggle('is-empty', !n && !o);
-        pill.title = n ? `${n} new for you` : (o ? `${o} open for you` : 'Nothing for you · your own lines');
+        pill.classList.toggle('is-empty', !n);
+        pill.title = n ? `${n} unopened for you` : 'Nothing unopened · the list and your own lines';
         if (pill.previousElementSibling !== you) you.insertAdjacentElement('afterend', pill);
     }
 
@@ -64,10 +67,13 @@ const Inbox = (() => {
     function close() { if (pop) pop.remove(); pop = null; document.removeEventListener('click', onDoc); }
     function onDoc(e) { if (pop && !pop.contains(e.target)) close(); }
 
-    function item(i, cls) {
+    // One ask: unopened carries a dot and a heavier line; opened is plain;
+    // answered says so. The place is where it was written.
+    function item(i) {
         const where = place(i, 'on ');
-        return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}">
-            <span class="inbox-who rd-head">${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}</span>
+        const cls = (i.seen ? 'is-seen' : 'is-new') + (i.answered ? ' is-answered' : '');
+        return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}" title="${i.seen ? 'Opened' : 'Not opened yet'}${i.answered ? ' · answered' : ''}">
+            <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
         </button>`;
     }
@@ -91,16 +97,16 @@ const Inbox = (() => {
         document.querySelectorAll('.presence-pop').forEach(p => p.remove());
         pop = document.createElement('div');
         pop.className = 'presence-pop inbox-pop';
-        const section = (title, items, cls) => items.length
-            ? `<div class="presence-pop-title">${title}</div>` + items.map(i => item(i, cls)).join('') : '';
-        const forYou = section('New', data.new, 'is-new') + section('Open', data.open, '') + section('Done', data.done.slice(0, 5), 'is-done')
-            || '<div class="presence-pop-title">Nothing for you</div>';
+        const asks = data.asks || [];
+        const unopened = asks.filter(i => !i.seen).length;
+        const forYou = `<div class="presence-pop-title">For you${asks.length ? ` <span class="inbox-count">${unopened ? `${unopened} unopened` : 'all opened'}</span>` : ''}</div>`
+            + (asks.length ? asks.slice(0, 30).map(item).join('') : '<div class="inbox-none">Nothing for you yet.</div>');
         const mine = (data.mine || []);
         const byYou = `<div class="presence-pop-title inbox-by-you">By you</div>` + (mine.length
             ? mine.slice(0, 12).map(mineItem).join('')
             : '<div class="inbox-none">Nothing written yet. A line on a session or a project lands here.</div>');
         pop.innerHTML = forYou + byYou;
-        const all = [...data.new, ...data.open, ...data.done, ...mine];
+        const all = [...asks, ...mine];
         pop.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
             const i = all.find(x => x.note.id === b.dataset.open);
             if (i) open(i, { mine: !!b.dataset.mine });
