@@ -71,18 +71,27 @@ def _item(store: Any, cs: Any, n: Note) -> dict:
     }
 
 
+def _when_written(n: Note) -> datetime:
+    """When a line counts as written. A plain line is written once, at its
+    created_at; a titled line is a tool's, rewritten in place on every save,
+    so its latest save is the moment that counts."""
+    return n.updated_at if n.title else n.created_at
+
+
 def _wrote_after(notes: list[Note], who: str, ask: Note) -> bool:
     """Did ``who`` write on the ask's session or project after it was asked?
     A line of their own or a tool note, either counts as an answer."""
     if ask.sessions:
         where = set(ask.sessions)
         return any(
-            n.by == who and n.updated_at > ask.created_at and set(n.sessions) & where for n in notes
+            n.by == who and _when_written(n) > ask.created_at and set(n.sessions) & where
+            for n in notes
         )
     if ask.projects:
         where = set(ask.projects)
         return any(
-            n.by == who and n.updated_at > ask.created_at and set(n.projects) & where for n in notes
+            n.by == who and _when_written(n) > ask.created_at and set(n.projects) & where
+            for n in notes
         )
     return False
 

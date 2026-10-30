@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from gently.core.file_store import FileStore
 from gently.harness.memory.file_store import FileContextStore
-from gently.harness.memory.notebook import Author, Note, NoteKind, mentions_in
+from gently.harness.memory.notebook import Author, Note, NoteKind, NoteStatus, mentions_in
 from gently.ui.web import auth
 from gently.ui.web.routes import inbox as inbox_routes
 from gently.ui.web.routes import notebook as notebook_routes
@@ -149,3 +149,48 @@ def test_your_own_lines_are_one_list_with_where_and_whether_answered(tmp_path, m
     by = c.get("/api/notebook/notes?by=kesavan").json()["notes"]
     assert sorted(n["id"] for n in by) == sorted([ask, plain])
     assert c.get("/api/notebook/notes?by=ryan").json()["notes"][0]["body"] == "done, all three"
+
+
+def test_an_older_line_touched_later_does_not_answer_a_newer_ask(tmp_path, monkeypatch):
+    """A plain line answers only if it was written after the ask; a status
+    change on an old line is not an answer. A tool note is rewritten in place
+    on every save, so its latest save is what counts."""
+    from datetime import datetime, timedelta
+
+    c, store, cs = _client(tmp_path, monkeypatch, "kesavan")
+    store.create_session("s1", name="monday")
+    nb = cs.notebook
+    old = nb.write_note(
+        Note(
+            id="",
+            kind=NoteKind.OBSERVATION,
+            body="an old line of ryan's",
+            author=Author.HUMAN,
+            by="ryan",
+            sessions=["s1"],
+            created_at=datetime.now() - timedelta(days=2),
+        )
+    )
+    ask = c.post(
+        "/api/notebook/notes", json={"body": "@ryan can you look?", "sessions": ["s1"]}
+    ).json()["note"]["id"]
+    n = nb.get_note(old)
+    n.status = NoteStatus.CONFIRMED
+    nb.write_note(n)  # touched now: updated_at moves, created_at does not
+    c.cookies.set("gently_operator", "ryan")
+    assert [i["note"]["id"] for i in c.get("/api/inbox").json()["new"]] == [ask]
+    # a tool note from before the ask, saved again after it, does answer
+    tool = nb.write_note(
+        Note(
+            id="",
+            kind=NoteKind.OBSERVATION,
+            body="Marked on 1 embryo: 60 min.",
+            author=Author.HUMAN,
+            by="ryan",
+            title="Twitching to hatching",
+            sessions=["s1"],
+            created_at=datetime.now() - timedelta(days=1),
+        )
+    )
+    nb.write_note(nb.get_note(tool))
+    assert [i["note"]["id"] for i in c.get("/api/inbox").json()["done"]] == [ask]
