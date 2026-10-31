@@ -10,15 +10,39 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const M = require('../../gently/ui/web/static/js/u16-math.js');
 
-test('percentiles read values off the histogram at the asked fractions', () => {
-    const px = new Uint16Array(1000);
-    for (let i = 0; i < 1000; i++) px[i] = i * 10;          // 0, 10, …, 9990
-    const h = M.histogram(px);
-    const [p1, p50, p99] = M.percentiles(h, px.length, [0.01, 0.5, 0.99]);
-    assert.equal(p1, 90);
-    assert.equal(p50, 4990);
-    assert.equal(p99, 9890);
-    assert.deepEqual(M.percentiles(h, 0, [0.5]), [0]);
+test("auto contrast is ImageJ's: the background bin ignored, the first bin over pixels/5000 from each end", () => {
+    // 1000 pixels: 900 at 100 (more than a tenth: ignored), 50 at 1000, 50 at 2000.
+    const px = new Uint16Array(1000).fill(100);
+    px.fill(1000, 900, 950); px.fill(2000, 950);
+    const r = M.imagejAuto(M.histogram(px), px.length, 0);
+    // min 100, max 2000, so bins of 1901/256; 1000 lands in bin 121 and 2000 in bin 255,
+    // and each end is read at its bin's lower edge
+    const bin = 1901 / 256;
+    assert.equal(r.lo, 100 + 121 * bin);
+    assert.equal(r.hi, 100 + 255 * bin);
+    assert.equal(r.autoThreshold, 5000);
+});
+
+test('a repeat press halves the threshold and cuts tighter; under 10 it starts over at 5000', () => {
+    // 100000 pixels: 30 at 100, 90000 at 500 (ignored), 4985 at 2000, 4985 at 3000.
+    const px = new Uint16Array(100000).fill(500);
+    px.fill(100, 0, 30); px.fill(2000, 30, 5015); px.fill(3000, 5015, 10000);
+    const h = M.histogram(px), bin = 2901 / 256;
+    const first = M.imagejAuto(h, px.length, 0);                        // over 20 pixels: the 30 at 100 count
+    assert.equal(first.lo, 100);
+    assert.equal(first.hi, 100 + 255 * bin);
+    const second = M.imagejAuto(h, px.length, first.autoThreshold);     // over 40: they no longer do
+    assert.equal(second.autoThreshold, 2500);
+    assert.equal(second.lo, 100 + 167 * bin);
+    assert.equal(second.hi, 100 + 255 * bin);
+    assert.equal(M.imagejAuto(h, px.length, 19).autoThreshold, 9);
+    assert.equal(M.imagejAuto(h, px.length, 9).autoThreshold, 5000);
+});
+
+test('a flat frame gives its one value as both ends, as ImageJ resets to the data range', () => {
+    const px = new Uint16Array(50).fill(777);
+    const r = M.imagejAuto(M.histogram(px), px.length, 0);
+    assert.equal(r.lo, 777); assert.equal(r.hi, 777);
 });
 
 test('the lookup table is 0 below black, 255 above white, monotonic between', () => {
