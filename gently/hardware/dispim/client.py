@@ -1106,6 +1106,16 @@ class DiSPIMMicroscope(Microscope):
         """Get current bottom camera exposure time."""
         return await self._api_get("/api/camera/exposure")
 
+    async def get_frame_u16(self, path: str, scale: int = 1) -> tuple[int, dict[str, str], bytes]:
+        """A camera frame as uint16 bytes from a device-layer ``/frame.u16``
+        route: the status, the X-Image-* headers and the body, as they came,
+        so the browser can draw the pixels itself (gently.core.u16)."""
+        self._ensure_connected()
+        assert self._session is not None
+        async with self._session.get(f"{self.http_url}{path}", params={"scale": scale}) as resp:
+            headers = {k: v for k, v in resp.headers.items() if k.lower().startswith("x-image-")}
+            return resp.status, headers, await resp.read()
+
     # ------------------------------------------------------------------
     # Fenced focus axes — bottom-camera focus Z and SPIM-head F-drive.
     # Read + relative nudge only (no autofocus). Out-of-range nudges come

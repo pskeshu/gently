@@ -586,6 +586,81 @@ const OperateManager = (function () {
             fit.style.setProperty('--cam-ar', `${img.naturalWidth} / ${img.naturalHeight}`);
         }
     }
+
+    // ── the frame as its numbers ────────────────────────────────────────────
+    // The stream's JSON frame stays the trigger and the geometry (shape,
+    // downsample, stage position, focus score); the pixels come as uint16
+    // bytes from the device layer's last grab and are drawn by a U16View in
+    // the fit box, under the marker canvas, with a window that stays where
+    // the operator put it (#149). A rig that has no pixels to give — an older
+    // device layer, a pushed marking still — shows the JPEG as before.
+    const FRAME_SRC = {
+        bottom: { img: 'op-img-bottom', ph: 'op-ph-bottom', box: 'op-cam-bottom', url: '/api/devices/bottom_camera/frame.u16' },
+        spim: { img: 'op-img-spim', ph: 'op-ph-spim', box: 'op-cam-spim', url: '/api/devices/lightsheet/frame.u16' },
+    };
+    const _pull = {};
+    function fitOf(pane) { const img = $(FRAME_SRC[pane].img); return img ? img.closest('.op-cam-fit') : null; }
+    function viewFor(pane) {
+        const fit = fitOf(pane);
+        if (!fit) return null;
+        if (!fit._u16) {
+            const host = document.createElement('div');
+            host.className = 'op-cam-pix';
+            fit.insertBefore(host, $(FRAME_SRC[pane].img).nextSibling);
+            fit._u16 = U16View.create(host, { bar: false });
+        }
+        return fit._u16;
+    }
+    async function showFrame(pane, p, pixels = true) {
+        const { img: imgId, ph: phId, url, box } = FRAME_SRC[pane];
+        if (!pixels || typeof U16View === 'undefined') { setImg(imgId, phId, p); return; }
+        // One fetch in flight per pane; a frame that lands meanwhile waits its turn,
+        // and only the newest does, so a slow link shows the frames it can.
+        if (_pull[pane]) { _pull[pane].next = p; return; }
+        const job = _pull[pane] = { next: null };
+        try {
+            // ÷2: a 2048² sensor is 2 MB a frame and the box shows it well under
+            // 1024 px; the readout says the value is a mean of 2×2.
+            const r = await fetch(`${url}?scale=2`, { cache: 'no-store' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const meta = U16Math.parseHeaders(k => r.headers.get(k));
+            const buf = await r.arrayBuffer();
+            const view = viewFor(pane);
+            if (!view) throw new Error('no fit box');
+            view.set(new Uint16Array(buf), meta);
+            const fit = fitOf(pane), ph = $(phId);
+            fit.classList.add('has-pixels');
+            fit.style.setProperty('--cam-ar', `${meta.width} / ${meta.height}`);
+            if (ph) ph.style.display = 'none';
+            if (typeof ImageView !== 'undefined' && ImageView.frameArrived) ImageView.frameArrived(box);
+        } catch (_) {
+            const fit = fitOf(pane);
+            if (fit) fit.classList.remove('has-pixels');
+            setImg(imgId, phId, p);
+        } finally {
+            _pull[pane] = null;
+            if (job.next) showFrame(pane, job.next, true);
+        }
+    }
+    // A frame is on the surface: the JPEG, or the pixels.
+    function frameShown(imgId) {
+        const img = $(imgId), fit = img && img.closest('.op-cam-fit');
+        return !!((img && img.classList.contains('has-frame')) || (fit && fit.classList.contains('has-pixels')));
+    }
+    // The value under the cursor, read off the pixels the view holds. The
+    // marker canvas takes the mouse, so it is asked from here, in the same
+    // frame fractions a click is mapped in.
+    function readUnderCursor(e) {
+        const fit = fitOf('bottom'), view = fit && fit._u16;
+        if (!view || !view.data || !fit.classList.contains('has-pixels')) return;
+        const r = renderedRect(), c = $('op-mark-canvas');
+        if (!r || !c) return;
+        const rect = c.getBoundingClientRect();
+        const sx = rect.width / c.offsetWidth, sy = rect.height / c.offsetHeight;
+        if (!(sx > 0 && sy > 0)) return;
+        const x = (e.clientX - rect.left) / sx, y = (e.clientY - rect.top) / sy;
+        view.readAt(Math.floor((x - r.x) / r.w * view.w), Math.floor((y - r.y) / r.h * view.h));
+    }
     // ══ REACTIVE PREVIEW ════════════════════════════════════════════════════
     // A routine that takes seconds and produces images has to show them where it
     // was started. Calibrate used to be one blocking POST: the montage it builds
@@ -651,8 +726,9 @@ const OperateManager = (function () {
     }
 
     function clearImg(imgId, phId, text) {
-        const img = $(imgId), ph = $(phId);
+        const img = $(imgId), ph = $(phId), fit = img && img.closest('.op-cam-fit');
         if (img) img.classList.remove('has-frame');
+        if (fit) fit.classList.remove('has-pixels');
         if (ph) { ph.style.display = ''; if (text) ph.textContent = text; }
     }
     // Stopping the stream freezes the last frame in place rather than clearing
@@ -661,8 +737,7 @@ const OperateManager = (function () {
     // ever shown. The "LIVE" badge dropping (renderSubnavMeta) is the cue that
     // the frame is now static.
     function freezeImg(imgId, phId, text) {
-        const img = $(imgId);
-        if (img && img.classList.contains('has-frame')) return;
+        if (frameShown(imgId)) return;
         clearImg(imgId, phId, text);
     }
 
@@ -1089,8 +1164,7 @@ const OperateManager = (function () {
         const busy = $('op-busy-bottom'); if (busy) busy.hidden = false;
         // Detect on the frame already on screen when there is one — the operator
         // is looking at it, and re-capturing would disturb the LED/room light.
-        const shown = $('op-img-bottom');
-        let hasFrame = !cfg.fresh && !!(shown && shown.classList.contains('has-frame'));
+        let hasFrame = !cfg.fresh && frameShown('op-img-bottom');
         try {
             // Phase 1 — when the viewport is empty, capture and SHOW the image
             // FIRST (no SAM yet), so the operator sees what detection will run on
@@ -1101,7 +1175,7 @@ const OperateManager = (function () {
                     Object.assign({ capture_only: true }, tune));
                 if (cap.frame && cap.frame.jpeg_b64) {
                     _lastBottom = cap.frame;
-                    setImg('op-img-bottom', 'op-ph-bottom', cap.frame);
+                    showFrame('bottom', cap.frame);
                     hasFrame = true;
                 }
             }
@@ -1111,7 +1185,7 @@ const OperateManager = (function () {
                 Object.assign({ use_last_frame: hasFrame }, tune));
             if (d.frame && d.frame.jpeg_b64) {
                 _lastBottom = d.frame;
-                setImg('op-img-bottom', 'op-ph-bottom', d.frame);
+                showFrame('bottom', d.frame);
             }
             const cands = Array.isArray(d.embryos) ? d.embryos : [];
             const f = frameOf(_lastBottom);
@@ -3355,7 +3429,9 @@ const OperateManager = (function () {
         // is blocked waiting on an answer.
         if (typeof switchTab === 'function') switchTab('devices');
         showPane('bottom');
-        setImg('op-img-bottom', 'op-ph-bottom', _lastBottom);
+        // A still the agent pushed: its own bytes, which the device layer's last
+        // grab need not be, so it is shown as sent.
+        showFrame('bottom', _lastBottom, false);
         drawMarkers();
         renderMarkCount();
         setDetectNote(_markers.length
@@ -3429,7 +3505,7 @@ const OperateManager = (function () {
         // frame behind whatever is on screen and races for stream ownership.
         if (!_active || _pane !== 'bottom' || !p || !p.jpeg_b64) return;
         _lastBottom = p;
-        setImg('op-img-bottom', 'op-ph-bottom', p);
+        showFrame('bottom', p);
         drawMarkers();
     }
     function onSpimFrame(p) {
@@ -3437,7 +3513,7 @@ const OperateManager = (function () {
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
-        setImg('op-img-spim', 'op-ph-spim', p);
+        showFrame('spim', p);
     }
     function onEmbryosUpdate(p) {
         const hadAny = _embryos.length > 0;
@@ -3498,7 +3574,12 @@ const OperateManager = (function () {
         const ok = $('op-confirm'); if (ok) ok.addEventListener('click', confirmMarks);
         const cl = $('op-clear');
         if (cl) cl.addEventListener('click', clearMarks);
-        const canvas = $('op-mark-canvas'); if (canvas) canvas.addEventListener('click', onCanvasClick);
+        const canvas = $('op-mark-canvas');
+        if (canvas) {
+            canvas.addEventListener('click', onCanvasClick);
+            canvas.addEventListener('mousemove', readUnderCursor);
+            canvas.addEventListener('mouseleave', () => { const fit = fitOf('bottom'); if (fit && fit._u16) fit._u16.readOff(); });
+        }
 
         // Row clicks and keys are the Roster panel's business now — it owns
         // the markup, so it owns the handlers. Two listeners on one host, one

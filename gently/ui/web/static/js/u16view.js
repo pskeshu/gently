@@ -31,7 +31,7 @@ const U16View = {
             </div>`;
         const $ = sel => host.querySelector(sel);
         view.canvas = $('.u16-c'); view.ctx = view.canvas.getContext('2d');
-        view.read = $('.u16-read'); view.info = $('.u16-info');
+        view.read = $('.u16-read'); view.info = $('.u16-info'); view.bar = $('.u16-bar');
         const lo = $('.u16-lo'), hi = $('.u16-hi'), g = $('.u16-g');
         const paintBar = () => {
             lo.value = view.lo; hi.value = view.hi; g.value = view.gamma;
@@ -45,17 +45,22 @@ const U16View = {
 
         // The cursor reads the array: the value under it, and where that is in
         // the source frame when the bytes were averaged down.
-        view.canvas.addEventListener('mousemove', ev => {
+        /** The readout for pixel (x, y) of the frame held; off the frame, nothing. A
+         *  host whose own overlay takes the mouse (the Operate marker canvas) calls this. */
+        view.readAt = function (x, y) {
             if (!view.data) return;
-            const r = view.canvas.getBoundingClientRect();
-            const x = Math.floor((ev.clientX - r.left) / r.width * view.w);
-            const y = Math.floor((ev.clientY - r.top) / r.height * view.h);
             if (x < 0 || y < 0 || x >= view.w || y >= view.h) { view.read.hidden = true; return; }
             const v = view.data[y * view.w + x], s = view.meta.scale || 1;
             const where = s > 1 ? `${x * s}, ${y * s} (mean of ${s}×${s})` : `${x}, ${y}`;
             view.read.textContent = `${where} · ${v}`;
             view.read.hidden = false;
             if (view._onPixel) view._onPixel({ x, y, value: v, scale: s });
+        };
+        view.readOff = function () { view.read.hidden = true; };
+        view.canvas.addEventListener('mousemove', ev => {
+            if (!view.data) return;
+            const r = view.canvas.getBoundingClientRect();
+            view.readAt(Math.floor((ev.clientX - r.left) / r.width * view.w), Math.floor((ev.clientY - r.top) / r.height * view.h));
         });
         view.canvas.addEventListener('mouseleave', () => { view.read.hidden = true; });
 
@@ -85,6 +90,12 @@ const U16View = {
                 paintBar();
             }
             view.info.textContent = `${meta.sourceWidth || view.w}×${meta.sourceHeight || view.h}` + (meta.scale > 1 ? ` · shown ÷${meta.scale}` : '') + ` · ${meta.min}–${meta.max}`;
+            // The sliders span the frame's own range, widened to keep a range already set;
+            // a camera using 3% of 16 bits would otherwise get 3% of the slider.
+            if (meta.min != null && meta.max != null) {
+                const a = Math.min(meta.min, view.lo, +lo.min || meta.min), b = Math.max(meta.max, view.hi, +hi.max === 65535 ? meta.max : +hi.max);
+                lo.min = hi.min = a; lo.max = hi.max = b; paintBar();
+            }
             view.redraw(true);
         };
 

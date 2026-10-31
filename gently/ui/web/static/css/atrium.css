@@ -268,12 +268,12 @@ body.atrium-on .atr-win:has(.atr-kids) .view-switcher { display: none !important
    Video genuinely wants a dark surround, so this only quiets the EMPTY state,
    keyed on the .has-frame class operate.js sets when a frame arrives. Scoped to
    .atrium-on so the tabbed UI is untouched. */
-body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) {
+body.atrium-on .op-cam-fit:not(.has-pixels):not(:has(.op-cam-img.has-frame)) {
     background: var(--bg-hover, #1b222c);
     border-style: dashed;
     border-color: var(--atr-win-border);
 }
-body.atrium-on .op-cam-fit:not(:has(.op-cam-img.has-frame)) .op-cam-ph {
+body.atrium-on .op-cam-fit:not(.has-pixels):not(:has(.op-cam-img.has-frame)) .op-cam-ph {
     color: var(--text-muted, #7d8998);
 }
 

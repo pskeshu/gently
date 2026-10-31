@@ -50,7 +50,7 @@ const ImageView = (() => {
         if (!fit) return;
 
         const v = { z: 1, tx: 0, ty: 0, fit, box, badge: null, drag: null,
-                    lo: 0, hi: 1, panel: null, hist: null,
+                    lo: 0, hi: 1, panel: null, hist: null, axis: null,
                     filterId: `iv-win-${containerId}` };
         views.set(containerId, v);
 
@@ -176,7 +176,7 @@ const ImageView = (() => {
           <div class="lp lp-compact">
             <div class="iv-row">
               <span class="lp-title">Display</span>
-              <span class="iv-src" title="Histogram of the displayed 8-bit frame, which the device layer has already percentile-stretched. Not raw camera counts (#149).">as displayed</span>
+              <span class="iv-src" data-src title="Histogram of the displayed 8-bit frame, which the device layer has already percentile-stretched. Not raw camera counts (#149).">as displayed</span>
               <div class="iv-hist" data-hist>
                 <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
                 <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
@@ -235,6 +235,31 @@ const ImageView = (() => {
         scheduleHistogram(v);
     }
 
+    /* ── the uint16 view, when the box draws pixels ────────────────────────── */
+    // operate.js mounts a U16View in the fit box (fit._u16) once the device
+    // layer hands out frames as uint16 bytes. Then the histogram is of the
+    // camera's counts and the window is the view's black and white, in counts:
+    // the handles are fractions of an axis that is the data range seen so far,
+    // widened as frames arrive, and the counts are the truth, so a wider axis
+    // moves a handle on the strip and never the window on the image (#149).
+    const u16Of = v => (v.fit._u16 && v.fit._u16.data) ? v.fit._u16 : null;
+    const axisOf = v => v.axis || { min: 0, max: 65535 };
+    const toCounts = (v, f) => { const a = axisOf(v); return Math.round(a.min + f * (a.max - a.min)); };
+    const toFraction = (v, c) => { const a = axisOf(v); return a.max > a.min ? (c - a.min) / (a.max - a.min) : 0; };
+
+    /** A frame landed in the box's uint16 view: widen the axis, keep the window. */
+    function frameArrived(containerId) {
+        const v = views.get(containerId);
+        const view = v && u16Of(v);
+        if (!view) return;
+        const m = view.meta || {};
+        const a = v.axis || { min: m.min, max: m.max };
+        v.axis = { min: Math.min(a.min, m.min, view.lo), max: Math.max(a.max, m.max, view.hi) };
+        v.lo = toFraction(v, view.lo); v.hi = toFraction(v, view.hi);
+        scheduleHistogram(v);
+        positionHandles(v);
+    }
+
     /* ── histogram ───────────────────────────────────────────────────────── */
 
     // RIG-NOTE: 400ms between recomputes. The frame rate is higher than any eye
@@ -256,6 +281,20 @@ const ImageView = (() => {
     }
 
     function computeHistogram(v) {
+        const view = u16Of(v);
+        const src = v.panel && v.panel.querySelector('[data-src]');
+        if (view) {
+            // The counts, rebinned onto the axis the handles move along.
+            const a = axisOf(v), span = a.max - a.min + 1, h = U16Math.histogram(view.data);
+            const bins = new Uint32Array(256);
+            for (let val = a.min; val <= a.max; val++) {
+                if (h[val]) bins[Math.min(255, Math.floor((val - a.min) / span * 256))] += h[val];
+            }
+            v.hist = bins;
+            if (src) { src.textContent = `counts ${a.min}–${a.max}`; src.title = "Histogram of the camera's own counts, as the frame arrived; the axis is the range seen so far."; }
+            drawHistogram(v);
+            return;
+        }
         const img = v.fit.querySelector('.op-cam-img');
         if (!img || !img.naturalWidth) { v.hist = null; drawHistogram(v); return; }
         try {
@@ -332,6 +371,14 @@ const ImageView = (() => {
      * — a handful of hot pixels should not define white.
      */
     function autoWindow(v) {
+        const view = u16Of(v);
+        if (view) {
+            // ImageJ's Auto, on the counts; pressed again it cuts tighter, as there.
+            view.auto(); view.redraw();
+            v.lo = toFraction(v, view.lo); v.hi = toFraction(v, view.hi);
+            apply(v);
+            return;
+        }
         if (!v.hist) return;
         let total = 0;
         for (let i = 0; i < 256; i++) total += v.hist[i];
@@ -394,20 +441,30 @@ const ImageView = (() => {
     }
 
     function applyWindow(v) {
-        const img = v.fit.querySelector('.op-cam-img');
-        const wide = v.lo === 0 && v.hi === 1;
-        if (img) img.style.filter = wide ? '' : `url(#${CSS.escape(v.filterId)})`;
+        const view = u16Of(v);
+        if (view) {
+            // The window in counts goes to the view, which redraws from the bytes it holds.
+            const lo = toCounts(v, v.lo), hi = toCounts(v, v.hi);
+            if (lo !== view.lo || hi !== view.hi) view.setRange(lo, hi);
+        } else {
+            const img = v.fit.querySelector('.op-cam-img');
+            const wide = v.lo === 0 && v.hi === 1;
+            if (img) img.style.filter = wide ? '' : `url(#${CSS.escape(v.filterId)})`;
 
-        const f = document.getElementById(v.filterId);
-        if (f) {
-            const slope = 1 / (v.hi - v.lo);
-            const intercept = -v.lo * slope;
-            f.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => {
-                fn.setAttribute('slope', String(slope));
-                fn.setAttribute('intercept', String(intercept));
-            });
+            const f = document.getElementById(v.filterId);
+            if (f) {
+                const slope = 1 / (v.hi - v.lo);
+                const intercept = -v.lo * slope;
+                f.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => {
+                    fn.setAttribute('slope', String(slope));
+                    fn.setAttribute('intercept', String(intercept));
+                });
+            }
         }
+        positionHandles(v);
+    }
 
+    function positionHandles(v) {
         if (!v.panel) return;
         // The handles are the only numeric readout there is, and the transfer
         // line over the histogram is the rest — ImageJ's B&C carries no status
@@ -471,7 +528,7 @@ const ImageView = (() => {
         return { slope, intercept: -lo * slope };
     }
 
-    return { attach, reset, zoomOf, displayOf, windowTransfer,
+    return { attach, reset, zoomOf, displayOf, windowTransfer, frameArrived,
              MIN_Z, MAX_Z, WHEEL_STEP, MIN_SPAN, _clamp: clamp };
 })();
 
