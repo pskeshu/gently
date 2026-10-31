@@ -185,7 +185,9 @@ def create_router(server) -> APIRouter:
         return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max, refs)
 
     @router.get("/api/bf/frames/{stem}.u16")
-    async def bf_frame_u16(stem: str, scale: int = 1, corrected: bool = False):
+    async def bf_frame_u16(
+        stem: str, scale: int = 1, corrected: bool = False, max: int | None = None
+    ):
         """One overview frame as it is: little-endian uint16 bytes, averaged
         down by ``scale`` if asked, shape and range in headers (gently.core.u16).
         The browser draws it with its own contrast and reads values from it."""
@@ -201,7 +203,9 @@ def create_router(server) -> APIRouter:
                 raise HTTPException(
                     status_code=404, detail=f"no dark and flat for frame {stem!r} in this session"
                 )
-        return await asyncio.to_thread(tiff_u16_response, Path(rec["file_path"]), stem, scale, refs)
+        return await asyncio.to_thread(
+            tiff_u16_response, Path(rec["file_path"]), stem, scale, refs, max
+        )
 
     return router
 
@@ -211,8 +215,10 @@ def tiff_u16_response(
     stem: str,
     scale: int = 1,
     correction: tuple[Path, Path] | None = None,
+    max_dim: int | None = None,
 ) -> Response:
-    """A filed TIFF as uint16 bytes; ``scale`` averages blocks down first;
+    """A filed TIFF as uint16 bytes; ``scale`` averages blocks down first,
+    or ``max_dim`` bounds the longer side (gently.core.u16.u16_payload);
     ``correction`` is the (dark, flat) pair to divide out. The sibling of
     tiff_png_response for the viewer that wants the numbers."""
     if not path.exists():
@@ -232,7 +238,7 @@ def tiff_u16_response(
                 arr = correct(arr, dark, flat)
             else:
                 raise ValueError("the dark and flat are not the frame's size")
-        body, headers = u16_payload(arr, scale, {"Stem": stem})
+        body, headers = u16_payload(arr, scale, {"Stem": stem}, max_dim=max_dim)
     except HTTPException:
         raise
     except Exception as exc:

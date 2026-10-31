@@ -136,6 +136,21 @@ const U16View = {
         return view;
     },
 
+    /**
+     * A thumbnail: a bar-less view in `host` loading `url` (ask with ?max=N
+     * for the size the tile has). If the counts cannot be had, an <img> of
+     * `fallback` takes the host's place, so a tile is never blank.
+     */
+    tile(host, url, fallback, alt) {
+        const view = U16View.create(host, { bar: false });
+        view.load(url).catch(() => {
+            const img = document.createElement('img');
+            img.src = fallback || ''; img.alt = alt || ''; img.loading = 'lazy';
+            host.replaceWith(img);
+        });
+        return view;
+    },
+
     /** A frame over the page, full size, with the bar: for "look at this one". */
     overlay(url, title) {
         document.querySelectorAll('.u16-overlay').forEach(o => o.remove());

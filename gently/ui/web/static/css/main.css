@@ -4601,6 +4601,12 @@ kbd {
 .tile-dot.error { background: var(--accent-red); border-radius: 1px; transform: rotate(45deg); }
 .tile-thumb { position: relative; display: block; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--img-bg); cursor: ew-resize; }
 .tile-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A thumbnail as counts: the viewer fills the tile the way the <img> does,
+   with its readout small in the corner. */
+.tile-thumb .u16, .embryo-thumb .u16, .home-image .u16 { display: block; width: 100%; height: 100%; }
+.tile-thumb .u16-stage, .embryo-thumb .u16-stage, .home-image .u16-stage { display: block; width: 100%; height: 100%; }
+.tile-thumb .u16-c, .embryo-thumb .u16-c, .home-image .u16-c { width: 100%; height: 100%; max-width: none; object-fit: cover; border: 0; border-radius: 0; }
+.tile-thumb .u16-read, .embryo-thumb .u16-read, .home-image .u16-read { left: 3px; bottom: 3px; font-size: 9px; padding: 1px 4px; }
 .tile-thumb-cap { position: absolute; right: 3px; bottom: 3px; font: 9px 'JetBrains Mono', ui-monospace, monospace; color: #e7eef4; background: rgba(0,0,0,.55); padding: 1px 4px; border-radius: 3px; }
 .tile-thumb-empty { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 0.62rem; color: var(--text-muted); text-align: center; line-height: 1.2; }
 .embryo-tile .stage-bar { display: flex; height: 6px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg-card); }
