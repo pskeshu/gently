@@ -33,6 +33,12 @@
  *   onFrame(i, {playing, byUser})  after the stage moves, so a detail pane
  *              can follow.
  *
+ * A frame that carries `u16` (the counts route, gently.core.u16) is drawn by
+ * a U16View in the same box: the contrast is the viewer's, set once and held
+ * from frame to frame, with the value under the cursor read out and the
+ * black/white/gamma bar in the side column. The JPEG stays for the hover
+ * preview, Compare, and a frame without counts.
+ *
  * Scrubbing shows the ?max=640 PNG; on settle the full frame is swapped in.
  * ?corrected=1 asks the server to divide the session's dark and flat out
  * (gently.app.brightfield); the toggle is live only when the frame has them.
@@ -69,6 +75,7 @@ function createOverviewStage() {
     const cache = new Map();    // url -> HTMLImageElement (decoded), LRU by insertion
     const CACHE_MAX = 160;
     let lastKey = '';           // what the file buttons and references line were last built for
+    let pix = null;             // the U16View, once a frame with counts has shown
     let api = null;
 
     const $ = id => host && host.querySelector('#' + id);
@@ -78,6 +85,39 @@ function createOverviewStage() {
     const frames = () => opts.frames() || [];
     const tools = () => Object.assign({}, TOOLS, opts.tools || {});
     const supportsMax = f => !!(f && f.url && f.scalable !== false);
+    const hasPixels = f => !!(f && f.u16 && !compare && typeof U16View !== 'undefined');
+
+    function u16For(f, scale) {
+        const q = [];
+        if (scale > 1) q.push(`scale=${scale}`);
+        if (corrected && f.correctable) q.push('corrected=1');
+        return f.u16 + (q.length ? `${f.u16.includes('?') ? '&' : '?'}${q.join('&')}` : '');
+    }
+    function pixView() {
+        if (pix) return pix;
+        const stage = $('ov-stage');
+        const div = document.createElement('div');
+        div.className = 'ov-pix';
+        stage.insertBefore(div, $('ov-img'));
+        pix = U16View.create(div, { bar: true });
+        const d = $('ov-display');
+        if (d) { d.appendChild(pix.bar); d.hidden = false; }
+        return pix;
+    }
+    // The counts into the view; a later load wins over a slower earlier one, and
+    // the range a person set holds across frames of one series.
+    function showPixels(f, scale) {
+        const view = pixView();
+        const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+        return view.load(u16For(f, scale)).then(meta => {
+            if (!meta) return null;
+            if (keep) view.setRange(keep[0], keep[1], keep[2]);
+            const stage = $('ov-stage');
+            stage.classList.add('has-pixels');
+            stage.style.aspectRatio = `${meta.width} / ${meta.height}`;
+            return meta;
+        }).catch(() => { const stage = $('ov-stage'); if (stage) stage.classList.remove('has-pixels'); return null; });
+    }
 
     function urlFor(f, max) {
         if (!f || !f.url) return f && f.thumb ? f.thumb : '';
@@ -118,6 +158,7 @@ function createOverviewStage() {
         const canCorrect = t.corrected && !!f.correctable;
         if (!host.querySelector('.ov')) {
             lastKey = '';
+            pix = null;
             host.innerHTML = `
                 <div class="ov" tabindex="0" aria-label="${esc(opts.label)}: drag the bar or use arrow keys to scrub, space to play">
                     <div class="ov-stage" id="ov-stage">
@@ -128,6 +169,7 @@ function createOverviewStage() {
                     </div>
                     <div class="ov-side">
                         <div class="ov-meta" id="ov-meta"></div>
+                        <div class="ov-display" id="ov-display" hidden></div>
                         <div class="ov-controls ov-fields" id="ov-fields" hidden></div>
                         <div class="ov-controls">
                             <button type="button" class="op-btn" id="ov-play" title="Space"></button>
@@ -245,6 +287,16 @@ function createOverviewStage() {
         // The scrub size now; the full frame once the pointer settles.
         const seq = ++loadSeq;
         const img = $('ov-img');
+        if (hasPixels(f)) {
+            // ÷4 while moving, the counts whole once the pointer settles; playing
+            // stays at ÷4, as the JPEG path stays at its scrub size.
+            showPixels(f, 4);
+            clearTimeout(settleTimer);
+            if (playing) return;
+            settleTimer = setTimeout(() => { if (seq === loadSeq) showPixels(f, 1); }, SETTLE_MS);
+            return;
+        }
+        $('ov-stage').classList.remove('has-pixels');
         const quick = urlFor(f, SCRUB_MAX);
         load(quick).then(im => { if (seq === loadSeq && im) img.src = im.src; });
         clearTimeout(settleTimer);
@@ -426,7 +478,7 @@ function createOverviewStage() {
     /** A different series on the same stage: start at its newest, following. */
     function reset() {
         stop();
-        cur = -1; follow = true; compare = false; hover = -1; lastKey = '';
+        cur = -1; follow = true; compare = false; hover = -1; lastKey = ''; pix = null;
         if (host) host.innerHTML = '';
     }
 

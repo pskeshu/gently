@@ -2395,6 +2395,8 @@ const EmbryosManager = {
             out.push({
                 url: `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryoId)}&t=${t}`,
                 scalable: false,            // the projection route serves the JPEG as it is
+                // the same picture in counts, for the stage (gently.core.u16)
+                u16: `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/projection.u16`,
                 frame: t,
                 when: c && c.timestamp ? c.timestamp : null,
                 stage: c && !c._pending ? c.stage : null,

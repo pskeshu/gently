@@ -158,6 +158,7 @@ def create_router(server) -> APIRouter:
                     "led_intensity_pct": meta.get("led_intensity_pct"),
                     "correctable": _correction_for(rec, records) is not None,
                     "url": f"/api/bf/frames/{stem}.png",
+                    "u16": f"/api/bf/frames/{stem}.u16",
                 }
             )
         return frames
