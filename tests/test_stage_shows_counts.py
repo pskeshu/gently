@@ -88,3 +88,14 @@ def test_the_stage_can_show_a_plane_of_the_volume_behind_a_projection() -> None:
     assert "f.slice(zSel)" in body and "zSel = -1; return showPixels(f, scale);" in body
     embryos = (WEB / "static" / "js" / "embryos.js").read_text(encoding="utf-8")
     assert "slice: z => `/api/sessions/" in embryos and "/slice/${z}.u16" in embryos
+
+
+def test_the_projection_viewer_draws_the_three_view_as_counts() -> None:
+    """ProjectionViewer's three-view card is the stored counts through the
+    viewer when the session is known; its other cards are renderings and stay
+    pictures, and so does this one if the counts cannot be had."""
+    pv = (WEB / "static" / "js" / "projection-viewer.js").read_text(encoding="utf-8")
+    body = pv.split("    renderProjections() {")[1].split("\n    },\n")[0]
+    assert "proj.method === 'three_view'" in body and "/projection.u16?max=1024" in body
+    assert 'class="pv-pix"' in body and "U16View.create(host, { bar: true })" in body
+    assert "host.replaceWith(img)" in body, "no fallback to the picture"
