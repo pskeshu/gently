@@ -398,9 +398,10 @@ def _persist_burst_to_disk(
 
         # Projection via the same helper used for regular volumes.
         try:
-            from gently.core.imaging import generate_jpeg_projection
+            from gently.core.imaging import generate_jpeg_projection, generate_u16_projection
 
             generate_jpeg_projection(arr, proj_path)
+            generate_u16_projection(arr, proj_path.with_suffix(".tif"))
         except Exception as exc:
             logger.debug("[%s] burst frame %d projection failed: %s", embryo_id, i, exc)
 
