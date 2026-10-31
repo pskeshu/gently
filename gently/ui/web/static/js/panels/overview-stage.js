@@ -76,6 +76,7 @@ function createOverviewStage() {
     const CACHE_MAX = 160;
     let lastKey = '';           // what the file buttons and references line were last built for
     let pix = null;             // the U16View, once a frame with counts has shown
+    let zSel = -1;              // the plane shown of a volume; -1 is its projection
     let api = null;
 
     const $ = id => host && host.querySelector('#' + id);
@@ -105,18 +106,40 @@ function createOverviewStage() {
         return pix;
     }
     // The counts into the view; a later load wins over a slower earlier one, and
-    // the range a person set holds across frames of one series.
+    // the range a person set holds across frames of one series. A frame with a
+    // volume behind it (`slice(z)`, and the projection says how many planes)
+    // can show one plane instead: the Z control under the bar, kept across
+    // frames so the same plane is followed through time.
     function showPixels(f, scale) {
         const view = pixView();
         const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
-        return view.load(u16For(f, scale)).then(meta => {
+        const plane = zSel >= 0 && typeof f.slice === 'function';
+        const url = plane ? f.slice(zSel) + (scale > 1 ? `?scale=${scale}` : '') : u16For(f, scale);
+        return view.load(url).then(meta => {
             if (!meta) return null;
             if (keep) view.setRange(keep[0], keep[1], keep[2]);
             const stage = $('ov-stage');
             stage.classList.add('has-pixels');
             stage.style.aspectRatio = `${meta.width} / ${meta.height}`;
+            paintZ(f, meta);
             return meta;
-        }).catch(() => { const stage = $('ov-stage'); if (stage) stage.classList.remove('has-pixels'); return null; });
+        }).catch(() => {
+            // A plane this frame does not have: back to its projection.
+            if (plane) { zSel = -1; return showPixels(f, scale); }
+            const stage = $('ov-stage'); if (stage) stage.classList.remove('has-pixels'); return null;
+        });
+    }
+    function paintZ(f, meta) {
+        const box = $('ov-z'), input = $('ov-z-in'), out = $('ov-z-out');
+        if (!box) return;
+        const planes = Number(meta.planes) || 0;
+        const can = planes > 1 && typeof f.slice === 'function';
+        box.hidden = !can;
+        if (!can) return;
+        input.max = planes - 1;
+        if (zSel >= planes) zSel = planes - 1;
+        input.value = zSel;
+        out.textContent = zSel < 0 ? 'projection' : `plane ${zSel} of ${planes}`;
     }
 
     function urlFor(f, max) {
@@ -170,6 +193,7 @@ function createOverviewStage() {
                     <div class="ov-side">
                         <div class="ov-meta" id="ov-meta"></div>
                         <div class="ov-display" id="ov-display" hidden></div>
+                        <div class="ov-z" id="ov-z" hidden title="A plane of the volume, or its projection; the plane is kept while stepping through time"><span class="ov-keys">Z</span><input type="range" id="ov-z-in" min="-1" max="0" step="1" value="-1"><output id="ov-z-out">projection</output></div>
                         <div class="ov-controls ov-fields" id="ov-fields" hidden></div>
                         <div class="ov-controls">
                             <button type="button" class="op-btn" id="ov-play" title="Space"></button>
@@ -435,6 +459,7 @@ function createOverviewStage() {
             if (b && opts.onField) { stop(); opts.onField(Number(b.dataset.ovField)); }
         });
         $('ov-newest').addEventListener('click', newest);
+        $('ov-z-in').addEventListener('input', ev => { zSel = Number(ev.target.value); const f = frames()[cur]; if (f) showPixels(f, 1); });
         const fold = $('ov-fold');
         if (fold) fold.addEventListener('click', () => { stop(); if (typeof opts.onFold === 'function') opts.onFold(); });
         $('ov-fps').addEventListener('change', ev => { fps = Number(ev.target.value) || 10; if (playing) { stop(); play(); } });
@@ -478,7 +503,7 @@ function createOverviewStage() {
     /** A different series on the same stage: start at its newest, following. */
     function reset() {
         stop();
-        cur = -1; follow = true; compare = false; hover = -1; lastKey = ''; pix = null;
+        cur = -1; follow = true; compare = false; hover = -1; lastKey = ''; pix = null; zSel = -1;
         if (host) host.innerHTML = '';
     }
 

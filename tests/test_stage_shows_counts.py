@@ -77,3 +77,14 @@ def test_every_thumbnail_is_the_counts_with_the_jpeg_behind_it() -> None:
         assert "data-jpg=" in src, f"{name} dropped the JPEG fallback"
     home = (WEB / "static" / "js" / "home.js").read_text(encoding="utf-8")
     assert "u16: u16Of(s)" in home.split("function openRecent(index)")[1].split("\n    }\n")[0]
+
+
+def test_the_stage_can_show_a_plane_of_the_volume_behind_a_projection() -> None:
+    """A frame that knows where its planes are (`slice(z)`) gets a Z control
+    once the projection says how many there are; the plane is kept across
+    frames, and a frame without that plane falls back to its projection."""
+    assert 'id="ov-z-in"' in STAGE and "function paintZ(f, meta)" in STAGE
+    body = STAGE.split("    function showPixels(f, scale) {")[1].split("\n    }\n")[0]
+    assert "f.slice(zSel)" in body and "zSel = -1; return showPixels(f, scale);" in body
+    embryos = (WEB / "static" / "js" / "embryos.js").read_text(encoding="utf-8")
+    assert "slice: z => `/api/sessions/" in embryos and "/slice/${z}.u16" in embryos

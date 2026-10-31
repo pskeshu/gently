@@ -154,6 +154,10 @@ def test_the_store_writes_the_counts_beside_the_jpeg(tmp_path):
     # the YZ view keeps the counts: nearest-neighbour, so every value is one the camera read
     assert arr[:10, 15:].max() == 5000
     assert set(np.unique(arr[:10, 15:])) <= set(np.unique(vol))
+    # the route says how many planes stand behind the projection
+    c = _client(store)
+    r = c.get("/api/sessions/s1/embryos/e01/volumes/0/projection.u16")
+    assert r.headers["x-image-planes"] == "4"
 
 
 def test_a_four_d_stack_projects_view_a_and_a_plane_stays_a_plane():
