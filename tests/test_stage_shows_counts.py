@@ -40,3 +40,19 @@ def test_both_kinds_of_frame_carry_their_counts_url() -> None:
     assert "/volumes/${t}/projection.u16" in embryos
     bf = (WEB / "routes" / "bf.py").read_text(encoding="utf-8")
     assert '"u16": f"/api/bf/frames/{stem}.u16"' in bf
+
+
+def test_the_lightbox_draws_a_counts_item_on_the_viewer_and_keeps_the_jpeg_otherwise() -> None:
+    """A calibration exposure opens in the lightbox as its counts; a plot, a
+    Home tile or any item without `u16` opens as the picture it always was."""
+    lb = (WEB / "static" / "js" / "lightbox.js").read_text(encoding="utf-8")
+    assert "paintPixels(img)" in lb and "U16View.create(" in lb
+    for fn in ("showImage(index) {", "showImageByUid(index) {"):
+        body = lb.split(fn)[1].split("\n    },\n")[0]
+        assert "this.paintPixels(img)" in body, f"{fn} skips the viewer"
+    assert "this.hidePixels();" in lb.split("    close() {")[1].split("\n    },\n")[0]
+    assert "zoomTarget(view.host)" in lb, "zoom would stay on the hidden <img>"
+    op = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
+    assert "u16: i.u16," in op.split("function openCalImage(index)")[1].split("\n    }\n")[0]
+    routes = (WEB / "routes" / "calibration_records.py").read_text(encoding="utf-8")
+    assert "/image/{n}.u16" in routes

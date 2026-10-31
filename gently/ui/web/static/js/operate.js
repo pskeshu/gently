@@ -1627,6 +1627,7 @@ const OperateManager = (function () {
         if (!_calKept || typeof Lightbox === 'undefined') return;
         Lightbox.open(_calKept.images.map(i => ({
             url: i.url,
+            u16: i.u16,                 // an exposure's counts; a plot has none
             data_type: calImageTitle(i),
             metadata: { embryo_id: _calKept.embryoId },
         })), Math.max(0, index), 'calibration');

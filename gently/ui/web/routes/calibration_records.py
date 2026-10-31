@@ -55,8 +55,46 @@ def create_router(server) -> APIRouter:
         return long_path(folder)
 
     def _with_urls(embryo_id: str, run: str, frames: list[dict]) -> list[dict]:
+        """Each image with where to get it: a PNG of any of them, and for an
+        exposure the counts as well (``u16``, see gently.core.u16); a plot is
+        a picture and carries no counts."""
         base = f"/api/calibration/records/{embryo_id}/{run}/image"
-        return [{**f, "url": f"{base}/{f.get('n')}.png"} for f in frames]
+        out = []
+        for f in frames:
+            rec = {**f, "url": f"{base}/{f.get('n')}.png"}
+            if not str(f.get("file", "")).lower().endswith(".png"):
+                rec["u16"] = f"{base}/{f.get('n')}.u16"
+            out.append(rec)
+        return out
+
+    def _image_file(embryo_id: str, run: str, n: int) -> Path:
+        """Image ``n`` of a run on disk. The name comes from the run's own
+        index, and must be one of its files."""
+        from gently.core.calibration_record import read_frames
+
+        folder = _run_dir(embryo_id, run)
+        line = next((f for f in read_frames(folder) if f.get("n") == n), None)
+        if line is None:
+            raise HTTPException(status_code=404, detail=f"no image {n} in {run!r}")
+        path = next(
+            (p for p in folder.rglob("*") if p.is_file() and p.name == Path(line["file"]).name),
+            None,
+        )
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"image {n} is no longer on disk")
+        return path
+
+    @router.get("/api/calibration/records/{embryo_id}/{run}/image/{n}.u16")
+    async def one_image_u16(embryo_id: str, run: str, n: int, scale: int = 1):
+        """Exposure ``n`` of a run as uint16 bytes (gently.core.u16): the
+        counts as they came off the camera, for the viewer that draws its own
+        contrast and reads values. A plot is a picture, not counts: 404."""
+        from gently.ui.web.routes.bf import tiff_u16_response
+
+        path = _image_file(embryo_id, run, n)
+        if path.suffix.lower() == ".png":
+            raise HTTPException(status_code=404, detail=f"image {n} is a plot; it has no counts")
+        return tiff_u16_response(path, path.stem, scale)
 
     @router.get("/api/calibration/records")
     async def list_records(embryo_id: str | None = None):
@@ -84,19 +122,7 @@ def create_router(server) -> APIRouter:
     @router.get("/api/calibration/records/{embryo_id}/{run}/image/{n}.png")
     async def one_image(embryo_id: str, run: str, n: int, max: int | None = None):
         """Image ``n`` of a run as PNG; ``?max=N`` bounds the longer side."""
-        from gently.core.calibration_record import read_frames
-
-        folder = _run_dir(embryo_id, run)
-        line = next((f for f in read_frames(folder) if f.get("n") == n), None)
-        if line is None:
-            raise HTTPException(status_code=404, detail=f"no image {n} in {run!r}")
-        # The name comes from the run's own index, and must be one of its files.
-        path = next(
-            (p for p in folder.rglob("*") if p.is_file() and p.name == Path(line["file"]).name),
-            None,
-        )
-        if path is None:
-            raise HTTPException(status_code=404, detail=f"image {n} is no longer on disk")
+        path = _image_file(embryo_id, run, n)
         limit = int(max) if max and max > 0 else 0
         is_png = path.suffix.lower() == ".png"
         try:
