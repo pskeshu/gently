@@ -2082,6 +2082,9 @@ const EmbryosManager = {
         const tp = Number(embryo.timepoints) || (latest ? latest.timepoint : 0) || 0;
         const sid = this.currentSessionId;
         const thumb = sid && tp > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryo.embryoId)}&t=${tp}` : null;
+        // The tile shows the counts (gently.core.u16), drawn by the viewer at the
+        // size a tile has; the JPEG is the fallback, mounted in _wireTileScrub.
+        const thumbU16 = thumb ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryo.embryoId)}/volumes/${tp}/projection.u16?max=256` : null;
         const bar = reasoning.length
             ? `<span class="stage-bar" aria-hidden="true">${reasoning.map(r => `<span style="background:${(typeof stageColor === 'function') ? stageColor(r.stage) : '#8b949e'}" title="t${r.timepoint} · ${this.escapeHtml(this.formatStageName(r.stage || ''))}"></span>`).join('')}</span>`
             : '<span class="stage-bar is-empty" aria-hidden="true"><span></span></span>';
@@ -2097,7 +2100,7 @@ const EmbryosManager = {
                     title="${this.escapeHtml(embryo.embryoId)} · ${this.escapeHtml(stageName)} · ${tp} timepoint${tp !== 1 ? 's' : ''}">
                 <span class="tile-head"><span class="tile-dot ${status}" aria-hidden="true"></span><span class="tile-id">${shortLabel}</span>${embryo.nickname ? `<span class="tile-nick">${this.escapeHtml(embryo.nickname)}</span>` : ''}</span>
                 <span class="tile-thumb" data-embryo="${embryo.embryoId}" data-tp="${tp}">
-                    ${thumb ? `<img src="${thumb}" alt="${this.escapeHtml(shortLabel)}, timepoint ${tp}" loading="lazy"><span class="tile-thumb-cap">t${tp}</span>` : `<span class="tile-thumb-empty">${tp ? `t${tp}` : 'no volume yet'}</span>`}
+                    ${thumb ? `<span class="tile-pix" data-u16="${thumbU16}" data-jpg="${thumb}" data-alt="${this.escapeHtml(shortLabel)}, timepoint ${tp}"></span><span class="tile-thumb-cap">t${tp}</span>` : `<span class="tile-thumb-empty">${tp ? `t${tp}` : 'no volume yet'}</span>`}
                 </span>
                 ${bar}
                 <span class="tile-stage"><i class="tile-swatch" style="background:${color}" aria-hidden="true"></i>${this.escapeHtml(stageName)}</span>
@@ -2116,18 +2119,36 @@ const EmbryosManager = {
         return remaining == null ? '—' : this.formatCountdown(Math.floor(remaining));
     },
 
-    // Moving across a tile's thumbnail walks its timepoints; leaving snaps back.
+    // Each tile's picture is the counts, drawn by the viewer; the JPEG if they
+    // cannot be had. Moving across a tile walks its timepoints; leaving snaps
+    // back. The range the viewer set on the latest frame holds while scrubbing.
     _wireTileScrub(container) {
         const sid = this.currentSessionId;
         if (!sid) return;
         container.querySelectorAll('.tile-thumb[data-tp]').forEach(el => {
             const n = Number(el.dataset.tp) || 0;
-            if (n < 2) return;
             const eid = el.dataset.embryo;
-            const img = el.querySelector('img'), cap = el.querySelector('.tile-thumb-cap');
+            const cap = el.querySelector('.tile-thumb-cap');
+            const jpg = t => `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
+            const host = el.querySelector('.tile-pix');
+            let view = null;
+            if (host) {
+                if (typeof U16View !== 'undefined') view = U16View.tile(host, host.dataset.u16, host.dataset.jpg, host.dataset.alt);
+                else host.replaceWith(Object.assign(document.createElement('img'), { src: host.dataset.jpg, alt: host.dataset.alt, loading: 'lazy' }));
+            }
+            if (n < 2) return;
+            let shown = n;
             const show = t => {
-                if (img && img.dataset.t !== String(t)) { img.src = `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`; img.dataset.t = String(t); }
+                if (t === shown) return;
+                shown = t;
                 if (cap) cap.textContent = `t${t}`;
+                if (view && view.host.isConnected) {
+                    const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+                    view.load(host.dataset.u16.replace(/\/volumes\/\d+\//, `/volumes/${t}/`)).then(m => { if (m && keep) view.setRange(keep[0], keep[1], keep[2]); }).catch(() => {});
+                    return;
+                }
+                const img = el.querySelector('img');
+                if (img) img.src = jpg(t);
             };
             el.addEventListener('mousemove', ev => {
                 const r = el.getBoundingClientRect();

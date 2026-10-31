@@ -1189,7 +1189,9 @@ def create_router(server) -> APIRouter:
         return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max)
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.u16")
-    async def session_snapshot_u16(session_id: str, stem: str, scale: int = 1):
+    async def session_snapshot_u16(
+        session_id: str, stem: str, scale: int = 1, max: int | None = None
+    ):
         """A session's snapshot as uint16 bytes (see gently.core.u16): the
         numbers, for a viewer that draws its own contrast and reads values."""
         from gently.ui.web.routes.bf import tiff_u16_response
@@ -1213,9 +1215,13 @@ def create_router(server) -> APIRouter:
         rec = await asyncio.to_thread(find)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
-        return await asyncio.to_thread(tiff_u16_response, Path(rec["file_path"]), stem, scale)
+        return await asyncio.to_thread(
+            tiff_u16_response, Path(rec["file_path"]), stem, scale, None, max
+        )
 
-    def _volume_u16(session_id: str, embryo: str, t: int, z: int | None, scale: int) -> Response:
+    def _volume_u16(
+        session_id: str, embryo: str, t: int, z: int | None, scale: int, max_dim: int | None
+    ) -> Response:
         """One plane of a volume TIFF, or its projection, as uint16 bytes."""
         import tifffile
 
@@ -1269,19 +1275,23 @@ def create_router(server) -> APIRouter:
                 else:
                     arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:])[z]
                 extra = {"Planes": planes, "Plane": z}
-        body, headers = u16_payload(arr, scale, extra)
+        body, headers = u16_payload(arr, scale, extra, max_dim=max_dim)
         return Response(
             body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
         )
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/projection.u16")
-    async def volume_projection_u16(session_id: str, embryo: str, t: int, scale: int = 1):
+    async def volume_projection_u16(
+        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+    ):
         """The maximum projection of a stored volume, as the numbers."""
-        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, None, scale)
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, None, scale, max)
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/slice/{z}.u16")
-    async def volume_slice_u16(session_id: str, embryo: str, t: int, z: int, scale: int = 1):
+    async def volume_slice_u16(
+        session_id: str, embryo: str, t: int, z: int, scale: int = 1, max: int | None = None
+    ):
         """One plane of a stored volume, as the numbers."""
-        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, z, scale)
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, z, scale, max)
 
     return router

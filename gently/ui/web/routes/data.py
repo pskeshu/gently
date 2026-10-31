@@ -852,7 +852,7 @@ def create_router(server) -> APIRouter:
         agent = bridge.agent if bridge is not None else None
         return getattr(agent, "client", None) if agent else None
 
-    async def _frame_u16(path: str, scale: int) -> Response:
+    async def _frame_u16(path: str, scale: int, max_dim: int | None = None) -> Response:
         """Relay a camera frame as uint16 bytes from the device layer, headers
         and all (gently.core.u16): the Operate view draws its own contrast
         and reads values from them, so the range no longer moves under the
@@ -863,7 +863,7 @@ def create_router(server) -> APIRouter:
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            status, headers, body = await client.get_frame_u16(path, scale)
+            status, headers, body = await client.get_frame_u16(path, scale, max_dim)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"device layer: {exc}") from exc
         if status != 200:
@@ -874,14 +874,14 @@ def create_router(server) -> APIRouter:
         )
 
     @router.get("/api/devices/bottom_camera/frame.u16")
-    async def bottom_camera_frame_u16(scale: int = 2):
+    async def bottom_camera_frame_u16(scale: int = 2, max: int | None = None):
         """The last bottom-camera frame as uint16 bytes, for the Operate view."""
-        return await _frame_u16("/api/bottom_camera/frame.u16", scale)
+        return await _frame_u16("/api/bottom_camera/frame.u16", scale, max)
 
     @router.get("/api/devices/lightsheet/frame.u16")
-    async def lightsheet_frame_u16(scale: int = 2):
+    async def lightsheet_frame_u16(scale: int = 2, max: int | None = None):
         """The last light-sheet live frame as uint16 bytes, for the Operate view."""
-        return await _frame_u16("/api/lightsheet/frame.u16", scale)
+        return await _frame_u16("/api/lightsheet/frame.u16", scale, max)
 
     @router.get("/api/devices/room_light/status")
     async def get_room_light_status():

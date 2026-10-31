@@ -166,3 +166,24 @@ def test_a_four_d_stack_projects_view_a_and_a_plane_stays_a_plane():
     assert layout["xy"] == [4, 5] and arr[:4, :5].max() == 7
     plane, layout = counts_projection(np.full((6, 7), 3, dtype=np.int32))
     assert plane.shape == (6, 7) and plane.dtype == np.uint16 and layout["views"] == "xy"
+
+
+def test_max_asks_for_a_size_and_the_route_picks_the_scale(tmp_path):
+    """A thumbnail says the pixels it has, not a factor: ?max=N gives the
+    smallest integer scale that brings the longer side within N."""
+    body, h = u16_payload(np.zeros((300, 1000), dtype=np.uint16), max_dim=256)
+    assert (h["X-Image-Scale"], h["X-Image-Width"], h["X-Image-Height"]) == ("4", "250", "75")
+    body, h = u16_payload(np.zeros((300, 1000), dtype=np.uint16), scale=8, max_dim=256)
+    assert h["X-Image-Scale"] == "8"  # the larger of the two wins
+    store = FileStore(tmp_path)
+    store.create_session("s1")
+    store.put_snapshot("s1", "bf", np.zeros((480, 640), dtype=np.uint16), stem="f9")
+    (rec,) = store.list_snapshots("s1", "bf")
+    from pathlib import Path
+
+    stem = Path(rec["file_path"]).stem
+    c = _client(store, active="s1")
+    r = c.get(f"/api/sessions/s1/snapshot/{stem}.u16?max=200")
+    assert (r.headers["x-image-scale"], r.headers["x-image-width"]) == ("4", "160")
+    r = c.get(f"/api/bf/frames/{stem}.u16?max=100")
+    assert (r.headers["x-image-scale"], r.headers["x-image-width"]) == ("7", "91")

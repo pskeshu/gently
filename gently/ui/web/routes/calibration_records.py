@@ -85,7 +85,9 @@ def create_router(server) -> APIRouter:
         return path
 
     @router.get("/api/calibration/records/{embryo_id}/{run}/image/{n}.u16")
-    async def one_image_u16(embryo_id: str, run: str, n: int, scale: int = 1):
+    async def one_image_u16(
+        embryo_id: str, run: str, n: int, scale: int = 1, max: int | None = None
+    ):
         """Exposure ``n`` of a run as uint16 bytes (gently.core.u16): the
         counts as they came off the camera, for the viewer that draws its own
         contrast and reads values. A plot is a picture, not counts: 404."""
@@ -94,7 +96,7 @@ def create_router(server) -> APIRouter:
         path = _image_file(embryo_id, run, n)
         if path.suffix.lower() == ".png":
             raise HTTPException(status_code=404, detail=f"image {n} is a plot; it has no counts")
-        return tiff_u16_response(path, path.stem, scale)
+        return tiff_u16_response(path, path.stem, scale, max_dim=max)
 
     @router.get("/api/calibration/records")
     async def list_records(embryo_id: str | None = None):

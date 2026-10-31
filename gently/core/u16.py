@@ -65,13 +65,21 @@ def first_plane(arr: np.ndarray) -> np.ndarray:
 
 
 def u16_payload(
-    arr: np.ndarray, scale: int = 1, extra: dict[str, Any] | None = None
+    arr: np.ndarray,
+    scale: int = 1,
+    extra: dict[str, Any] | None = None,
+    max_dim: int | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     """The bytes and the headers for one frame. ``scale`` averages blocks
-    of that size down first; the headers carry both the sent shape and the
-    source shape, so a cursor position can be mapped back."""
+    of that size down first; ``max_dim`` asks instead for the smallest
+    integer scale that brings the longer side to at most that many pixels
+    (a thumbnail says the size it has, not a factor); the larger of the two
+    wins. The headers carry both the sent shape and the source shape, so a
+    cursor position can be mapped back."""
     src = first_plane(np.asarray(arr))
     scale = max(1, int(scale))
+    if max_dim and max_dim > 0 and src.ndim == 2 and src.size:
+        scale = max(scale, -(-max(src.shape) // int(max_dim)))
     out = as_u16(block_mean(src, scale))
     headers = {
         "X-Image-Width": str(out.shape[1]),

@@ -1244,6 +1244,14 @@ const ReviewApp = {
     wireScrub() {
         document.querySelectorAll('.embryo-thumb[data-embryo]').forEach(el => {
             const eid = el.dataset.embryo;
+            // The card's picture is the counts, drawn by the viewer at the size a
+            // card has (gently.core.u16); the JPEG if they cannot be had.
+            const host = el.querySelector('.embryo-pix');
+            let view = null;
+            if (host) {
+                if (typeof U16View !== 'undefined') view = U16View.tile(host, host.dataset.u16, host.dataset.jpg, host.dataset.alt);
+                else host.replaceWith(Object.assign(document.createElement('img'), { src: host.dataset.jpg, alt: host.dataset.alt, loading: 'lazy' }));
+            }
             const e = (this.currentSession.embryos || []).find(x => x.embryo_id === eid);
             const tps = e && e.projection_timepoints;
             if (!tps || tps.length < 2) return;
@@ -1262,8 +1270,18 @@ const ReviewApp = {
                 if (want != null && String(want) !== img.dataset.t) { const t = want; want = null; apply(t); }
             };
             if (img) { img.addEventListener('load', landed); img.addEventListener('error', landed); }
+            let shownT = null;
             const show = t => {
                 if (cap) cap.textContent = `t${t} · ${tps.indexOf(t) + 1}/${tps.length}`;
+                if (view && view.host.isConnected) {
+                    // the viewer: a later load wins, and the range holds across timepoints
+                    if (shownT === t) return;
+                    shownT = t;
+                    const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+                    el.href = `/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
+                    view.load(host.dataset.u16.replace(/\/volumes\/\d+\//, `/volumes/${t}/`)).then(m => { if (m && keep) view.setRange(keep[0], keep[1], keep[2]); }).catch(() => {});
+                    return;
+                }
                 if (!img || img.dataset.t === String(t)) return;
                 if (img.dataset.loading) { want = t; return; }
                 apply(t);
@@ -1488,7 +1506,7 @@ const ReviewApp = {
                     return `
                     <div class="embryo-card">
                         ${e.thumbnail
-                            ? `<a class="embryo-thumb" data-embryo="${this.escapeHtml(e.embryo_id)}" href="${e.thumbnail}" target="_blank" rel="noopener" title="Move across to scrub through the timepoints; click to open"><img src="${e.thumbnail}" alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}" loading="lazy"><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
+                            ? `<a class="embryo-thumb" data-embryo="${this.escapeHtml(e.embryo_id)}" href="${e.thumbnail}" target="_blank" rel="noopener" title="Move across to scrub through the timepoints; click to open"><span class="embryo-pix" data-u16="/api/sessions/${encodeURIComponent(this.currentSession.session_id)}/embryos/${encodeURIComponent(e.embryo_id)}/volumes/${e.latest_timepoint}/projection.u16?max=256" data-jpg="${e.thumbnail}" data-alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}"></span><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
                             : '<div class="embryo-thumb embryo-thumb-empty">no image</div>'}
                         <div class="embryo-header">
                             <h3>${this.escapeHtml(name)}${sub ? ` <small>${this.escapeHtml(sub)}</small>` : ''}</h3>

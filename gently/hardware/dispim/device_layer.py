@@ -4451,8 +4451,12 @@ class DeviceLayerServer(Service):
             scale = max(1, int(request.query.get("scale", 1)))
         except (TypeError, ValueError):
             scale = 1
+        try:
+            max_dim = int(request.query.get("max", 0)) or None
+        except (TypeError, ValueError):
+            max_dim = None
         extra = {"Stage-X": xy[0], "Stage-Y": xy[1]} if xy else {}
-        body, headers = await asyncio.to_thread(u16_payload, img, scale, extra)
+        body, headers = await asyncio.to_thread(u16_payload, img, scale, extra, max_dim)
         return web.Response(
             body=body, content_type=MEDIA_TYPE, headers={"Cache-Control": "no-store", **headers}
         )

@@ -83,7 +83,9 @@ def test_the_viz_server_relays_the_bytes_and_headers_as_they_came() -> None:
     class Client:
         asked: tuple[str, int] | None = None
 
-        async def get_frame_u16(self, path: str, scale: int) -> tuple[int, dict[str, str], bytes]:
+        async def get_frame_u16(
+            self, path: str, scale: int, max_dim: int | None = None
+        ) -> tuple[int, dict[str, str], bytes]:
             self.asked = (path, scale)
             heads = {"X-Image-Width": "4", "X-Image-Height": "1", "X-Image-Scale": str(scale)}
             return 200, heads, b"\x01\x00\x02\x00\x03\x00\x04\x00"
@@ -100,7 +102,9 @@ def test_the_viz_server_relays_the_bytes_and_headers_as_they_came() -> None:
 
 def test_no_frame_yet_and_no_microscope_each_say_so() -> None:
     class Client:
-        async def get_frame_u16(self, path: str, scale: int) -> tuple[int, dict[str, str], bytes]:
+        async def get_frame_u16(
+            self, path: str, scale: int, max_dim: int | None = None
+        ) -> tuple[int, dict[str, str], bytes]:
             return 404, {}, b""
 
     with TestClient(_app(Client())) as t:

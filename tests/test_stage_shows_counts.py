@@ -56,3 +56,24 @@ def test_the_lightbox_draws_a_counts_item_on_the_viewer_and_keeps_the_jpeg_other
     assert "u16: i.u16," in op.split("function openCalImage(index)")[1].split("\n    }\n")[0]
     routes = (WEB / "routes" / "calibration_records.py").read_text(encoding="utf-8")
     assert "/image/{n}.u16" in routes
+
+
+def test_every_thumbnail_is_the_counts_with_the_jpeg_behind_it() -> None:
+    """Embryo tiles, the session's embryo cards and the Home tiles mount the
+    viewer at the size a tile has (?max=256) and keep the JPEG as the fallback;
+    the Home lightbox items carry the counts too."""
+    v = (WEB / "static" / "js" / "u16view.js").read_text(encoding="utf-8")
+    assert "tile(host, url, fallback, alt)" in v and "host.replaceWith(img)" in v
+    for name, host in (
+        ("embryos.js", "tile-pix"),
+        ("review.js", "embryo-pix"),
+        ("home.js", "home-pix"),
+    ):
+        src = (WEB / "static" / "js" / name).read_text(encoding="utf-8")
+        assert f'class="{host}"' in src, f"{name} has no viewer host in its tile"
+        assert "U16View.tile(" in src and "max=256" in src, (
+            f"{name} does not mount the viewer at tile size"
+        )
+        assert "data-jpg=" in src, f"{name} dropped the JPEG fallback"
+    home = (WEB / "static" / "js" / "home.js").read_text(encoding="utf-8")
+    assert "u16: u16Of(s)" in home.split("function openRecent(index)")[1].split("\n    }\n")[0]

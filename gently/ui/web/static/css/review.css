@@ -641,7 +641,7 @@
 .stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; margin: 8px 0 2px; background: var(--bg-hover); }
 .stage-bar span { flex: 1 1 0; min-width: 2px; }
 .stage-bar-key { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.embryo-thumb.is-scrubbing img { cursor: ew-resize; }
+.embryo-thumb.is-scrubbing img, .embryo-thumb.is-scrubbing .u16-c { cursor: ew-resize; }
 
 /* Light dose against the budget */
 .dose { margin-top: 8px; font-size: 12px; color: var(--text-muted); }

@@ -93,11 +93,17 @@ const HomeApp = (() => {
         return link ? link.textContent.trim() : '';
     }
 
+    /** The same picture in counts, for the viewer (gently.core.u16). */
+    function u16Of(s) {
+        return `/api/sessions/${encodeURIComponent(s.session_id)}/embryos/${encodeURIComponent(s.embryo_id)}/volumes/${encodeURIComponent(s.timepoint)}/projection.u16?`;
+    }
+
     /** Open the strip's images in the Lightbox, starting at the one clicked. */
     function openRecent(index) {
         if (typeof Lightbox === 'undefined' || !_recent.length) return;
         Lightbox.open(_recent.map(s => ({
             url: s.url,
+            u16: u16Of(s).replace(/\?$/, ''),
             data_type: 'projection',
             metadata: {
                 embryo_id: s.embryo_id,
@@ -307,7 +313,7 @@ const HomeApp = (() => {
                 const title = `${s.session_id}/${s.embryo_id}${tp}`
                     + (n ? ` · ${n} timepoint${n === 1 ? '' : 's'}` : '');
                 return `<button type="button" class="home-image" data-home-image="${i}" title="${escapeHtml(title)}">
-                    <img loading="lazy" src="${s.url}" alt="${escapeHtml(label)}">
+                    <span class="home-pix" data-u16="${u16Of(s)}&max=256" data-jpg="${s.url}" data-alt="${escapeHtml(label)}"></span>
                     <span class="home-image-cap">${cap}</span>
                 </button>`;
             };
@@ -324,6 +330,12 @@ const HomeApp = (() => {
                     </div>
                     <div class="home-image-strip">${g.items.map(x => tile(x.image, x.index)).join('')}</div>
                 </div>`).join('');
+            // Each tile is the counts, drawn by the viewer at the size a tile has
+            // (gently.core.u16); the JPEG takes its place if they cannot be had.
+            el.querySelectorAll('.home-pix').forEach(h => {
+                if (typeof U16View !== 'undefined') U16View.tile(h, h.dataset.u16, h.dataset.jpg, h.dataset.alt);
+                else h.replaceWith(Object.assign(document.createElement('img'), { src: h.dataset.jpg, alt: h.dataset.alt, loading: 'lazy' }));
+            });
             if (!el._openWired) {
                 el._openWired = true;
                 el.addEventListener('click', e => {
