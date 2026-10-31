@@ -610,6 +610,25 @@ def counts_projection(volume: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     return flat, {"views": "xy", "xy": [int(flat.shape[0]), int(flat.shape[1])]}
 
 
+def pushed_counts(array: np.ndarray) -> tuple[np.ndarray, dict[str, Any]] | None:
+    """The counts behind an image the agent pushes to the page, or None for
+    one that has none (a colour rendering). A volume is cropped to the embryo
+    and laid out in three views exactly as its PNG is (see the viz server's
+    _array_to_image_data), so the two are the same picture; a 2D frame is
+    itself; a 4D stack is view A."""
+    arr = np.asarray(array)
+    if arr.ndim == 4:
+        arr = arr[0]
+    if arr.ndim == 3 and arr.shape[2] in (3, 4):
+        return None
+    if arr.ndim == 3:
+        bounds = compute_crop_bounds(arr)
+        arr = apply_crop_bounds(arr, bounds)
+    if arr.ndim not in (2, 3) or arr.size == 0 or not np.issubdtype(arr.dtype, np.number):
+        return None
+    return counts_projection(arr)
+
+
 def write_counts_projection(arr: np.ndarray, layout: dict[str, Any], output_path: Path) -> Path:
     """A counts projection to disk: a plain uint16 TIFF, its layout as JSON in
     the TIFF description, so Fiji shows it and the .u16 routes read it in a

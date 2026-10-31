@@ -365,7 +365,9 @@ const Lightbox = {
     _pixBar: null,
     paintPixels(img) {
         const w = this.els.imageWrapper, im = this.els.image;
-        if (!(img && img.u16 && typeof U16View !== 'undefined' && w && im)) { this.hidePixels(); return false; }
+        // An item names its counts (`u16`), or is a pushed image whose counts the server kept.
+        const u16 = img && (img.u16 || (img.has_counts && img.uid ? `/api/images/${encodeURIComponent(img.uid)}.u16` : null));
+        if (!(u16 && typeof U16View !== 'undefined' && w && im)) { this.hidePixels(); return false; }
         if (!this._pix) {
             const host = document.createElement('div');
             host.className = 'lightbox-pix';
@@ -380,7 +382,7 @@ const Lightbox = {
         view.host.hidden = false; this._pixBar.hidden = false; im.style.display = 'none';
         this.zoomTarget(view.host);
         const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
-        view.load(img.u16)
+        view.load(u16)
             .then(meta => { if (meta && keep) view.setRange(keep[0], keep[1], keep[2]); })
             .catch(() => {
                 if (this.imageList[this.currentIndex] !== img) return;

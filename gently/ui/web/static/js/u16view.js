@@ -149,6 +149,7 @@ const U16View = {
         view.load(url).catch(() => {
             const img = document.createElement('img');
             img.src = fallback || ''; img.alt = alt || ''; img.loading = 'lazy';
+            img.className = host.dataset.cls || '';
             host.replaceWith(img);
         });
         return view;

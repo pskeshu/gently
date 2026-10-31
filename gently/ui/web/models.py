@@ -122,6 +122,7 @@ class ImageData:
     metadata: dict[str, Any] = field(default_factory=dict)
     base64_png: str | None = None
     shape: tuple | None = None
+    has_counts: bool = False  # the numbers are kept for /api/images/{uid}.u16
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -16,6 +16,7 @@ for the cameras here.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
 import numpy as np
@@ -95,3 +96,48 @@ def u16_payload(
         if v is not None:
             headers[f"X-Image-{k}"] = str(v)
     return out.tobytes(), headers
+
+
+class CountsKeep:
+    """The counts of the images the agent pushes to the page, by uid, within
+    a byte budget: the newest stay, the oldest go. A pushed image used to live
+    on only as the PNG drawn from it; this keeps the numbers behind the recent
+    ones so the Gallery and the lightbox can draw them with their own contrast.
+    """
+
+    def __init__(self, budget: int = 256 << 20) -> None:
+        self.budget = int(budget)
+        self._items: OrderedDict[str, tuple[np.ndarray, dict[str, Any]]] = OrderedDict()
+        self._bytes = 0
+
+    def put(self, uid: str, arr: np.ndarray, layout: dict[str, Any] | None = None) -> None:
+        plane = as_u16(first_plane(np.asarray(arr)))
+        if plane.ndim != 2 or plane.size == 0 or plane.nbytes > self.budget:
+            return
+        self.drop(uid)
+        self._items[uid] = (plane, dict(layout or {}))
+        self._bytes += plane.nbytes
+        while self._bytes > self.budget and self._items:
+            _, (old, _layout) = self._items.popitem(last=False)
+            self._bytes -= old.nbytes
+
+    def get(self, uid: str) -> tuple[np.ndarray, dict[str, Any]] | None:
+        got = self._items.get(uid)
+        if got is not None:
+            self._items.move_to_end(uid)
+        return got
+
+    def drop(self, uid: str) -> None:
+        got = self._items.pop(uid, None)
+        if got is not None:
+            self._bytes -= got[0].nbytes
+
+    def clear(self) -> None:
+        self._items.clear()
+        self._bytes = 0
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __contains__(self, uid: object) -> bool:
+        return uid in self._items

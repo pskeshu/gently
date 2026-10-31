@@ -177,6 +177,10 @@ class VisualizationServer(Service):
 
         # Organized image storage (unlimited)
         self.store = ImageStore()
+        # The counts behind the recent pushed images (gently.core.u16.CountsKeep)
+        from gently.core.u16 import CountsKeep
+
+        self._counts = CountsKeep()
 
         # Timelapse state tracker for client sync
         self.timelapse_tracker = TimelapseStateTracker()
@@ -354,6 +358,9 @@ class VisualizationServer(Service):
         if self.gently_store is None or not session_id:
             return 0
         self.store = ImageStore()  # drop the previous session's images
+        counts = getattr(self, "_counts", None)  # tests build this server from a bare namespace
+        if counts is not None:
+            counts.clear()
         added = 0
         try:
             embryos = self.gently_store.list_embryos(session_id) or []
@@ -620,6 +627,18 @@ class VisualizationServer(Service):
             Additional metadata (should include embryo_id for organization)
         """
         image_data = self._array_to_image_data(array, uid, data_type, metadata)
+        # Keep the numbers behind the picture, for the viewer that draws its
+        # own contrast (gently.core.u16); a colour rendering has none.
+        try:
+            from gently.core.imaging import pushed_counts
+
+            counts = pushed_counts(array)
+        except Exception as exc:
+            logger.debug("no counts kept for %s: %s", uid, exc)
+            counts = None
+        if counts is not None:
+            self._counts.put(uid, counts[0], counts[1])
+            image_data.has_counts = uid in self._counts
 
         # Add to organized storage
         self.store.add_image(image_data)
@@ -630,6 +649,10 @@ class VisualizationServer(Service):
         logger.debug(
             f"Pushed image {uid} ({data_type}) to {len(self.manager.active_connections)} clients"
         )
+
+    def counts_for(self, uid: str) -> tuple[np.ndarray, dict] | None:
+        """The counts kept for a pushed image, or None once they are gone."""
+        return self._counts.get(uid)
 
     async def start_marking_session(
         self,
