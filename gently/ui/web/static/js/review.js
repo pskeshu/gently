@@ -1462,7 +1462,7 @@ const ReviewApp = {
                 <div class="session-bf-head">Brightfield overview <span class="session-bf-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
                 <div class="session-bf-frames">
                     ${frames.map(f => `
-                        <a class="session-bf-frame" href="${f.url}" target="_blank" rel="noopener" title="Open frame ${f.frame ?? ''}">
+                        <a class="session-bf-frame" href="${f.url}" title="Open frame ${f.frame ?? ''} with its values" onclick="event.preventDefault(); U16View.overlay('${f.url.replace(/\.png$/, '.u16')}', 'frame ${f.frame ?? ''}${f.captured_at ? ' · ' + this.formatTime(f.captured_at) : ''}')">
                             <img src="${f.url}?max=256" alt="brightfield overview frame ${f.frame ?? ''}" loading="lazy">
                             <span class="session-bf-cap">${f.frame ?? ''}${f.captured_at ? ` · ${this.formatTime(f.captured_at)}` : ''}</span>
                         </a>`).join('')}

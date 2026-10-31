@@ -44,6 +44,10 @@ const TwitchHatchTool = {
     frames() { return (this.data.frames || []).filter(f => (f.field ?? 0) === this.field).sort((a, b) => (a.frame ?? 0) - (b.frame ?? 0)); },
     frame() { return this.frames()[Math.min(this.idx, this.frames().length - 1)]; },
     url(stem) { return `/api/sessions/${encodeURIComponent(this.sid)}/snapshot/${stem}.png`; },
+    // The frame as its numbers, averaged 2×2: a 2048² frame is 2 MB and the
+    // pane shows it at ~720 px, so nothing visible is lost and a hover reads
+    // the value. A click to mark still lands in fractions of the frame.
+    u16(stem) { return `/api/sessions/${encodeURIComponent(this.sid)}/snapshot/${stem}.u16?scale=2`; },
     hms(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); },
 
     render() {
@@ -61,7 +65,7 @@ const TwitchHatchTool = {
             <span class="th-when">${this.whenText()}</span>
           </div>
           <div class="th-stage">
-            <img class="th-img" src="${this.url(cur.stem)}?max=1024" draggable="false" title="Click an embryo on the frame it first twitches">
+            <div class="th-img" title="Click an embryo on the frame it first twitches"></div>
             ${here.map(([r, i]) => `<span class="th-pin ${r.hatch_frame == null ? 'is-open' : ''}" style="left:${r.x * 100}%;top:${r.y * 100}%" title="#${i + 1}">${i + 1}</span>`).join('')}
           </div>
           <table class="th-table">
@@ -85,10 +89,10 @@ const TwitchHatchTool = {
     },
 
     // A scrub changes the picture, its caption and the "hatch here" labels; the
-    // rest of the pane stands, so the image element is not rebuilt per step.
+    // rest of the pane stands, so the viewer is not rebuilt per step.
     scrub() {
         const cur = this.frame(), el = this.el;
-        this.setFrame(el.querySelector('.th-img'), `${this.url(cur.stem)}?max=1024`);
+        this.showFrame(cur);
         el.querySelector('.th-when').textContent = this.whenText();
         const slider = el.querySelector('.th-slider');
         if (slider && +slider.value !== this.idx) slider.value = this.idx;
@@ -111,15 +115,21 @@ const TwitchHatchTool = {
         this.scrub();
     },
 
-    // A slider sweep asks the server for the frames it can show, one at a time.
-    setFrame(img, src) {
-        if (!img._gated) {
-            img._gated = true;
-            const landed = () => { img.dataset.loading = ''; const w = img.dataset.want; if (w) { img.dataset.want = ''; this.setFrame(img, w); } };
-            img.addEventListener('load', landed); img.addEventListener('error', landed);
+    // The viewer under the pins. One per pane; a frame change is a load into
+    // it, and a later load wins over a slower earlier one, so a sweep across
+    // the slider shows the frames it can and lands on the last.
+    showFrame(frame) {
+        const host = this.el.querySelector('.th-img');
+        if (!host) return;
+        if (!this.view || this.view.host !== host) {
+            if (this.view) this.view.destroy();
+            this.view = U16View.create(host, { bar: true });
         }
-        if (img.dataset.loading) { img.dataset.want = src; return; }
-        img.dataset.loading = '1'; img.src = src;
+        const keep = this.view.data ? [this.view.lo, this.view.hi, this.view.gamma] : null;
+        this.view.load(this.u16(frame.stem)).then(meta => {
+            // The contrast a person set holds across frames of one field.
+            if (meta && keep) this.view.setRange(keep[0], keep[1], keep[2]);
+        }).catch(() => {});
     },
 
     wire() {
@@ -129,8 +139,10 @@ const TwitchHatchTool = {
         slider.oninput = () => { this.idx = +slider.value; this.scrub(); };
         el.querySelectorAll('.th-step').forEach(b => { b.onclick = () => this.step(+b.dataset.step); });
         this.scrub();   // the arrows' disabled state at the ends
+        this.showFrame(this.frame());
         el.querySelector('.th-img').onclick = ev => {
-            const img = ev.currentTarget, r = img.getBoundingClientRect();
+            const img = this.view ? this.view.canvas : ev.currentTarget, r = img.getBoundingClientRect();
+            if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
             this.save([...this.data.rows, {
                 field: this.field, x: (ev.clientX - r.left) / r.width, y: (ev.clientY - r.top) / r.height,
                 twitch_frame: this.frame().frame, hatch_frame: null,
