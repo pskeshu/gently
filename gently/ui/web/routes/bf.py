@@ -183,7 +183,61 @@ def create_router(server) -> APIRouter:
         # for the loop the orchestrator runs on.
         return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max, refs)
 
+    @router.get("/api/bf/frames/{stem}.u16")
+    async def bf_frame_u16(stem: str, scale: int = 1, corrected: bool = False):
+        """One overview frame as it is: little-endian uint16 bytes, averaged
+        down by ``scale`` if asked, shape and range in headers (gently.core.u16).
+        The browser draws it with its own contrast and reads values from it."""
+        rec = await asyncio.to_thread(_record, stem)
+        if rec is None:
+            raise HTTPException(
+                status_code=404, detail=f"no brightfield frame {stem!r} in this session"
+            )
+        refs = None
+        if corrected:
+            refs = await asyncio.to_thread(lambda: _correction_for(rec, _reference_records()))
+            if refs is None:
+                raise HTTPException(
+                    status_code=404, detail=f"no dark and flat for frame {stem!r} in this session"
+                )
+        return await asyncio.to_thread(tiff_u16_response, Path(rec["file_path"]), stem, scale, refs)
+
     return router
+
+
+def tiff_u16_response(
+    path: Path,
+    stem: str,
+    scale: int = 1,
+    correction: tuple[Path, Path] | None = None,
+) -> Response:
+    """A filed TIFF as uint16 bytes; ``scale`` averages blocks down first;
+    ``correction`` is the (dark, flat) pair to divide out. The sibling of
+    tiff_png_response for the viewer that wants the numbers."""
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"frame {stem!r} is no longer on disk")
+    try:
+        import tifffile
+
+        from gently.core.u16 import MEDIA_TYPE, first_plane, u16_payload
+
+        arr = first_plane(tifffile.imread(str(path)))
+        if correction is not None:
+            from gently.app.brightfield import correct
+
+            dark = tifffile.imread(str(correction[0]))
+            flat = tifffile.imread(str(correction[1]))
+            if dark.shape == arr.shape and flat.shape == arr.shape:
+                arr = correct(arr, dark, flat)
+            else:
+                raise ValueError("the dark and flat are not the frame's size")
+        body, headers = u16_payload(arr, scale, {"Stem": stem})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("frame bytes failed for %s", path)
+        raise HTTPException(status_code=502, detail=f"could not read {stem!r}: {exc}") from exc
+    return Response(body, media_type=MEDIA_TYPE, headers={**_IMMUTABLE, **headers})
 
 
 def tiff_png_response(

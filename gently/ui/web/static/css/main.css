@@ -11964,3 +11964,25 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .rd-mention { font-weight: 650; color: var(--who, var(--accent)); }
 .rd-text { font-size: 13.5px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
 .rd-text b:not(.rd-mention) { font-weight: 600; }
+
+/* U16View: pixels as they are. The canvas scales to its box; the bar holds
+   the contrast; the readout follows the cursor. */
+.u16 { display: grid; gap: 6px; min-width: 0; }
+.u16-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.u16-c { display: block; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border); background: var(--img-bg, #000); image-rendering: auto; }
+.u16-read { position: absolute; left: 8px; bottom: 8px; font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e7eef4; background: rgba(0,0,0,.6); padding: 2px 7px; border-radius: 5px; pointer-events: none; }
+.u16-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-muted); }
+.u16-bar.is-hidden { display: none; }
+.u16-l { display: inline-flex; align-items: center; gap: 6px; }
+.u16-l input[type="range"] { width: 120px; accent-color: var(--accent); }
+.u16-l output { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 4.5ch; text-align: right; color: var(--text); }
+.u16-auto { font: inherit; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; }
+.u16-auto:hover { border-color: var(--accent); color: var(--accent); }
+.u16-info { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-left: auto; }
+.u16-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.72); display: grid; grid-template-rows: auto 1fr; padding: 18px 24px; }
+.u16-overlay-head { display: flex; align-items: center; justify-content: space-between; color: #e7eef4; font-size: 13px; padding: 0 2px 8px; }
+.u16-overlay-close { font: inherit; font-size: 20px; line-height: 1; color: #e7eef4; background: none; border: 0; cursor: pointer; padding: 2px 8px; }
+.u16-overlay-body { min-height: 0; overflow: auto; }
+.u16-overlay-body .u16-c { max-height: calc(100vh - 120px); width: auto; }
+.u16-overlay-body .u16-bar { color: #c9d1d9; }
+.u16-overlay-body .u16-l output, .u16-overlay-body .u16-auto { color: #e7eef4; background: rgba(255,255,255,.06); }

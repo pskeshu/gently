@@ -789,7 +789,9 @@
 .th-empty { color: var(--text-muted); font-style: italic; font-weight: 400; }
 .th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }
-.th-img { display: block; max-width: 100%; width: 720px; max-height: 70vh; object-fit: contain; border-radius: 8px; border: 1px solid var(--border); background: var(--img-bg); }
+.th-img { display: block; max-width: 100%; width: 720px; }
+.th-img .u16-c { max-height: 70vh; width: 100%; height: auto; object-fit: contain; }
+.th-stage .th-pin { z-index: 2; }
 .th-pin { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
 .th-pin.is-open { background: #f59e0b; }
 .th-table { margin-top: 10px; border-collapse: collapse; font-size: 12px; }
