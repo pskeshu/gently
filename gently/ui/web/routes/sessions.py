@@ -1240,6 +1240,8 @@ def create_router(server) -> APIRouter:
                 if per_page:
                     acc: np.ndarray | None = None
                     for pg in pages:
+                        if pg is None:  # tifffile types a missing page as None
+                            continue
                         a = np.asarray(pg.asarray())
                         acc = a if acc is None else np.maximum(acc, a)
                     arr = acc if acc is not None else np.zeros(shape[-2:], dtype=np.uint16)
@@ -1251,8 +1253,8 @@ def create_router(server) -> APIRouter:
                     raise HTTPException(
                         status_code=404, detail=f"no plane {z}; the volume has {planes}"
                     )
-                if per_page:
-                    arr = np.asarray(pages[z].asarray())
+                if per_page and (pg := pages[z]) is not None:
+                    arr = np.asarray(pg.asarray())
                 else:
                     arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:])[z]
                 extra = {"Planes": planes, "Plane": z}
