@@ -1,6 +1,6 @@
 /**
  * U16Math — the pure arithmetic behind the uint16 viewer: a histogram of a
- * frame, percentiles off it, a lookup table from black, white and gamma, and
+ * frame, ImageJ's auto contrast off it, a lookup table from black, white and gamma, and
  * the fill of an RGBA buffer through that table. No DOM, so it is tested in
  * Node (tests/js/u16-math.test.mjs) and loaded as a plain script in the page.
  */
@@ -13,19 +13,43 @@ const U16Math = {
     },
 
     /**
-     * The values at the given fractions (0..1) of the pixels, from a histogram.
-     * percentiles(h, n, [0.01, 0.995]) → [black, white] for an auto contrast.
+     * ImageJ's auto contrast, as the Auto button of Brightness/Contrast does
+     * it: ij.plugin.frame.ContrastAdjuster.autoAdjust over the 16-bit
+     * histogram ij.process.ShortStatistics builds (ImageJ 1.54u; Fiji ships
+     * the same class). The 65536 counts are rebinned into 256 over the data's
+     * min..max with a bin size of (max - min + 1) / 256; a bin holding more
+     * than a tenth of the pixels is ignored as background; black and white
+     * are the first bins from each end holding more than total / autoThreshold
+     * pixels, read at the bin's lower edge, as ImageJ does. autoThreshold
+     * starts at 5000 and halves on each repeat, so a second press cuts
+     * tighter; under 10 it is back to 5000. Pass 0 for a fresh image and the
+     * returned value back in for a repeat. A flat frame, or a search that
+     * finds nothing, gives the data range, as ImageJ's reset does.
+     * Returns { lo, hi, autoThreshold }.
      */
-    percentiles(hist, total, fractions) {
-        const out = new Array(fractions.length).fill(0);
-        if (!total) return out;
-        const targets = fractions.map(f => Math.max(0, Math.min(total, Math.round(f * total))));
-        let acc = 0, next = 0;
-        for (let v = 0; v < hist.length && next < targets.length; v++) {
-            acc += hist[v];
-            while (next < targets.length && acc >= targets[next]) { out[next] = v; next++; }
+    imagejAuto(hist, total, autoThreshold = 0) {
+        autoThreshold = autoThreshold < 10 ? 5000 : Math.trunc(autoThreshold / 2);
+        if (!total) return { lo: 0, hi: 65535, autoThreshold };
+        let min = 0, max = hist.length - 1;
+        while (hist[min] === 0 && min < hist.length - 1) min++;
+        while (hist[max] === 0 && max > 0) max--;
+        const nBins = 256, binSize = (max - min + 1) / nBins, scale = 1 / binSize;
+        const h = new Uint32Array(nBins);
+        for (let i = min; i <= max; i++) {
+            if (hist[i]) h[Math.min(nBins - 1, Math.trunc(scale * (i - min)))] += hist[i];
         }
-        return out;
+        const limit = Math.trunc(total / 10), threshold = Math.trunc(total / autoThreshold);
+        const over = i => (h[i] > limit ? 0 : h[i]) > threshold;
+        let hmin = 0;
+        while (!over(hmin) && hmin < nBins - 1) hmin++;
+        let hmax = nBins - 1;
+        while (!over(hmax) && hmax > 0) hmax--;
+        let lo = min, hi = max;
+        if (hmax >= hmin) {
+            lo = min + hmin * binSize; hi = min + hmax * binSize;
+            if (lo === hi) { lo = min; hi = max; }
+        }
+        return { lo, hi, autoThreshold };
     },
 
     /**

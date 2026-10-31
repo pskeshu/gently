@@ -5,7 +5,8 @@
  * it on a canvas through a lookup table it owns, and answers the cursor with
  * the value under it. Black, white and gamma are sliders that redraw from
  * memory; nothing goes back to the server to change the contrast. Auto sets
- * black and white at the 1st and 99.5th percentiles of the frame.
+ * black and white as ImageJ's Brightness/Contrast Auto button does, and a
+ * second press cuts tighter, as there.
  *
  * ponytail: a 2D canvas and a per-pixel JS loop; a 1024² frame redraws in
  * ~10 ms, a 2048² one in ~40 ms. A WebGL texture with the table in a shader
@@ -22,7 +23,7 @@ const U16View = {
         host.innerHTML = `
             <div class="u16-stage"><canvas class="u16-c"></canvas><div class="u16-read" hidden></div></div>
             <div class="u16-bar${opts.bar === false ? ' is-hidden' : ''}">
-                <button type="button" class="u16-auto" title="Black at the 1st percentile, white at the 99.5th">auto</button>
+                <button type="button" class="u16-auto" title="Auto contrast, as ImageJ's Auto button · press again for a tighter cut">auto</button>
                 <label class="u16-l">black <input class="u16-lo" type="range" min="0" max="65535" step="1"><output class="u16-lo-v">0</output></label>
                 <label class="u16-l">white <input class="u16-hi" type="range" min="0" max="65535" step="1"><output class="u16-hi-v">65535</output></label>
                 <label class="u16-l">γ <input class="u16-g" type="range" min="0.3" max="3" step="0.05" value="1"><output class="u16-g-v">1.0</output></label>
@@ -76,6 +77,7 @@ const U16View = {
         view.set = function (u16, meta) {
             const first = !view.data || view.w !== meta.width || view.h !== meta.height;
             view.data = u16; view.meta = meta; view.w = meta.width; view.h = meta.height;
+            view._autoThreshold = 0;   // a new image: ImageJ starts its Auto over
             if (first) {
                 view.canvas.width = view.w; view.canvas.height = view.h;
                 view._img = view.ctx.createImageData(view.w, view.h);
@@ -86,12 +88,12 @@ const U16View = {
             view.redraw(true);
         };
 
-        /** Black and white from the frame itself. */
+        /** Black and white from the frame itself, as ImageJ's Auto sets them; pressed again, a tighter cut. */
         view.auto = function () {
             if (!view.data) return;
-            const hist = U16Math.histogram(view.data);
-            const [b, w] = U16Math.percentiles(hist, view.data.length, [0.01, 0.995]);
-            view.lo = b; view.hi = Math.max(w, b + 1); view._lut = null;
+            const r = U16Math.imagejAuto(U16Math.histogram(view.data), view.data.length, view._autoThreshold || 0);
+            view._autoThreshold = r.autoThreshold;
+            view.lo = Math.round(r.lo); view.hi = Math.max(Math.round(r.hi), view.lo + 1); view._lut = null;
             view._paintBar();
         };
 
