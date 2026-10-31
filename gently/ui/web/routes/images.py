@@ -20,6 +20,24 @@ MAX_IMAGE_UPLOAD_BYTES = 64 * 1024 * 1024
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/api/images/{uid}.u16")
+    async def get_image_u16(uid: str, scale: int = 1, max: int | None = None):
+        """A pushed image as uint16 bytes (gently.core.u16), while its counts
+        are kept; 404 once they are gone or for a picture that had none."""
+        from gently.core.u16 import MEDIA_TYPE, u16_payload
+
+        kept = server.counts_for(uid) if hasattr(server, "counts_for") else None
+        if kept is None:
+            raise HTTPException(status_code=404, detail="no counts kept for this image")
+        arr, layout = kept
+        extra: dict = {"Views": layout.get("views")} if layout.get("views") else {}
+        if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
+            extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+        body, headers = u16_payload(arr, scale, extra, max_dim=max)
+        return Response(
+            body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
+        )
+
     @router.get("/api/images/{uid}")
     async def get_image(uid: str):
         """Get image by UID"""
