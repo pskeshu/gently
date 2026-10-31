@@ -184,6 +184,7 @@ class DeviceLayerServer(Service):
 
         # Lightsheet (SPIM) live stream — continuous sequence acquisition.
         self._ls_subscribers: list[asyncio.Queue] = []
+        self._last_ls_frame: np.ndarray | None = None  # the last live frame, for /frame.u16
         self._ls_task: asyncio.Task | None = None
         # Min interval between streamed frames. A floor (not 0) caps the live
         # FPS so short exposures don't flood the browser at 100+ fps, which
@@ -1401,6 +1402,8 @@ class DeviceLayerServer(Service):
                     continue
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
+                if img is not None:
+                    self._last_ls_frame = img
                 payload = (
                     self._encode_frame_for_stream(
                         img, self._ls_target_max_dim, self._ls_jpeg_quality
@@ -4424,6 +4427,36 @@ class DeviceLayerServer(Service):
 
         return response
 
+    async def handle_bottom_camera_frame_u16(self, request):
+        """GET /api/bottom_camera/frame.u16?scale=N — the last bottom-camera
+        frame as uint16 bytes (gently.core.u16), with the stage XY it was
+        grabbed at in X-Image-Stage-X/Y. The SSE stream stays the trigger and
+        the metadata (shape, downsample, stage, focus); this is the pixels,
+        for a viewer that draws its own contrast and reads values (#149).
+        404 until a frame has been grabbed.
+        """
+        return await self._frame_u16(request, self._last_bottom_frame, self._last_bottom_frame_xy)
+
+    async def handle_lightsheet_frame_u16(self, request):
+        """GET /api/lightsheet/frame.u16?scale=N — the last light-sheet live
+        frame as uint16 bytes; see handle_bottom_camera_frame_u16."""
+        return await self._frame_u16(request, self._last_ls_frame, None)
+
+    async def _frame_u16(self, request, img, xy):
+        from gently.core.u16 import MEDIA_TYPE, u16_payload
+
+        if img is None:
+            return web.json_response({"error": "no frame yet"}, status=404)
+        try:
+            scale = max(1, int(request.query.get("scale", 1)))
+        except (TypeError, ValueError):
+            scale = 1
+        extra = {"Stage-X": xy[0], "Stage-Y": xy[1]} if xy else {}
+        body, headers = await asyncio.to_thread(u16_payload, img, scale, extra)
+        return web.Response(
+            body=body, content_type=MEDIA_TYPE, headers={"Cache-Control": "no-store", **headers}
+        )
+
     async def handle_bottom_camera_stream(self, request):
         """GET /api/bottom_camera/stream — SSE of base64-JPEG frames.
 
@@ -4556,6 +4589,10 @@ class DeviceLayerServer(Service):
 
         # Bottom-camera live stream (subscriber-gated, off when nobody listens)
         self._app.router.add_get("/api/bottom_camera/stream", self.handle_bottom_camera_stream)
+        self._app.router.add_get(
+            "/api/bottom_camera/frame.u16", self.handle_bottom_camera_frame_u16
+        )
+        self._app.router.add_get("/api/lightsheet/frame.u16", self.handle_lightsheet_frame_u16)
 
         # Lightsheet (SPIM) live stream — continuous sequence acquisition
         self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
