@@ -11889,6 +11889,18 @@ a.settings-btn { display: inline-block; text-decoration: none; }
 .ov-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .ov-img-b { pointer-events: none; }
 .ov-img[hidden] { display: none; }
+/* The frame as its numbers: the uint16 viewer's canvas in the stage box, the
+   <img> under it for the frames that have no counts, Compare, and the hover
+   preview; its bar sits in the side column. */
+.ov-pix { position: absolute; inset: 0; display: none; }
+.ov-pix.u16 { display: none; }
+.ov-stage.has-pixels .ov-pix, .ov-stage.has-pixels .ov-pix.u16 { display: block; }
+.ov-stage.has-pixels .ov-img:not(.ov-img-b) { display: none; }
+.ov-pix .u16-stage { display: block; width: 100%; height: 100%; }
+.ov-pix .u16-c { width: 100%; height: 100%; max-width: none; object-fit: contain; border: 0; border-radius: 0; }
+.ov-display[hidden] { display: none; }
+.ov-display .u16-bar { gap: 8px 12px; }
+.ov-display .u16-l input[type="range"] { width: 90px; }
 .ov-divider { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); pointer-events: none; }
 .ov-divider span { position: absolute; top: 10px; left: -14px; width: 28px; height: 20px; border-radius: 10px; background: var(--accent); color: var(--bg-dark); font: 600 10px/20px system-ui, sans-serif; text-align: center; }
 .ov-divider span::before { content: '⇔'; }

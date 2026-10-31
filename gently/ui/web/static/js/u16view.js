@@ -32,10 +32,14 @@ const U16View = {
         const $ = sel => host.querySelector(sel);
         view.canvas = $('.u16-c'); view.ctx = view.canvas.getContext('2d');
         view.read = $('.u16-read'); view.info = $('.u16-info'); view.bar = $('.u16-bar');
+        // The bar's parts are taken once: a host may move the bar out of the
+        // stage (the overview stage puts it in its side column), and after
+        // that nothing under `host` would answer a query for them.
         const lo = $('.u16-lo'), hi = $('.u16-hi'), g = $('.u16-g');
+        const loV = $('.u16-lo-v'), hiV = $('.u16-hi-v'), gV = $('.u16-g-v');
         const paintBar = () => {
             lo.value = view.lo; hi.value = view.hi; g.value = view.gamma;
-            $('.u16-lo-v').textContent = view.lo; $('.u16-hi-v').textContent = view.hi; $('.u16-g-v').textContent = Number(view.gamma).toFixed(2).replace(/0$/, '');
+            loV.textContent = view.lo; hiV.textContent = view.hi; gV.textContent = Number(view.gamma).toFixed(2).replace(/0$/, '');
         };
         lo.oninput = () => { view.lo = Math.min(+lo.value, view.hi - 1); paintBar(); view.redraw(); };
         hi.oninput = () => { view.hi = Math.max(+hi.value, view.lo + 1); paintBar(); view.redraw(); };
