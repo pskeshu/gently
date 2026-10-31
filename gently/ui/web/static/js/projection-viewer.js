@@ -220,6 +220,16 @@ const ProjectionViewer = {
             ? this.projections.filter(p => p.method === this.selectedMethod)
             : this.projections;
 
+        // The three-view card is the counts (gently.core.u16): the projection
+        // the store keeps beside the JPEG, drawn by the viewer with its own
+        // contrast and a readout, when the session is known. The other methods
+        // are renderings (depth colour, a montage) and stay as the pictures the
+        // server draws; so does this one if the counts cannot be had.
+        const sid = (typeof SharedState !== 'undefined' && SharedState.get && SharedState.get('sessionId'))
+            || (typeof EmbryosManager !== 'undefined' && EmbryosManager.currentSessionId) || null;
+        const counts = proj => proj.method === 'three_view' && sid && typeof U16View !== 'undefined'
+            ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(this.currentEmbryoId)}/volumes/${encodeURIComponent(this.currentTimepoint)}/projection.u16?max=1024`
+            : null;
         grid.innerHTML = toShow.map(proj => `
             <div class="projection-card ${this.selectedMethod === proj.method ? 'selected' : ''}"
                  data-method="${proj.method}"
@@ -228,11 +238,21 @@ const ProjectionViewer = {
                     <span class="projection-method-name">${methodNames[proj.method] || proj.method}</span>
                 </div>
                 <div class="projection-card-image">
-                    <img src="data:image/png;base64,${proj.data}" alt="${proj.method}" />
+                    ${counts(proj)
+                        ? `<div class="pv-pix" data-u16="${counts(proj)}" data-jpg="data:image/png;base64,${proj.data}" data-alt="${proj.method}"></div>`
+                        : `<img src="data:image/png;base64,${proj.data}" alt="${proj.method}" />`}
                 </div>
                 <div class="projection-card-desc">${proj.description || ''}</div>
             </div>
         `).join('');
+        grid.querySelectorAll('.pv-pix').forEach(host => {
+            const view = U16View.create(host, { bar: true });
+            view.load(host.dataset.u16).catch(() => {
+                const img = document.createElement('img');
+                img.src = host.dataset.jpg; img.alt = host.dataset.alt;
+                host.replaceWith(img);
+            });
+        });
     },
 
     renderTabs() {

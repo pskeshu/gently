@@ -3301,6 +3301,11 @@ kbd {
     object-fit: contain;
     border-radius: 4px;
 }
+/* The three-view card as counts: the viewer sized as the picture was, its bar under it. */
+.projection-card-image .pv-pix { max-width: 100%; }
+.projection-card-image .pv-pix .u16-c { max-width: 100%; max-height: 350px; width: auto; height: auto; border: 0; }
+.projection-card-image .pv-pix .u16-bar { color: #c9d1d9; }
+.projection-card-image .pv-pix .u16-l output, .projection-card-image .pv-pix .u16-auto { color: #e7eef4; background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.25); }
 
 .projection-card-desc {
     padding: 0.75rem 1rem;
