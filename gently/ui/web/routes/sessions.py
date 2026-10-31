@@ -1257,6 +1257,11 @@ def create_router(server) -> APIRouter:
             extra = {"Projection": "max", "Views": layout.get("views")}
             if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
                 extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+            # How many planes stand behind it, so a viewer can offer them.
+            meta = store.get_volume_meta(session_id, embryo, t) if store is not None else None
+            shape = (meta or {}).get("shape")
+            if isinstance(shape, list) and len(shape) >= 3:
+                extra["Planes"] = int(shape[-3])
         else:
             # Volumes are written one page per plane, zlib-compressed, so a plane
             # is one page decoded on its own. A file that holds the stack in one
@@ -1274,6 +1279,10 @@ def create_router(server) -> APIRouter:
                     arr = np.asarray(pg.asarray())
                 else:
                     arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:])[z]
+                # The channel the projection shows, so a plane lines up with it.
+                from gently.core.imaging import shown_channel
+
+                arr = shown_channel(arr)
                 extra = {"Planes": planes, "Plane": z}
         body, headers = u16_payload(arr, scale, extra, max_dim=max_dim)
         return Response(

@@ -2418,6 +2418,8 @@ const EmbryosManager = {
                 scalable: false,            // the projection route serves the JPEG as it is
                 // the same picture in counts, for the stage (gently.core.u16)
                 u16: `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/projection.u16`,
+                // and any one plane of the volume behind it
+                slice: z => `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/slice/${z}.u16`,
                 frame: t,
                 when: c && c.timestamp ? c.timestamp : null,
                 stage: c && !c._pending ? c.stage : null,

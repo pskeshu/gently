@@ -37,7 +37,12 @@ const U16View = {
         // that nothing under `host` would answer a query for them.
         const lo = $('.u16-lo'), hi = $('.u16-hi'), g = $('.u16-g');
         const loV = $('.u16-lo-v'), hiV = $('.u16-hi-v'), gV = $('.u16-g-v');
+        // The sliders span the data seen so far, widened to hold whatever range
+        // is set; a camera using 3% of 16 bits would otherwise get 3% of the
+        // slider, and a range kept across frames must never fall outside them.
         const paintBar = () => {
+            const a = Math.min(view._dmin ?? 0, view.lo), b = Math.max(view._dmax ?? 65535, view.hi);
+            lo.min = hi.min = a; lo.max = hi.max = b;
             lo.value = view.lo; hi.value = view.hi; g.value = view.gamma;
             loV.textContent = view.lo; hiV.textContent = view.hi; gV.textContent = Number(view.gamma).toFixed(2).replace(/0$/, '');
         };
@@ -93,13 +98,11 @@ const U16View = {
                 view.auto();
                 paintBar();
             }
-            view.info.textContent = `${meta.sourceWidth || view.w}×${meta.sourceHeight || view.h}` + (meta.scale > 1 ? ` · shown ÷${meta.scale}` : '') + ` · ${meta.min}–${meta.max}`;
-            // The sliders span the frame's own range, widened to keep a range already set;
-            // a camera using 3% of 16 bits would otherwise get 3% of the slider.
-            if (meta.min != null && meta.max != null) {
-                const a = Math.min(meta.min, view.lo, +lo.min || meta.min), b = Math.max(meta.max, view.hi, +hi.max === 65535 ? meta.max : +hi.max);
-                lo.min = hi.min = a; lo.max = hi.max = b; paintBar();
-            }
+            view.info.textContent = `${meta.sourceWidth || view.w}×${meta.sourceHeight || view.h}` + (meta.scale > 1 ? ` · shown ÷${meta.scale}` : '') + ` · ${meta.min}–${meta.max}`
+                + (meta.plane != null ? ` · plane ${meta.plane}${meta.planes ? ` of ${meta.planes}` : ''}` : '');
+            if (meta.min != null) view._dmin = Math.min(view._dmin ?? meta.min, meta.min);
+            if (meta.max != null) view._dmax = Math.max(view._dmax ?? meta.max, meta.max);
+            paintBar();
             view.redraw(true);
         };
 
