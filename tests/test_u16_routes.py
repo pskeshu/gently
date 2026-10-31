@@ -107,8 +107,62 @@ def test_a_stored_volume_gives_one_plane_or_its_projection(tmp_path):
         and r.headers["x-image-plane"] == "1"
     )
     assert np.array_equal(np.frombuffer(r.content, "<u2").reshape(8, 6), vol[1])
+    # The projection is the three-view layout in counts (gently.core.imaging):
+    # XY at the top left, YZ beside it, XZ under. An older session has no
+    # stored one, so it is made from the volume and kept for the next time.
+    from gently.core.imaging import counts_projection
+
+    want, layout = counts_projection(vol)
     r = c.get("/api/sessions/s1/embryos/e01/volumes/7/projection.u16")
     assert r.headers["x-image-projection"] == "max"
-    assert np.array_equal(np.frombuffer(r.content, "<u2").reshape(8, 6), vol.max(axis=0))
+    assert r.headers["x-image-views"] == "xy+yz/xz"
+    assert (r.headers["x-image-xy-height"], r.headers["x-image-xy-width"]) == ("8", "6")
+    got = np.frombuffer(r.content, "<u2").reshape(want.shape)
+    assert np.array_equal(got, want)
+    assert np.array_equal(got[:8, :6], vol.max(axis=0))  # the XY view is the plain max
+    stored = store.get_projection_u16_path("s1", "e01", 7)
+    assert stored is not None and stored.name == "t0007.tif"
+    r2 = c.get("/api/sessions/s1/embryos/e01/volumes/7/projection.u16")
+    assert r2.content == r.content and r2.headers["x-image-xy-width"] == "6"
     assert c.get("/api/sessions/s1/embryos/e01/volumes/7/slice/5.u16").status_code == 404
     assert c.get("/api/sessions/s1/embryos/e01/volumes/8/projection.u16").status_code == 404
+
+
+def test_the_store_writes_the_counts_beside_the_jpeg(tmp_path):
+    """put_volume leaves t0000.jpg for the thumbnails and t0000.tif, the same
+    picture in uint16 with its layout in the TIFF description, for the viewer."""
+    from gently.core.imaging import projection_three_view, read_counts_projection
+
+    store = FileStore(tmp_path)
+    store.create_session("s1")
+    store.register_embryo("s1", "e01", position_x=0, position_y=0)
+    vol = (np.random.default_rng(1).poisson(300, (4, 10, 12))).astype(np.uint16)
+    vol[2, 3:6, 4:9] = 5000
+    store.put_volume("s1", "e01", 0, vol)
+    proj_dir = store._embryo_dir("s1", "e01") / "projections"
+    assert (proj_dir / "t0000.jpg").exists()
+    path = store.get_projection_u16_path("s1", "e01", 0)
+    assert path == proj_dir / "t0000.tif"
+    arr, layout = read_counts_projection(path)
+    assert arr.dtype == np.uint16
+    assert layout == {"views": "xy+yz/xz", "xy": [10, 12]}
+    # the same layout the JPEG draws, pixel for pixel in size
+    jpeg_like, _ = projection_three_view(vol)
+    assert arr.shape == jpeg_like.shape
+    assert np.array_equal(arr[:10, :12], vol.max(axis=0))
+    assert (arr[:10, 12:15] == 0).all()  # the band between the views is black, not a grey
+    # the YZ view keeps the counts: nearest-neighbour, so every value is one the camera read
+    assert arr[:10, 15:].max() == 5000
+    assert set(np.unique(arr[:10, 15:])) <= set(np.unique(vol))
+
+
+def test_a_four_d_stack_projects_view_a_and_a_plane_stays_a_plane():
+    from gently.core.imaging import counts_projection
+
+    stack = np.zeros((2, 3, 4, 5), dtype=np.uint16)
+    stack[0, 1] = 7
+    stack[1] = 900
+    arr, layout = counts_projection(stack)
+    assert layout["xy"] == [4, 5] and arr[:4, :5].max() == 7
+    plane, layout = counts_projection(np.full((6, 7), 3, dtype=np.int32))
+    assert plane.shape == (6, 7) and plane.dtype == np.uint16 and layout["views"] == "xy"

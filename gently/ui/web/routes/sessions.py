@@ -1216,8 +1216,7 @@ def create_router(server) -> APIRouter:
         return await asyncio.to_thread(tiff_u16_response, Path(rec["file_path"]), stem, scale)
 
     def _volume_u16(session_id: str, embryo: str, t: int, z: int | None, scale: int) -> Response:
-        """One plane of a volume TIFF, or its maximum projection, as uint16
-        bytes. A plane is read on its own, not the whole stack."""
+        """One plane of a volume TIFF, or its projection, as uint16 bytes."""
         import tifffile
 
         from gently.core.u16 import MEDIA_TYPE, u16_payload
@@ -1226,34 +1225,46 @@ def create_router(server) -> APIRouter:
         path = store.get_volume_path(session_id, embryo, t) if store is not None else None
         if path is None:
             raise HTTPException(status_code=404, detail="Volume not found")
-        # Volumes are written one page per plane, zlib-compressed. A plane is
-        # then one page decoded on its own; a projection walks the pages with a
-        # running maximum, never holding the whole stack. A file that holds the
-        # stack in one page (a small or foreign TIFF) is read whole.
-        with tifffile.TiffFile(str(path)) as tf:
-            series = tf.series[0]
-            shape = tuple(series.shape)
-            planes = int(np.prod(shape[:-2])) if len(shape) > 2 else 1
-            pages = series.pages
-            per_page = planes > 1 and len(pages) == planes
-            if z is None:
-                if per_page:
-                    acc: np.ndarray | None = None
-                    for pg in pages:
-                        if pg is None:  # tifffile types a missing page as None
-                            continue
-                        a = np.asarray(pg.asarray())
-                        acc = a if acc is None else np.maximum(acc, a)
-                    arr = acc if acc is not None else np.zeros(shape[-2:], dtype=np.uint16)
-                else:
-                    arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:]).max(axis=0)
-                extra: dict = {"Planes": planes, "Projection": "max"}
+        extra: dict = {}
+        if z is None:
+            # The projection written at acquisition (gently.core.imaging): the
+            # three-view layout in counts, read in a few milliseconds. An older
+            # session has only the JPEG, so its counts are made from the volume
+            # once, here, and kept beside it for the next time.
+            from gently.core.imaging import (
+                counts_projection,
+                read_counts_projection,
+                write_counts_projection,
+            )
+
+            stored = path.parent.parent / "projections" / f"t{t:04d}.tif"
+            if stored.exists():
+                arr, layout = read_counts_projection(stored)
             else:
+                with tifffile.TiffFile(str(path)) as tf:
+                    vol = np.asarray(tf.asarray(maxworkers=8))
+                arr, layout = counts_projection(vol)
+                try:
+                    write_counts_projection(arr, layout, stored)
+                except Exception as exc:
+                    logger.debug("counts projection not kept for %s: %s", stored, exc)
+            extra = {"Projection": "max", "Views": layout.get("views")}
+            if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
+                extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+        else:
+            # Volumes are written one page per plane, zlib-compressed, so a plane
+            # is one page decoded on its own. A file that holds the stack in one
+            # page (a small or foreign TIFF) is read whole.
+            with tifffile.TiffFile(str(path)) as tf:
+                series = tf.series[0]
+                shape = tuple(series.shape)
+                planes = int(np.prod(shape[:-2])) if len(shape) > 2 else 1
+                pages = series.pages
                 if z < 0 or z >= planes:
                     raise HTTPException(
                         status_code=404, detail=f"no plane {z}; the volume has {planes}"
                     )
-                if per_page and (pg := pages[z]) is not None:
+                if planes > 1 and len(pages) == planes and (pg := pages[z]) is not None:
                     arr = np.asarray(pg.asarray())
                 else:
                     arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:])[z]

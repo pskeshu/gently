@@ -468,6 +468,9 @@ class FileStore:
     def _projection_filename(self, timepoint: int) -> str:
         return f"t{timepoint:04d}.jpg"
 
+    def _projection_u16_filename(self, timepoint: int) -> str:
+        return f"t{timepoint:04d}.tif"
+
     def _generate_projection(
         self,
         session_id: str,
@@ -475,11 +478,14 @@ class FileStore:
         timepoint: int,
         volume: np.ndarray,
     ) -> Path | None:
-        """Generate JPEG projection file from volume data."""
-        from .imaging import generate_jpeg_projection
+        """Write the projection twice: the JPEG the thumbnails show, and the
+        same picture in the camera's counts (a uint16 TIFF, gently.core.imaging)
+        for the viewer that draws its own contrast."""
+        from .imaging import generate_jpeg_projection, generate_u16_projection
 
         proj_dir = self._projection_dir(session_id, embryo_id)
         proj_path = proj_dir / self._projection_filename(timepoint)
+        generate_u16_projection(volume, proj_dir / self._projection_u16_filename(timepoint))
         return generate_jpeg_projection(volume, proj_path)
 
     # ==================================================================
@@ -1424,6 +1430,21 @@ class FileStore:
         if proj_path.exists():
             return proj_path
         return None
+
+    def get_projection_u16_path(
+        self, session_id: str, embryo_id: str, timepoint: int
+    ) -> Path | None:
+        """Absolute path to the counts projection (uint16 TIFF), or None: an
+        older session has only the JPEG."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        path = (
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "projections"
+            / self._projection_u16_filename(timepoint)
+        )
+        return path if path.exists() else None
 
     def projection_timepoints_and_latest(
         self, session_id: str, embryo_id: str

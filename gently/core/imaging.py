@@ -20,6 +20,7 @@ Functions:
 
 import base64
 import io
+import json
 import logging
 from pathlib import Path
 from types import ModuleType
@@ -530,44 +531,123 @@ def projection_three_view(
     xy_proj = normalize_to_uint8(np.max(volume, axis=0))
     xz_proj = normalize_to_uint8(np.max(volume, axis=1))
     yz_proj = normalize_to_uint8(np.max(volume, axis=2))
+    combined = _three_view_layout(xy_proj, xz_proj, yz_proj, voxel_size, 128)
+    return combined, "Three-view: [XY|YZ] top, [XZ] bottom"
 
-    # XY view: Y pixels × X pixels, physical size = (height*dy) × (width*dx)
-    # Use XY as the reference scale: 1 display pixel = dx microns
-    # (dx and dy are typically equal for square camera pixels)
-    xy_h, xy_w = xy_proj.shape  # Already correct scale
 
-    # XZ view: Z pixels × X pixels, physical = (z_depth*dz) × (width*dx)
-    # Z axis needs scaling: each Z pixel represents dz microns,
-    # but we want it displayed at dx microns/pixel
-    z_scale = dz / dx  # How many display pixels per Z voxel
-    xz_display_h = max(1, int(z_depth * z_scale))
+def _resize(arr: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """A resize at the array's dtype. 8-bit, for the JPEG, keeps LANCZOS.
+    Anything else is nearest-neighbour through float32: every value in a
+    counts projection is then a value the camera read, where LANCZOS rings
+    above it and a bilinear blend invents numbers between. Clipped back into
+    the dtype's range."""
+    if arr.dtype == np.uint8:
+        return np.array(Image.fromarray(arr).resize(size, Image.Resampling.LANCZOS))
+    out = np.asarray(
+        Image.fromarray(arr.astype(np.float32), mode="F").resize(size, Image.Resampling.NEAREST)
+    )
+    if np.issubdtype(arr.dtype, np.integer):
+        info = np.iinfo(arr.dtype)
+        return np.clip(np.rint(out), info.min, info.max).astype(arr.dtype)
+    return out.astype(arr.dtype)
 
-    pil_xz = Image.fromarray(xz_proj)
-    pil_xz = pil_xz.resize((xy_w, xz_display_h), Image.Resampling.LANCZOS)
-    xz_scaled = np.array(pil_xz)
 
-    # YZ view: Y pixels × Z pixels, physical = (height*dy) × (z_depth*dz)
-    yz_rotated = yz_proj.T  # Transpose so Z is horizontal
-    yz_display_w = xz_display_h  # Same Z scaling
-
-    pil_yz = Image.fromarray(yz_rotated)
-    pil_yz = pil_yz.resize((yz_display_w, xy_h), Image.Resampling.LANCZOS)
-    yz_scaled = np.array(pil_yz)
-
+def _three_view_layout(
+    xy: np.ndarray,
+    xz: np.ndarray,
+    yz: np.ndarray,
+    voxel_size: tuple[float, float, float],
+    sep_value: int,
+) -> np.ndarray:
+    """[XY | YZ] over [XZ]: the side views resampled so one Z step is dz/dx
+    display pixels, a 3 px band of ``sep_value`` between. Works in the views'
+    own dtype: uint8 for the JPEG, uint16 for the counts, same picture."""
+    dz, dy, dx = voxel_size
+    z_depth = xz.shape[0]
+    xy_h, xy_w = xy.shape
+    # XY is the reference scale: one display pixel is dx microns, so a Z voxel
+    # of dz microns is dz/dx display pixels tall (XZ) or wide (YZ).
+    z_px = max(1, int(z_depth * (dz / dx)))
+    xz_scaled = _resize(xz, (xy_w, z_px))
+    yz_scaled = _resize(yz.T, (z_px, xy_h))  # transposed so Z runs horizontal
+    dtype = xy.dtype
     sep = 3
-    v_sep = np.ones((xy_h, sep), dtype=np.uint8) * 128
-    top_row = np.concatenate([xy_proj, v_sep, yz_scaled], axis=1)
+    v_sep = np.full((xy_h, sep), sep_value, dtype=dtype)
+    top_row = np.concatenate([xy, v_sep, yz_scaled], axis=1)
     total_width = top_row.shape[1]
-
     if xz_scaled.shape[1] < total_width:
-        pad = np.zeros((xz_scaled.shape[0], total_width - xz_scaled.shape[1]), dtype=np.uint8)
+        pad = np.zeros((xz_scaled.shape[0], total_width - xz_scaled.shape[1]), dtype=dtype)
         bottom_row = np.concatenate([xz_scaled, pad], axis=1)
     else:
         bottom_row = xz_scaled[:, :total_width]
+    h_sep = np.full((sep, total_width), sep_value, dtype=dtype)
+    return np.concatenate([top_row, h_sep, bottom_row], axis=0)
 
-    h_sep = np.ones((sep, total_width), dtype=np.uint8) * 128
-    combined = np.concatenate([top_row, h_sep, bottom_row], axis=0)
-    return combined, "Three-view: [XY|YZ] top, [XZ] bottom"
+
+def counts_projection(volume: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """The projection as the camera's own counts: the three-view layout
+    projection_three_view draws, in uint16 with no stretch and a black band
+    between the views, from the same channel (shown_channel) of the same view
+    (A, of a 4D stack). The JPEG beside it is a picture of this; this is the
+    numbers, for a viewer that draws its own contrast and reads values
+    (gently.core.u16). Returns the composite and its layout: ``xy`` is the
+    [height, width] of the XY view at the top left, where a cursor position
+    is a volume position."""
+    from .u16 import as_u16
+
+    vol = np.squeeze(volume)
+    if vol.ndim == 4:
+        vol = vol[0]
+    if vol.ndim == 3:
+        vol = shown_channel(vol)
+        xy, xz, yz = np.max(vol, axis=0), np.max(vol, axis=1), np.max(vol, axis=2)
+        if PIL_AVAILABLE:
+            views = (as_u16(xy), as_u16(xz), as_u16(yz))
+            combined = _three_view_layout(*views, (1.0, 0.1625, 0.1625), 0)
+            return combined, {"views": "xy+yz/xz", "xy": [int(xy.shape[0]), int(xy.shape[1])]}
+        return as_u16(xy), {"views": "xy", "xy": [int(xy.shape[0]), int(xy.shape[1])]}
+    flat = as_u16(vol.reshape(-1, *vol.shape[-2:]).max(axis=0) if vol.ndim > 2 else vol)
+    return flat, {"views": "xy", "xy": [int(flat.shape[0]), int(flat.shape[1])]}
+
+
+def write_counts_projection(arr: np.ndarray, layout: dict[str, Any], output_path: Path) -> Path:
+    """A counts projection to disk: a plain uint16 TIFF, its layout as JSON in
+    the TIFF description, so Fiji shows it and the .u16 routes read it in a
+    few milliseconds instead of walking the volume."""
+    if _tifffile is None:
+        raise RuntimeError("tifffile is not available")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _tifffile.imwrite(str(output_path), arr, description=json.dumps(layout))
+    return output_path
+
+
+def read_counts_projection(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
+    """A counts projection back from disk, with its layout (or an empty one
+    for a TIFF that carries none)."""
+    if _tifffile is None:
+        raise RuntimeError("tifffile is not available")
+    with _tifffile.TiffFile(str(path)) as tf:
+        arr = np.asarray(tf.asarray())
+        desc = tf.pages[0].description or ""
+    layout: dict[str, Any] = {}
+    try:
+        got = json.loads(desc)
+        if isinstance(got, dict):
+            layout = got
+    except ValueError:
+        pass
+    return arr, layout
+
+
+def generate_u16_projection(volume: np.ndarray, output_path: Path) -> Path | None:
+    """Write the counts projection beside the JPEG one; None, logged, on any
+    failure, as generate_jpeg_projection does."""
+    try:
+        arr, layout = counts_projection(volume)
+        return write_counts_projection(arr, layout, output_path)
+    except Exception as e:
+        logger.error(f"Failed to write the counts projection: {e}")
+        return None
 
 
 def _euler_to_rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
