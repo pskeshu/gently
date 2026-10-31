@@ -2392,6 +2392,17 @@ a.tab-link.active {
     cursor: grabbing;
 }
 
+/* The frame as its numbers: the uint16 viewer in the image's place, sized
+   as the <img> is, its bar at the foot of the picture. */
+.lightbox-pix { max-width: 100%; max-height: 100%; display: block; transition: transform 0.15s ease; cursor: grab; }
+.lightbox-pix[hidden] { display: none; }
+.lightbox-pix .u16-stage { display: block; line-height: 0; }
+.lightbox-pix .u16-c { max-width: 100%; max-height: calc(100vh - 200px); width: auto; height: auto; border: 0; border-radius: 4px; }
+.lightbox-pix-bar { position: absolute; left: 16px; right: 16px; bottom: 46px; display: flex; justify-content: center; pointer-events: none; }  /* above the position counter */
+.lightbox-pix-bar[hidden] { display: none; }
+.lightbox-pix-bar .u16-bar { pointer-events: auto; background: rgba(0, 0, 0, 0.6); padding: 6px 12px; border-radius: 8px; color: #e7eef4; }
+.lightbox-pix-bar .u16-l output, .lightbox-pix-bar .u16-auto { color: #e7eef4; background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.25); }
+
 /* Floating position counter on image */
 .lightbox-position {
     position: absolute;

@@ -371,3 +371,27 @@ def test_the_long_form_is_for_the_disk_and_the_short_form_for_people():
         assert str(rec.long_path(ordinary)).startswith(rec._EXTENDED)
     else:
         assert rec.long_path(ordinary) == ordinary
+
+
+def test_an_exposure_has_its_counts_too_and_a_plot_does_not(client):
+    """Beside the PNG, an exposure is offered as the camera's counts
+    (``u16``, gently.core.u16); a plot is a picture and has none."""
+    import numpy as np
+
+    c, run = client
+    d = c.get(f"/api/calibration/records/embryo_1/{run.name}").json()
+    exposures = [i for i in d["images"] if not str(i["file"]).lower().endswith(".png")]
+    plots = [i for i in d["images"] if str(i["file"]).lower().endswith(".png")]
+    assert exposures and plots
+    assert all(i["u16"] == i["url"].replace(".png", ".u16") for i in exposures)
+    assert all("u16" not in i for i in plots)
+    r = c.get(exposures[0]["u16"])
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/octet-stream")
+    w, h = int(r.headers["x-image-width"]), int(r.headers["x-image-height"])
+    assert len(r.content) == w * h * 2 and w > 0
+    assert np.frombuffer(r.content, "<u2").max() > 0
+    r = c.get(exposures[0]["u16"] + "?scale=2")
+    assert int(r.headers["x-image-width"]) == w // 2 and r.headers["x-image-scale"] == "2"
+    assert c.get(plots[0]["url"].replace(".png", ".u16")).status_code == 404
+    assert c.get(f"/api/calibration/records/embryo_1/{run.name}/image/99.u16").status_code == 404

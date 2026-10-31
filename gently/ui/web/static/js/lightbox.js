@@ -190,7 +190,7 @@ const Lightbox = {
 
         // Load image from API by UID — or by a URL the caller already has
         // (Home's projections are served per session, and carry no store uid).
-        if (this.els.image && (img.uid || img.url)) {
+        if (!this.paintPixels(img) && this.els.image && (img.uid || img.url)) {
             this.els.image.classList.add('transitioning');
             this.els.image.src = img.url || `/api/images/${img.uid}/png`;
             setTimeout(() => {
@@ -354,8 +354,59 @@ const Lightbox = {
         if (this.els.thumbnails) this.els.thumbnails.style.display = 'none';
     },
 
+    // ── the frame as its numbers ────────────────────────────────────────────
+    // An item with `u16` (the counts route, gently.core.u16) is drawn by a
+    // U16View in the image's place: the contrast is the viewer's and holds
+    // from item to item, the value under the cursor reads out, and the bar
+    // sits at the foot of the picture. Zoom and pan take the viewer's box as
+    // their target while it shows. Without counts, or without the viewer,
+    // the <img> as before; if the counts cannot be had, the <img> too.
+    _pix: null,
+    _pixBar: null,
+    paintPixels(img) {
+        const w = this.els.imageWrapper, im = this.els.image;
+        if (!(img && img.u16 && typeof U16View !== 'undefined' && w && im)) { this.hidePixels(); return false; }
+        if (!this._pix) {
+            const host = document.createElement('div');
+            host.className = 'lightbox-pix';
+            w.insertBefore(host, im);
+            this._pix = U16View.create(host, { bar: true });
+            this._pixBar = document.createElement('div');
+            this._pixBar.className = 'lightbox-pix-bar';
+            this._pixBar.appendChild(this._pix.bar);
+            w.appendChild(this._pixBar);
+        }
+        const view = this._pix;
+        view.host.hidden = false; this._pixBar.hidden = false; im.style.display = 'none';
+        this.zoomTarget(view.host);
+        const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+        view.load(img.u16)
+            .then(meta => { if (meta && keep) view.setRange(keep[0], keep[1], keep[2]); })
+            .catch(() => {
+                if (this.imageList[this.currentIndex] !== img) return;
+                this.hidePixels();
+                if (img.url) im.src = img.url;
+            });
+        return true;
+    },
+    hidePixels() {
+        const im = this.els.image;
+        if (this._pix) { this._pix.host.hidden = true; if (this._pixBar) this._pixBar.hidden = true; }
+        if (im) { im.style.display = ''; this.zoomTarget(im); }
+    },
+    // One transform, on whichever element shows the picture.
+    zoomTarget(el) {
+        const z = this._zoomCtrl;
+        if (!z || z.target === el) return;
+        if (z.target) z.target.style.transform = '';
+        z.target = el;
+        if (typeof z._apply === 'function') z._apply();
+    },
+
     close() {
         this.isOpen = false;
+        this.hidePixels();
+        if (this._pix) this._pix.data = null;    // the next series starts with its own auto
         this.els.overlay?.classList.remove('active');
         document.body.style.overflow = '';
         this.resetZoom();
@@ -452,7 +503,9 @@ const Lightbox = {
                 // you saw image A captioned as item B, which is worse than
                 // seeing nothing. Volume3DData.to_info_dict carries no
                 // base64_png, and events.js:155 opens volumes through here.
-                if (img.base64_png) {
+                if (this.paintPixels(img)) {
+                    this.els.image.removeAttribute('src');   // the viewer has it
+                } else if (img.base64_png) {
                     this.els.image.src = 'data:image/png;base64,' + img.base64_png;
                 } else if (img.num_slices) {
                     // a 3D volume: show its middle slice, which the API renders
